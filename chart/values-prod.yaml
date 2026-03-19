@@ -1,0 +1,18 @@
+image:
+  pullPolicy: IfNotPresent
+
+studiomcp:
+  replicas: 2
+
+pulsar:
+  persistence:
+    enabled: true
+    size: 20Gi
+
+minio:
+  persistence:
+    enabled: true
+    size: 100Gi
+
+llmReference:
+  enabled: true

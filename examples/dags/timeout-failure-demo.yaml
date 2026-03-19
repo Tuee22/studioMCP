@@ -1,0 +1,27 @@
+name: timeout-failure-demo
+description: A graph intended to demonstrate timeout validation and summary handling.
+nodes:
+  - id: ingest
+    kind: pure
+    inputs: []
+    outputType: video/source
+    timeout:
+      seconds: 5
+    memoization: memoize
+  - id: slow-boundary
+    kind: boundary
+    tool: ffmpeg
+    inputs:
+      - ingest
+    outputType: video/output
+    timeout:
+      seconds: 1
+    memoization: memoize
+  - id: summary
+    kind: summary
+    inputs:
+      - slow-boundary
+    outputType: summary/run
+    timeout:
+      seconds: 5
+    memoization: no-memoize

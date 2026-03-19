@@ -1,0 +1,146 @@
+cabal-version:      3.0
+name:               studioMCP
+version:            0.1.0.0
+synopsis:           Haskell-first MCP server for pure DAG-based studio workflows
+category:           Development
+build-type:         Simple
+license:            MIT
+author:             Matthew Nowak
+maintainer:         matthewnowak@example.com
+
+common common-settings
+  default-language: GHC2021
+  ghc-options:
+    -Wall
+    -Wcompat
+    -Wincomplete-uni-patterns
+    -Wincomplete-record-updates
+    -Wmissing-export-lists
+    -Wredundant-constraints
+
+library
+  import: common-settings
+  hs-source-dirs: src
+  exposed-modules:
+    StudioMCP.Prelude
+    StudioMCP.Config.Types
+    StudioMCP.Config.Load
+    StudioMCP.Config.Env
+    StudioMCP.MCP.Server
+    StudioMCP.MCP.Protocol
+    StudioMCP.MCP.Handlers
+    StudioMCP.MCP.Types
+    StudioMCP.DAG.Types
+    StudioMCP.DAG.Parser
+    StudioMCP.DAG.Validator
+    StudioMCP.DAG.Executor
+    StudioMCP.DAG.Scheduler
+    StudioMCP.DAG.Timeout
+    StudioMCP.DAG.Railway
+    StudioMCP.DAG.Memoization
+    StudioMCP.DAG.Summary
+    StudioMCP.DAG.Hashing
+    StudioMCP.DAG.Provenance
+    StudioMCP.Result.Types
+    StudioMCP.Result.Failure
+    StudioMCP.Result.SummaryFailure
+    StudioMCP.Storage.MinIO
+    StudioMCP.Storage.Keys
+    StudioMCP.Storage.Manifests
+    StudioMCP.Storage.ContentAddressed
+    StudioMCP.Messaging.Pulsar
+    StudioMCP.Messaging.Topics
+    StudioMCP.Messaging.Events
+    StudioMCP.Messaging.ExecutionState
+    StudioMCP.Tools.Types
+    StudioMCP.Tools.Registry
+    StudioMCP.Tools.Boundary
+    StudioMCP.Tools.Process
+    StudioMCP.Inference.Types
+    StudioMCP.Inference.Host
+    StudioMCP.Inference.Prompts
+    StudioMCP.Inference.ReferenceModel
+    StudioMCP.Inference.Guardrails
+    StudioMCP.API.Health
+    StudioMCP.API.Metrics
+    StudioMCP.API.Version
+    StudioMCP.Util.Time
+    StudioMCP.Util.Logging
+    StudioMCP.Util.Json
+    StudioMCP.Util.Exceptions
+  build-depends:
+      aeson >=2.2 && <2.3
+    , base >=4.21 && <4.22
+    , bytestring >=0.12 && <0.13
+    , containers >=0.7 && <0.8
+    , directory >=1.3 && <1.4
+    , filepath >=1.5 && <1.6
+    , process >=1.6 && <1.7
+    , text >=2.1 && <2.2
+    , time >=1.14 && <1.15
+    , yaml >=0.11 && <0.12
+
+executable studiomcp
+  import: common-settings
+  hs-source-dirs: app
+  main-is: Main.hs
+  build-depends:
+      base
+    , filepath
+    , studioMCP
+    , text
+
+executable studiomcp-server
+  import: common-settings
+  hs-source-dirs: app
+  main-is: ServerMain.hs
+  build-depends:
+      base
+    , studioMCP
+
+executable studiomcp-inference
+  import: common-settings
+  hs-source-dirs: app
+  main-is: InferenceMain.hs
+  build-depends:
+      base
+    , studioMCP
+
+executable studiomcp-worker
+  import: common-settings
+  hs-source-dirs: app
+  main-is: WorkerMain.hs
+  build-depends:
+      base
+    , studioMCP
+
+test-suite unit-tests
+  import: common-settings
+  type: exitcode-stdio-1.0
+  hs-source-dirs: test
+  main-is: Spec.hs
+  other-modules:
+    DAG.ValidatorSpec
+    DAG.RailwaySpec
+    DAG.TimeoutSpec
+    DAG.MemoizationSpec
+    DAG.SummarySpec
+  build-depends:
+      base
+    , hspec >=2.11 && <2.12
+    , studioMCP
+    , text
+    , time
+
+test-suite integration-tests
+  import: common-settings
+  type: exitcode-stdio-1.0
+  hs-source-dirs: test
+  main-is: IntegrationSpec.hs
+  other-modules:
+    Integration.HarnessSpec
+  build-depends:
+      base
+    , hspec >=2.11 && <2.12
+    , process
+    , studioMCP

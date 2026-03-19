@@ -1,0 +1,12 @@
+{{- if and .Values.pulsar.enabled .Values.pulsar.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "studiomcp.fullname" . }}-pulsar
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.pulsar.persistence.size }}
+{{- end }}

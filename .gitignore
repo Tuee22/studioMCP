@@ -1,0 +1,56 @@
+# Haskell
+dist-newstyle/
+dist/
+*.hi
+*.o
+*.chi
+*.chs.h
+*.dyn_hi
+*.dyn_o
+.ghc.environment.*
+cabal.project.local
+cabal.project.local~
+
+# Stack
+.stack-work/
+
+# Coverage / profiling / benchmarks
+*.eventlog
+*.prof
+*.hp
+*.tix
+*.mix
+coverage/
+benchmarks/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Editors
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs and traces
+*.log
+logs/
+traces/
+
+# Docker and local service state
+docker/.env
+docker-compose.override.yaml
+.docker/
+.minio/
+.pulsar/
+tmp/
+
+# Media artifacts
+artifacts/
+scratch/
+render-output/

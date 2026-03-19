@@ -1,0 +1,13 @@
+image:
+  pullPolicy: IfNotPresent
+
+pulsar:
+  persistence:
+    enabled: false
+
+minio:
+  persistence:
+    enabled: false
+
+llmReference:
+  enabled: false

@@ -1,0 +1,27 @@
+name: subtitle-generation
+description: Placeholder pipeline for subtitle extraction and summarization.
+nodes:
+  - id: ingest
+    kind: pure
+    inputs: []
+    outputType: video/source
+    timeout:
+      seconds: 5
+    memoization: memoize
+  - id: transcribe
+    kind: boundary
+    tool: whisper
+    inputs:
+      - ingest
+    outputType: subtitles/srt
+    timeout:
+      seconds: 180
+    memoization: memoize
+  - id: summary
+    kind: summary
+    inputs:
+      - transcribe
+    outputType: summary/run
+    timeout:
+      seconds: 5
+    memoization: no-memoize

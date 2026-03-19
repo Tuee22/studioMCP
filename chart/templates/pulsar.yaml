@@ -1,0 +1,54 @@
+{{- if .Values.pulsar.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "studiomcp.fullname" . }}-pulsar
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "studiomcp.fullname" . }}
+      app.kubernetes.io/component: pulsar
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "studiomcp.fullname" . }}
+        app.kubernetes.io/component: pulsar
+    spec:
+      containers:
+        - name: pulsar
+          image: {{ .Values.pulsar.image | quote }}
+          command: ["bin/pulsar", "standalone"]
+          ports:
+            - containerPort: {{ .Values.pulsar.service.binaryPort }}
+              name: binary
+            - containerPort: {{ .Values.pulsar.service.httpPort }}
+              name: http
+          volumeMounts:
+            - name: pulsar-data
+              mountPath: /pulsar/data
+      volumes:
+        - name: pulsar-data
+          {{- if .Values.pulsar.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "studiomcp.fullname" . }}-pulsar
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "studiomcp.fullname" . }}-pulsar
+spec:
+  selector:
+    app.kubernetes.io/name: {{ include "studiomcp.fullname" . }}
+    app.kubernetes.io/component: pulsar
+  ports:
+    - name: binary
+      port: {{ .Values.pulsar.service.binaryPort }}
+      targetPort: binary
+    - name: http
+      port: {{ .Values.pulsar.service.httpPort }}
+      targetPort: http
+{{- end }}

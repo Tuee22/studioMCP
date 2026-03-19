@@ -1,0 +1,60 @@
+apiVersion: skaffold/v4beta11
+kind: Config
+metadata:
+  name: studiomcp
+build:
+  local:
+    push: false
+    useBuildkit: true
+  artifacts:
+    - image: studiomcp
+      docker:
+        dockerfile: docker/Dockerfile
+        target: production
+      sync:
+        manual:
+          - src: "documents/**/*.md"
+            dest: /workspace
+          - src: "scripts/**/*.sh"
+            dest: /workspace
+          - src: "examples/**/*.yaml"
+            dest: /workspace
+deploy:
+  helm:
+    releases:
+      - name: studiomcp
+        chartPath: chart
+        valuesFiles:
+          - chart/values.yaml
+        setValueTemplates:
+          image.repository: "{{.IMAGE_REPO_studiomcp}}"
+          image.tag: "{{.IMAGE_TAG_studiomcp}}"
+profiles:
+  - name: kind
+    deploy:
+      helm:
+        releases:
+          - name: studiomcp
+            chartPath: chart
+            valuesFiles:
+              - chart/values.yaml
+              - chart/values-kind.yaml
+            setValueTemplates:
+              image.repository: "{{.IMAGE_REPO_studiomcp}}"
+              image.tag: "{{.IMAGE_TAG_studiomcp}}"
+    portForward:
+      - resourceType: service
+        resourceName: studiomcp
+        namespace: default
+        port: 3000
+        localPort: 3000
+      - resourceType: service
+        resourceName: studiomcp-minio
+        namespace: default
+        port: 9001
+        localPort: 9001
+      - resourceType: service
+        resourceName: studiomcp-pulsar
+        namespace: default
+        port: 8080
+        localPort: 8080

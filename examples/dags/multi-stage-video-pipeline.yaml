@@ -1,0 +1,36 @@
+name: multi-stage-video-pipeline
+description: Placeholder pipeline with multiple boundary nodes.
+nodes:
+  - id: ingest
+    kind: pure
+    inputs: []
+    outputType: video/source
+    timeout:
+      seconds: 5
+    memoization: memoize
+  - id: normalize
+    kind: boundary
+    tool: ffmpeg
+    inputs:
+      - ingest
+    outputType: video/normalized
+    timeout:
+      seconds: 120
+    memoization: memoize
+  - id: thumbnail
+    kind: boundary
+    tool: imagemagick
+    inputs:
+      - normalize
+    outputType: image/thumbnail
+    timeout:
+      seconds: 30
+    memoization: memoize
+  - id: summary
+    kind: summary
+    inputs:
+      - thumbnail
+    outputType: summary/run
+    timeout:
+      seconds: 5
+    memoization: no-memoize

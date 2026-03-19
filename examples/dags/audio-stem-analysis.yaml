@@ -1,0 +1,27 @@
+name: audio-stem-analysis
+description: Placeholder pipeline for future audio stem and transcription work.
+nodes:
+  - id: ingest
+    kind: pure
+    inputs: []
+    outputType: audio/source
+    timeout:
+      seconds: 5
+    memoization: memoize
+  - id: analyze
+    kind: boundary
+    tool: sox
+    inputs:
+      - ingest
+    outputType: audio/features
+    timeout:
+      seconds: 30
+    memoization: memoize
+  - id: summary
+    kind: summary
+    inputs:
+      - analyze
+    outputType: summary/run
+    timeout:
+      seconds: 5
+    memoization: no-memoize

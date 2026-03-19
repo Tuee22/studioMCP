@@ -1,0 +1,6 @@
+apiVersion: v2
+name: studiomcp
+description: Kubernetes-native development and deployment chart for studioMCP
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

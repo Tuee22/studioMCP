@@ -1,0 +1,27 @@
+name: transcode-basic
+description: Simple ingest to FFmpeg transcode flow.
+nodes:
+  - id: ingest
+    kind: pure
+    inputs: []
+    outputType: media/input
+    timeout:
+      seconds: 5
+    memoization: memoize
+  - id: transcode
+    kind: boundary
+    tool: ffmpeg
+    inputs:
+      - ingest
+    outputType: media/mp4
+    timeout:
+      seconds: 120
+    memoization: memoize
+  - id: summary
+    kind: summary
+    inputs:
+      - transcode
+    outputType: summary/run
+    timeout:
+      seconds: 5
+    memoization: no-memoize
