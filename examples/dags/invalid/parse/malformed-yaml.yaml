@@ -1,0 +1,18 @@
+name: malformed-yaml
+description: Fixture that must fail during YAML parsing.
+nodes:
+  - id: ingest
+    kind: pure
+    inputs: []
+    outputType: media/input
+    timeout:
+      seconds: 5
+    memoization: memoize
+  - id: summary
+    kind summary
+    inputs:
+      - ingest
+    outputType: summary/run
+    timeout:
+      seconds: 5
+    memoization: no-memoize

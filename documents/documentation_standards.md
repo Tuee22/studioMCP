@@ -33,10 +33,10 @@ The repository uses `documents/`, not `docs/`.
 - `documents/development/`: local setup, contributor workflows, and testing policy
 - `documents/domain/`: DAG schema and execution-domain rules
 - `documents/engineering/`: engineering standards such as Kubernetes-native development policy
-- `documents/operations/`: future runbooks and operability procedures
-- `documents/reference/`: future generated or API-style reference material
+- `documents/operations/`: runbooks and operability procedures
+- `documents/reference/`: public-surface and API-style reference material
 - `documents/tools/`: tool and sidecar integration notes
-- `documents/adr/`: future architecture decision records
+- `documents/adr/`: architecture decision records
 
 The navigational index for the suite is [README.md](README.md#studiomcp-documentation-index).
 
@@ -121,6 +121,7 @@ Validation checklist for each Mermaid diagram:
 - [ ] Update dependent links and overlays.
 - [ ] Validate Mermaid diagrams after edits.
 - [ ] Keep `../README.md` and this suite index aligned when the structure changes.
+- [ ] Keep the suite index aligned when canonical documents are added, renamed, or retired.
 - [ ] Keep `../STUDIOMCP_DEVELOPMENT_PLAN.md` aligned when documentation governance changes.
 
 ## Cross-References

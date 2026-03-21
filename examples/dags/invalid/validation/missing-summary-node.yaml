@@ -1,0 +1,19 @@
+name: missing-summary-node
+description: Fixture that parses successfully but must fail DAG validation.
+nodes:
+  - id: ingest
+    kind: pure
+    inputs: []
+    outputType: media/input
+    timeout:
+      seconds: 5
+    memoization: memoize
+  - id: transcode
+    kind: boundary
+    tool: ffmpeg
+    inputs:
+      - ingest
+    outputType: media/mp4
+    timeout:
+      seconds: 120
+    memoization: memoize

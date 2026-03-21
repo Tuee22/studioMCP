@@ -2,7 +2,10 @@
 
 module StudioMCP.Messaging.Topics
   ( TopicName (..),
+    TopicChannel (..),
     defaultExecutionTopic,
+    topicForChannel,
+    allTopics,
   )
 where
 
@@ -13,5 +16,28 @@ newtype TopicName = TopicName
   }
   deriving (Eq, Show)
 
+data TopicChannel
+  = ExecutionEventsTopic
+  | ExecutionSummariesTopic
+  | ExecutionDeadLetterTopic
+  deriving (Eq, Show)
+
 defaultExecutionTopic :: TopicName
-defaultExecutionTopic = TopicName "persistent://public/default/studiomcp-execution"
+defaultExecutionTopic = topicForChannel ExecutionEventsTopic
+
+topicForChannel :: TopicChannel -> TopicName
+topicForChannel topicChannel =
+  TopicName $
+    case topicChannel of
+      ExecutionEventsTopic -> "persistent://public/default/studiomcp-execution"
+      ExecutionSummariesTopic -> "persistent://public/default/studiomcp-summary"
+      ExecutionDeadLetterTopic -> "persistent://public/default/studiomcp-dead-letter"
+
+allTopics :: [TopicName]
+allTopics =
+  map
+    topicForChannel
+    [ ExecutionEventsTopic,
+      ExecutionSummariesTopic,
+      ExecutionDeadLetterTopic
+    ]

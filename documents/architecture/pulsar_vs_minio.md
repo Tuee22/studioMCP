@@ -3,7 +3,7 @@
 
 **Status**: Authoritative source
 **Supersedes**: legacy `documents/architecture/pulsar-vs-minio.md`
-**Referenced by**: [overview.md](overview.md#canonical-follow-on-documents), [../development/testing_strategy.md](../development/testing_strategy.md#integration-tests), [../tools/minio.md](../tools/minio.md#cross-references), [../tools/pulsar.md](../tools/pulsar.md#cross-references)
+**Referenced by**: [overview.md](overview.md#canonical-follow-on-documents), [../development/testing_strategy.md](../development/testing_strategy.md#integration-tests), [../tools/minio.md](../tools/minio.md#cross-references), [../tools/pulsar.md](../tools/pulsar.md#cross-references), [../engineering/k8s_storage.md](../engineering/k8s_storage.md#cross-references)
 
 > **Purpose**: Canonical definition of the storage and messaging split between Pulsar and MinIO in `studioMCP`.
 
@@ -55,9 +55,10 @@ Do not use MinIO for:
 
 ## Testing Implication
 
-Because both systems are stateful, integration tests must reset them through the harness described in [Testing Strategy](../development/testing_strategy.md#reproducible-harness).
+Because both systems are stateful, local persistence and reset behavior must follow the explicit environment and PV rules described in [Testing Strategy](../development/testing_strategy.md#reproducible-environment) and [Kubernetes Storage Policy](../engineering/k8s_storage.md#kubernetes-storage-policy).
 
 ## Cross-References
 
 - [Architecture Overview](overview.md#architecture-overview)
 - [Testing Strategy](../development/testing_strategy.md#testing-strategy)
+- [Kubernetes Storage Policy](../engineering/k8s_storage.md#kubernetes-storage-policy)

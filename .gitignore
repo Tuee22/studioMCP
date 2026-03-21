@@ -46,6 +46,7 @@ traces/
 docker/.env
 docker-compose.override.yaml
 .docker/
+.data/
 .minio/
 .pulsar/
 tmp/

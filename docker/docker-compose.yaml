@@ -1,81 +1,24 @@
-## Compose is retained only for sidecar-backed integration testing.
-## Kubernetes via Helm under chart/ is the deployment source of truth.
+## Compose exists only to launch the outer development container.
+## The Haskell CLI inside that container owns kind, Helm, and sidecar lifecycle.
 services:
-  studiomcp:
+  studiomcp-env:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-      target: production
+      target: env
+    command: ["sleep", "infinity"]
+    init: true
+    stdin_open: true
+    tty: true
     working_dir: /workspace
+    environment:
+      DOCKER_HOST: unix:///var/run/docker.sock
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+      STUDIOMCP_KIND_CLUSTER: ${STUDIOMCP_KIND_CLUSTER:-studiomcp}
+      STUDIOMCP_KIND_HOST_DATA_PATH: ${STUDIOMCP_KIND_HOST_DATA_PATH:-}
     volumes:
       - ..:/workspace
-    environment:
-      STUDIO_MCP_MODE: server
-      STUDIO_MCP_PULSAR_HTTP_URL: http://pulsar:8080
-      STUDIO_MCP_PULSAR_BINARY_URL: pulsar://pulsar:6650
-      STUDIO_MCP_MINIO_ENDPOINT: http://minio:9000
-      STUDIO_MCP_MINIO_ACCESS_KEY: minioadmin
-      STUDIO_MCP_MINIO_SECRET_KEY: minioadmin123
-    depends_on:
-      pulsar:
-        condition: service_started
-      minio:
-        condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
-    ports:
-      - "3000:3000"
-    command: ["/workspace/docker/entrypoints/start-server.sh"]
-
-  # Pulsar is the source of truth for in-flight DAG execution state only.
-  pulsar:
-    image: apachepulsar/pulsar:3.1.2
-    command: ["bin/pulsar", "standalone"]
-    ports:
-      - "6650:6650"
-      - "8080:8080"
-    volumes:
-      - pulsar-data:/pulsar/data
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/admin/v2/clusters >/dev/null"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-
-  # MinIO is immutable persistent storage for memoized outputs and artifacts.
-  minio:
-    image: minio/minio:latest
-    command: ["server", "/data", "--console-address", ":9001"]
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin123
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    volumes:
-      - minio-data:/data
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/live >/dev/null"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-
-  minio-init:
-    image: minio/mc:latest
-    depends_on:
-      minio:
-        condition: service_healthy
-    entrypoint: ["/bin/sh", "/workspace/docker/scripts/bootstrap-minio.sh"]
-    working_dir: /workspace
-    volumes:
-      - ..:/workspace
-
-  llm-reference:
-    image: ollama/ollama:latest
-    profiles: ["inference"]
-    ports:
-      - "11434:11434"
-
-volumes:
-  pulsar-data:
-  minio-data:
+      - ../.data:/.data
+      - ${HOME}/.docker:/root/.docker:ro
+      - /var/run/docker.sock:/var/run/docker.sock

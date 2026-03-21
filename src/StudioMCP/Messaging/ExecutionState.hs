@@ -1,6 +1,8 @@
 module StudioMCP.Messaging.ExecutionState
   ( RunPhase (..),
     ExecutionState (..),
+    StateTransitionError (..),
+    initialExecutionState,
     advanceState,
   )
 where
@@ -8,7 +10,8 @@ where
 import StudioMCP.Messaging.Events (ExecutionEventType (..))
 
 data RunPhase
-  = Submitted
+  = Pending
+  | Submitted
   | Running
   | Failed
   | Completed
@@ -19,11 +22,27 @@ newtype ExecutionState = ExecutionState
   }
   deriving (Eq, Show)
 
-advanceState :: ExecutionState -> ExecutionEventType -> ExecutionState
-advanceState _ RunSubmitted = ExecutionState Submitted
-advanceState _ NodeScheduled = ExecutionState Running
-advanceState _ NodeStarted = ExecutionState Running
-advanceState _ NodeCompleted = ExecutionState Running
-advanceState _ NodeFailedEvent = ExecutionState Failed
-advanceState _ NodeTimedOutEvent = ExecutionState Failed
-advanceState _ SummaryEmitted = ExecutionState Completed
+data StateTransitionError = StateTransitionError
+  { transitionFrom :: RunPhase,
+    transitionEvent :: ExecutionEventType
+  }
+  deriving (Eq, Show)
+
+initialExecutionState :: ExecutionState
+initialExecutionState = ExecutionState Pending
+
+advanceState :: ExecutionState -> ExecutionEventType -> Either StateTransitionError ExecutionState
+advanceState (ExecutionState Pending) RunSubmitted = Right (ExecutionState Submitted)
+advanceState (ExecutionState Submitted) NodeScheduled = Right (ExecutionState Running)
+advanceState (ExecutionState Submitted) NodeStarted = Right (ExecutionState Running)
+advanceState (ExecutionState Running) NodeStarted = Right (ExecutionState Running)
+advanceState (ExecutionState Running) NodeCompleted = Right (ExecutionState Running)
+advanceState (ExecutionState Running) SummaryEmitted = Right (ExecutionState Completed)
+advanceState (ExecutionState Running) NodeFailedEvent = Right (ExecutionState Failed)
+advanceState (ExecutionState Running) NodeTimedOutEvent = Right (ExecutionState Failed)
+advanceState (ExecutionState Failed) eventTypeValue =
+  Left (StateTransitionError Failed eventTypeValue)
+advanceState (ExecutionState Completed) eventTypeValue =
+  Left (StateTransitionError Completed eventTypeValue)
+advanceState (ExecutionState runPhaseValue) eventTypeValue =
+  Left (StateTransitionError runPhaseValue eventTypeValue)

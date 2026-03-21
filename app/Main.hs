@@ -1,30 +1,29 @@
 module Main (main) where
 
-import StudioMCP.DAG.Parser (loadDagFile)
-import StudioMCP.DAG.Validator (renderFailures, validateDag)
+import StudioMCP.CLI.Cluster (runClusterCommand, runValidateCommand)
+import StudioMCP.CLI.Command
+  ( Command (..),
+    parseCommand,
+    usageText,
+  )
+import StudioMCP.CLI.Dag (runDagCommand, validateDagFileCommand)
 import StudioMCP.Inference.Host (runInferenceMode)
 import StudioMCP.MCP.Server (runServer)
-import StudioMCP.Result.Types (Result (Failure, Success))
-import StudioMCP.Tools.Process (runWorkerMode)
+import StudioMCP.Worker.Server (runWorkerMode)
 import System.Environment (getArgs)
 import System.Exit (die)
 
 main :: IO ()
 main = do
   args <- getArgs
-  case args of
-    ["server"] -> runServer
-    ["inference"] -> runInferenceMode
-    ["worker"] -> runWorkerMode
-    ["validate-dag", dagPath] -> validateDagFile dagPath
-    _ ->
-      die
-        "usage: studiomcp {server|inference|worker|validate-dag <path>}"
-
-validateDagFile :: FilePath -> IO ()
-validateDagFile dagPath = do
-  decoded <- loadDagFile dagPath
-  dagSpec <- either die pure decoded
-  case validateDag dagSpec of
-    Success _ -> putStrLn "DAG is valid."
-    Failure failures -> die (renderFailures failures)
+  case parseCommand args of
+    Left _ -> die usageText
+    Right command ->
+      case command of
+        ServerCommand -> runServer
+        InferenceCommand -> runInferenceMode
+        WorkerCommand -> runWorkerMode
+        ValidateDagCommand dagPath -> validateDagFileCommand dagPath
+        DagCommand dagCommand -> runDagCommand dagCommand
+        ValidateCommand validateCommand -> runValidateCommand validateCommand
+        ClusterCommand clusterCommand -> runClusterCommand clusterCommand

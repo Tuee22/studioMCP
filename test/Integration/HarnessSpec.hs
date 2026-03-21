@@ -3,23 +3,82 @@ module Integration.HarnessSpec
   )
 where
 
+import Control.Monad (unless)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import System.Environment (lookupEnv)
 import System.Exit (ExitCode (ExitSuccess))
+import System.IO.Unsafe (unsafePerformIO)
 import System.Process (readProcessWithExitCode)
-import Test.Hspec (Spec, describe, it, pendingWith, shouldBe)
+import Test.Hspec (Spec, describe, it, pendingWith, shouldBe, shouldContain)
 
 spec :: Spec
 spec =
   describe "integration harness" $ do
-    it "reaches the MinIO health endpoint" $
+    it "validates deterministic helper processes through the outer-container CLI" $
       runIfEnabled $ do
-        exitCode <- curlExitCode "http://localhost:9000/minio/health/live"
-        exitCode `shouldBe` ExitSuccess
+        ensureOuterContainer
+        output <- runOuterCliExpectSuccess ["validate", "boundary"]
+        output `shouldContain` "Boundary validation passed."
 
-    it "reaches the Pulsar admin endpoint" $
+    it "runs the FFmpeg adapter against deterministic fixtures through the outer-container CLI" $
       runIfEnabled $ do
-        exitCode <- curlExitCode "http://localhost:8080/admin/v2/clusters"
-        exitCode `shouldBe` ExitSuccess
+        ensureOuterContainer
+        output <- runOuterCliExpectSuccess ["validate", "ffmpeg-adapter"]
+        output `shouldContain` "FFmpeg adapter validation passed."
+
+    it "runs the sequential executor validation through the outer-container CLI" $
+      runIfEnabled $ do
+        ensureOuterContainer
+        output <- runOuterCliExpectSuccess ["validate", "executor"]
+        output `shouldContain` "Executor validation passed."
+
+    it "runs the worker runtime validation through the outer-container CLI" $
+      runIfEnabled $ do
+        ensureOuterEnvironment
+        output <- runOuterCliExpectSuccess ["validate", "worker"]
+        output `shouldContain` "Worker validation passed."
+
+    it "validates the cluster through the outer-container CLI" $
+      runIfEnabled $ do
+        ensureOuterEnvironment
+        _ <- runOuterCliExpectSuccess ["validate", "cluster"]
+        pure ()
+
+    it "runs a real successful and failing DAG end to end through the outer-container CLI" $
+      runIfEnabled $ do
+        ensureOuterEnvironment
+        output <- runOuterCliExpectSuccess ["validate", "e2e"]
+        output `shouldContain` "End-to-end validation passed."
+
+    it "publishes and consumes a validation lifecycle through real Pulsar" $
+      runIfEnabled $ do
+        ensureOuterEnvironment
+        output <- runOuterCliExpectSuccess ["validate", "pulsar"]
+        output `shouldContain` "Pulsar validation passed."
+
+    it "round-trips immutable objects through real MinIO" $
+      runIfEnabled $ do
+        ensureOuterEnvironment
+        output <- runOuterCliExpectSuccess ["validate", "minio"]
+        output `shouldContain` "MinIO validation passed."
+
+    it "exercises the MCP transport through the outer-container CLI" $
+      runIfEnabled $ do
+        ensureOuterEnvironment
+        output <- runOuterCliExpectSuccess ["validate", "mcp"]
+        output `shouldContain` "MCP validation passed."
+
+    it "runs the inference advisory mode validation through the outer-container CLI" $
+      runIfEnabled $ do
+        ensureOuterContainer
+        output <- runOuterCliExpectSuccess ["validate", "inference"]
+        output `shouldContain` "Inference validation passed."
+
+    it "exercises the observability surface through the outer-container CLI" $
+      runIfEnabled $ do
+        ensureOuterEnvironment
+        output <- runOuterCliExpectSuccess ["validate", "observability"]
+        output `shouldContain` "Observability validation passed."
 
 runIfEnabled :: IO () -> IO ()
 runIfEnabled action = do
@@ -28,9 +87,61 @@ runIfEnabled action = do
     Just "1" -> action
     _ ->
       pendingWith
-        "set STUDIOMCP_RUN_INTEGRATION=1 and use scripts/integration-harness.sh to run sidecar-backed integration tests"
+        "set STUDIOMCP_RUN_INTEGRATION=1 to run the outer-container integration workflow"
 
-curlExitCode :: String -> IO ExitCode
-curlExitCode url = do
-  (exitCode, _, _) <- readProcessWithExitCode "curl" ["-fsS", url] ""
-  pure exitCode
+ensureOuterContainer :: IO ()
+ensureOuterContainer = do
+  alreadyReady <- readIORef outerContainerReadyRef
+  unless alreadyReady $ do
+    _ <- runComposeExpectSuccess ["up", "-d", "studiomcp-env"]
+    _ <-
+      runComposeExpectSuccess
+        [ "exec",
+          "-T",
+          "studiomcp-env",
+          "sh",
+          "-lc",
+          "rm -rf /tmp/studiomcp-dist && cabal --builddir=/tmp/studiomcp-dist build all && cabal --builddir=/tmp/studiomcp-dist install exe:studiomcp --installdir /usr/local/bin --overwrite-policy=always"
+        ]
+    writeIORef outerContainerReadyRef True
+
+ensureOuterEnvironment :: IO ()
+ensureOuterEnvironment = do
+  alreadyReady <- readIORef outerEnvironmentReadyRef
+  unless alreadyReady $ do
+    ensureOuterContainer
+    _ <- runOuterCliExpectSuccess ["cluster", "up"]
+    _ <- runOuterCliExpectSuccess ["cluster", "deploy", "sidecars"]
+    writeIORef outerEnvironmentReadyRef True
+
+runComposeExpectSuccess :: [String] -> IO String
+runComposeExpectSuccess args = do
+  (exitCode, stdoutText, stderrText) <-
+    readProcessWithExitCode
+      "docker"
+      (["compose", "-f", "docker/docker-compose.yaml"] <> args)
+      ""
+  let combinedOutput = stdoutText <> stderrText
+  exitCode `shouldBe` ExitSuccess
+  pure combinedOutput
+
+runOuterCliExpectSuccess :: [String] -> IO String
+runOuterCliExpectSuccess args = do
+  (exitCode, stdoutText, stderrText) <-
+    readProcessWithExitCode
+      "docker"
+      ( ["compose", "-f", "docker/docker-compose.yaml", "exec", "-T", "studiomcp-env", "studiomcp"]
+          <> args
+      )
+      ""
+  let combinedOutput = stdoutText <> stderrText
+  exitCode `shouldBe` ExitSuccess
+  pure combinedOutput
+
+outerContainerReadyRef :: IORef Bool
+outerContainerReadyRef = unsafePerformIO (newIORef False)
+{-# NOINLINE outerContainerReadyRef #-}
+
+outerEnvironmentReadyRef :: IORef Bool
+outerEnvironmentReadyRef = unsafePerformIO (newIORef False)
+{-# NOINLINE outerEnvironmentReadyRef #-}

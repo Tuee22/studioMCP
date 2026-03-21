@@ -11,6 +11,16 @@ where
 
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
+import Data.Aeson
+  ( FromJSON (parseJSON),
+    ToJSON (toJSON),
+    Value (String),
+    object,
+    withObject,
+    withText,
+    (.:),
+    (.=),
+  )
 import Data.Text (Text)
 import qualified Data.Text as Text
 import StudioMCP.DAG.Types (NodeId (..))
@@ -26,6 +36,33 @@ data FailureCategory
   | InternalInvariantFailure
   deriving (Eq, Ord, Show)
 
+instance FromJSON FailureCategory where
+  parseJSON =
+    withText "FailureCategory" $ \value ->
+      case value of
+        "timeout" -> pure TimeoutFailure
+        "validation" -> pure ValidationFailure
+        "tool_process" -> pure ToolProcessFailure
+        "bad_output_decoding" -> pure BadOutputDecoding
+        "dependency_missing" -> pure DependencyMissing
+        "storage" -> pure StorageFailure
+        "messaging" -> pure MessagingFailure
+        "internal_invariant" -> pure InternalInvariantFailure
+        _ -> fail ("Unknown FailureCategory: " <> Text.unpack value)
+
+instance ToJSON FailureCategory where
+  toJSON failureCategoryValue =
+    String $
+      case failureCategoryValue of
+        TimeoutFailure -> "timeout"
+        ValidationFailure -> "validation"
+        ToolProcessFailure -> "tool_process"
+        BadOutputDecoding -> "bad_output_decoding"
+        DependencyMissing -> "dependency_missing"
+        StorageFailure -> "storage"
+        MessagingFailure -> "messaging"
+        InternalInvariantFailure -> "internal_invariant"
+
 data FailureDetail = FailureDetail
   { failureCategory :: FailureCategory,
     failureCode :: Text,
@@ -34,6 +71,25 @@ data FailureDetail = FailureDetail
     failureContext :: Map Text Text
   }
   deriving (Eq, Show)
+
+instance FromJSON FailureDetail where
+  parseJSON = withObject "FailureDetail" $ \obj ->
+    FailureDetail
+      <$> obj .: "category"
+      <*> obj .: "code"
+      <*> obj .: "message"
+      <*> obj .: "retryable"
+      <*> obj .: "context"
+
+instance ToJSON FailureDetail where
+  toJSON failureDetail =
+    object
+      [ "category" .= failureCategory failureDetail,
+        "code" .= failureCode failureDetail,
+        "message" .= failureMessage failureDetail,
+        "retryable" .= failureRetryable failureDetail,
+        "context" .= failureContext failureDetail
+      ]
 
 validationFailure :: Text -> Text -> FailureDetail
 validationFailure code message =

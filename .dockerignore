@@ -9,6 +9,7 @@ dist
 .venv
 venv
 __pycache__
+.data/
 coverage
 logs
 traces

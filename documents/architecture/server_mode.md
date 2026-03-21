@@ -9,7 +9,11 @@
 
 ## Summary
 
-Server mode is the path that actually executes work. It is responsible for validating DAGs, coordinating execution, publishing state, persisting immutable outputs, and deriving final summaries.
+Server mode is the authoritative execution path. It is responsible for validating DAGs, coordinating execution, publishing state, persisting immutable outputs, and deriving final summaries.
+
+Current repo note: the server runtime is implemented. `studiomcp server` and `studiomcp-server` expose the HTTP control surface on port `3000`, including `POST /runs`, `GET /runs/:id/summary`, `GET /healthz`, `GET /version`, and `GET /metrics`. Delivery status lives in [../../STUDIOMCP_DEVELOPMENT_PLAN.md](../../STUDIOMCP_DEVELOPMENT_PLAN.md#phase-13-mcp-server-transport-handlers-and-protocol-level-tests).
+
+Phase-boundary note: the transport and observability phases are both complete in the current plan. The server now exposes both the submission and summary handlers plus the admin and observability surface they depend on.
 
 ## Responsibilities
 

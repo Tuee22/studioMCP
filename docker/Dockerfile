@@ -1,14 +1,11 @@
-FROM ubuntu:24.04 AS base
+FROM ubuntu:24.04 AS os-base
 
 ARG DEBIAN_FRONTEND=noninteractive
-ARG GHC_VERSION=9.12.2
-ARG CABAL_VERSION=3.16.0.0
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
-    build-essential \
     ca-certificates \
     curl \
     ffmpeg \
@@ -28,6 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
     sox \
+    tar \
     unzip \
     wget \
     xz-utils \
@@ -36,24 +34,73 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN apt-get update && apt-get install -y --no-install-recommends blender || true
 
-RUN curl --proto '=https' --tlsv1.2 -fsSL https://get-ghcup.haskell.org | \
-    BOOTSTRAP_HASKELL_NONINTERACTIVE=1 BOOTSTRAP_HASKELL_MINIMAL=1 sh
+FROM os-base AS env
 
-ENV PATH="/root/.ghcup/bin:/root/.cabal/bin:${PATH}"
+COPY --from=minio/mc:latest /usr/bin/mc /usr/local/bin/mc
 
-RUN ghcup install ghc "${GHC_VERSION}" && \
+ARG GHC_VERSION=9.12.2
+ARG CABAL_VERSION=3.16.0.0
+ARG BUILDX_VERSION=v0.32.1
+ARG HELM_VERSION=v3.18.6
+ARG KIND_VERSION=v0.29.0
+ARG KUBECTL_VERSION=v1.33.4
+ARG TARGETARCH
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    docker.io \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN if [ -z "${TARGETARCH}" ]; then TARGETARCH="$(dpkg --print-architecture)"; fi && \
+    case "${TARGETARCH}" in \
+      arm64) export STUDIO_ARCH=arm64 ;; \
+      amd64) export STUDIO_ARCH=amd64 ;; \
+      *) echo "Unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac && \
+    curl --proto '=https' --tlsv1.2 -fsSL https://get-ghcup.haskell.org | \
+      BOOTSTRAP_HASKELL_NONINTERACTIVE=1 BOOTSTRAP_HASKELL_MINIMAL=1 sh && \
+    export PATH="/root/.ghcup/bin:/root/.cabal/bin:${PATH}" && \
+    ghcup install ghc "${GHC_VERSION}" && \
     ghcup set ghc "${GHC_VERSION}" && \
     ghcup install cabal "${CABAL_VERSION}" && \
-    ghcup set cabal "${CABAL_VERSION}"
+    ghcup set cabal "${CABAL_VERSION}" && \
+    curl -fsSL -o /usr/local/bin/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${STUDIO_ARCH}/kubectl" && \
+    chmod +x /usr/local/bin/kubectl && \
+    curl -fsSL -o /usr/local/bin/kind "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-${STUDIO_ARCH}" && \
+    chmod +x /usr/local/bin/kind && \
+    curl -fsSL -o /tmp/helm.tgz "https://get.helm.sh/helm-${HELM_VERSION}-linux-${STUDIO_ARCH}.tar.gz" && \
+    tar -xzf /tmp/helm.tgz -C /tmp && \
+    mv "/tmp/linux-${STUDIO_ARCH}/helm" /usr/local/bin/helm && \
+    chmod +x /usr/local/bin/helm && \
+    mkdir -p /usr/libexec/docker/cli-plugins && \
+    curl -fsSL -o /usr/libexec/docker/cli-plugins/docker-buildx "https://github.com/docker/buildx/releases/download/${BUILDX_VERSION}/buildx-${BUILDX_VERSION}.linux-${STUDIO_ARCH}" && \
+    chmod +x /usr/libexec/docker/cli-plugins/docker-buildx && \
+    rm -rf /tmp/helm.tgz "/tmp/linux-${STUDIO_ARCH}"
+
+ENV LANG="C.UTF-8" \
+    LC_ALL="C.UTF-8" \
+    PATH="/root/.ghcup/bin:/root/.cabal/bin:/usr/local/bin:${PATH}"
 
 WORKDIR /workspace
 
-FROM base AS production
-
 COPY . /workspace
 
-RUN cabal update && cabal build exe:studiomcp
+RUN cabal update && \
+    cabal build all && \
+    cabal install exe:studiomcp --installdir /usr/local/bin --overwrite-policy=always
 
-# The image is used for both server and inference mode.
-# Helm and Skaffold consume the `production` target as the canonical build output.
-ENTRYPOINT ["/workspace/docker/entrypoints/start-server.sh"]
+CMD ["sleep", "infinity"]
+
+FROM os-base AS production
+
+WORKDIR /app
+
+ENV LANG="C.UTF-8" \
+    LC_ALL="C.UTF-8"
+
+COPY --from=env /usr/local/bin/studiomcp /usr/local/bin/studiomcp
+COPY --from=env /usr/local/bin/kubectl /usr/local/bin/kubectl
+COPY --from=env /usr/local/bin/mc /usr/local/bin/mc
+
+ENTRYPOINT ["studiomcp"]
+CMD ["server"]

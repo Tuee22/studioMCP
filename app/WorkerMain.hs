@@ -1,6 +1,6 @@
 module Main (main) where
 
-import StudioMCP.Tools.Process (runWorkerMode)
+import StudioMCP.Worker.Server (runWorkerMode)
 
 main :: IO ()
 main = runWorkerMode

@@ -1,34 +1,37 @@
-.PHONY: build test test-integration format lint dev repl smoke kind-create kind-delete helm-template
+.PHONY: build test test-integration repl docs validate-dag validate-fixtures cluster-up cluster-down cluster-status cluster-deploy-sidecars cluster-deploy-server
 
 build:
 	cabal build all
 
 test:
-	./scripts/test.sh
+	cabal test unit-tests
 
 test-integration:
-	./scripts/test-integration.sh
-
-format:
-	./scripts/format.sh
-
-lint:
-	./scripts/lint.sh
-
-dev:
-	./scripts/dev.sh
+	STUDIOMCP_RUN_INTEGRATION=1 cabal test integration-tests
 
 repl:
 	cabal repl
 
-kind-create:
-	./scripts/kind_create_cluster.sh
+docs:
+	cabal run studiomcp -- validate docs
 
-kind-delete:
-	./scripts/kind_delete_cluster.sh
+validate-dag:
+	cabal run studiomcp -- validate-dag examples/dags/transcode-basic.yaml
 
-helm-template:
-	./scripts/helm_template.sh
+validate-fixtures:
+	cabal run studiomcp -- dag validate-fixtures
 
-smoke:
-	./scripts/smoke-test.sh
+cluster-up:
+	cabal run studiomcp -- cluster up
+
+cluster-down:
+	cabal run studiomcp -- cluster down
+
+cluster-status:
+	cabal run studiomcp -- cluster status
+
+cluster-deploy-sidecars:
+	cabal run studiomcp -- cluster deploy sidecars
+
+cluster-deploy-server:
+	cabal run studiomcp -- cluster deploy server

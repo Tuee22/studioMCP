@@ -6,6 +6,14 @@ module StudioMCP.DAG.Provenance
   )
 where
 
+import Data.Aeson
+  ( FromJSON (parseJSON),
+    ToJSON (toJSON),
+    object,
+    withObject,
+    (.:),
+    (.=),
+  )
 import Data.Text (Text)
 
 data Provenance = Provenance
@@ -14,6 +22,21 @@ data Provenance = Provenance
     provenanceRequestedBy :: Text
   }
   deriving (Eq, Show)
+
+instance FromJSON Provenance where
+  parseJSON = withObject "Provenance" $ \obj ->
+    Provenance
+      <$> obj .: "dagName"
+      <*> obj .: "dagVersion"
+      <*> obj .: "requestedBy"
+
+instance ToJSON Provenance where
+  toJSON provenance =
+    object
+      [ "dagName" .= provenanceDagName provenance,
+        "dagVersion" .= provenanceDagVersion provenance,
+        "requestedBy" .= provenanceRequestedBy provenance
+      ]
 
 emptyProvenance :: Text -> Provenance
 emptyProvenance dagNameValue =

@@ -16,6 +16,8 @@ data AppConfig = AppConfig
   { appMode :: AppMode,
     pulsarHttpUrl :: Text,
     pulsarBinaryUrl :: Text,
-    minioEndpoint :: Text
+    minioEndpoint :: Text,
+    minioAccessKey :: Text,
+    minioSecretKey :: Text
   }
   deriving (Eq, Show)

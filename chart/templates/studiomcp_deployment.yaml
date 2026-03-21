@@ -14,6 +14,7 @@ spec:
         app.kubernetes.io/name: {{ include "studiomcp.fullname" . }}
         app.kubernetes.io/component: studiomcp
     spec:
+      serviceAccountName: {{ include "studiomcp.fullname" . }}
       containers:
         - name: studiomcp
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"

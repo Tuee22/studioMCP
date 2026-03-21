@@ -11,6 +11,8 @@
 
 Inference mode is an assistive layer for planning and operator support. It may help draft DAGs, suggest repairs, answer documentation questions, and explain summaries, but it does not own execution semantics.
 
+Current repo note: the inference runtime is implemented. `studiomcp inference` and `studiomcp-inference` expose an advisory HTTP service with `POST /advice`, `GET /healthz`, and `GET /version`, apply prompt rendering plus guardrails, and surface unavailable model-host behavior as a typed HTTP failure. Delivery status lives in [../../STUDIOMCP_DEVELOPMENT_PLAN.md](../../STUDIOMCP_DEVELOPMENT_PLAN.md#phase-14-inference-advisory-mode-with-guardrails).
+
 ## Allowed Uses
 
 - DAG drafting

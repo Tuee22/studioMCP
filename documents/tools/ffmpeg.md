@@ -17,6 +17,10 @@ FFmpeg covers a large part of the initial media-boundary surface:
 - muxing and demuxing
 - format normalization
 
+## Current Maturity
+
+The repo now includes a production Haskell FFmpeg adapter on top of the generic boundary runtime. `studiomcp validate ffmpeg-adapter` seeds the deterministic `examples/assets/audio/tone.wav` fixture, verifies reseeding repeatability, runs one successful transcode, and asserts the structured failure projection for a missing input. Delivery status is tracked in [../../STUDIOMCP_DEVELOPMENT_PLAN.md](../../STUDIOMCP_DEVELOPMENT_PLAN.md#phase-10-first-production-tool-adapter-and-deterministic-media-fixtures).
+
 ## Boundary Rule
 
 FFmpeg is always an impure process boundary. The Haskell layer must:
@@ -30,3 +34,4 @@ FFmpeg is always an impure process boundary. The Haskell layer must:
 
 - [Architecture Overview](../architecture/overview.md#architecture-overview)
 - [Testing Strategy](../development/testing_strategy.md#testing-strategy)
+- [MCP Surface Reference](../reference/mcp_surface.md#mcp-surface-reference)

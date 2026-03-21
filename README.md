@@ -50,13 +50,13 @@ Early structure:
 app/        executable entrypoints
 src/        Haskell library modules
 test/       unit and integration tests
-docker/     single Dockerfile and integration-harness assets
+docker/     single Dockerfile, compose launcher, and container assets
 chart/      Helm deployment source of truth
 kind/       local kind cluster configuration
 skaffold.yaml  Kubernetes-native development loop config
 documents/  governed architecture, development, domain, and tool docs
 examples/   sample DAGs and fixtures
-scripts/    local developer helpers
+.data/      local persistent cluster data ignored by git and Docker builds
 ```
 
 ## Documentation Suite
@@ -79,11 +79,14 @@ Current documentation categories:
 ## Inference Mode
 `inference` mode is a local reference-LLM path for DAG drafting, repair suggestions, documentation Q&A, and operator assistance. It is advisory only. It must not bypass typed validation or mutate persisted results directly.
 
+## Cluster Management CLI
+Supported operational commands are expected to live in the Haskell `studiomcp` CLI, not in checked-in shell helpers. The intended control-plane workflow is `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp <subcommand...>`. See [documents/architecture/cli_architecture.md](/Users/matthewnowak/studioMCP/documents/architecture/cli_architecture.md), [documents/reference/cli_surface.md](/Users/matthewnowak/studioMCP/documents/reference/cli_surface.md), and [documents/engineering/docker_policy.md](/Users/matthewnowak/studioMCP/documents/engineering/docker_policy.md).
+
 ## Docker Strategy
-The repo uses one Dockerfile at [docker/Dockerfile](/Users/matthewnowak/studioMCP/docker/Dockerfile). Docker is the image-build substrate, not the deployment topology source of truth. The `production` target is the canonical image target consumed by Helm and Skaffold.
+The repo uses one multi-stage Dockerfile at [docker/Dockerfile](/Users/matthewnowak/studioMCP/docker/Dockerfile). One stage is the outer development container with the Haskell toolchain and cluster-management tools. Another stage builds the runtime image for the actual MCP server, which is intended to run only inside the kind cluster.
 
 ## Kubernetes-Native Development
-The repo is Kubernetes-forward. Helm under [chart/](/Users/matthewnowak/studioMCP/chart) defines service topology, [skaffold.yaml](/Users/matthewnowak/studioMCP/skaffold.yaml) drives the local dev loop, and [kind/kind_config.yaml](/Users/matthewnowak/studioMCP/kind/kind_config.yaml) defines the local cluster. Compose at [docker/docker-compose.yaml](/Users/matthewnowak/studioMCP/docker/docker-compose.yaml) is retained only for the stateful integration harness. The canonical engineering policy is [documents/engineering/k8s_native_dev_policy.md](/Users/matthewnowak/studioMCP/documents/engineering/k8s_native_dev_policy.md).
+The repo is Kubernetes-forward. Helm under [chart/](/Users/matthewnowak/studioMCP/chart) defines service topology, [skaffold.yaml](/Users/matthewnowak/studioMCP/skaffold.yaml) remains part of the image-build and deploy toolchain, and [kind/kind_config.yaml](/Users/matthewnowak/studioMCP/kind/kind_config.yaml) defines the local cluster target. Compose at [docker/docker-compose.yaml](/Users/matthewnowak/studioMCP/docker/docker-compose.yaml) is intended to launch the outer development container and bind host `./.data/` plus the active Docker context into it. The canonical policies are [documents/engineering/k8s_native_dev_policy.md](/Users/matthewnowak/studioMCP/documents/engineering/k8s_native_dev_policy.md), [documents/engineering/docker_policy.md](/Users/matthewnowak/studioMCP/documents/engineering/docker_policy.md), and [documents/engineering/k8s_storage.md](/Users/matthewnowak/studioMCP/documents/engineering/k8s_storage.md).
 
 ## FOOS Ecosystem Survey
 The project leans on existing tools instead of rebuilding them:
@@ -97,15 +100,7 @@ The project leans on existing tools instead of rebuilding them:
 - a local LLM host such as Ollama or `llama.cpp` for inference mode
 
 ## Development Roadmap
-The implementation plan lives in [STUDIOMCP_DEVELOPMENT_PLAN.md](/Users/matthewnowak/studioMCP/STUDIOMCP_DEVELOPMENT_PLAN.md). Foundation, Haskell scaffolding, core types, and YAML DAG parsing/validation are already in place. The next sequence is:
-
-1. Pulsar integration
-2. MinIO integration
-3. Boundary execution
-4. End-to-end DAG runs
-5. MCP surface
-6. Inference mode
-7. expanded documentation and tool coverage
+The implementation plan lives in [STUDIOMCP_DEVELOPMENT_PLAN.md](/Users/matthewnowak/studioMCP/STUDIOMCP_DEVELOPMENT_PLAN.md). The current phase plan is complete through Phase 17. Remaining work now belongs to the next planning pass rather than to unfinished work inside the current roadmap.
 
 ## Status / Current Maturity
 Current state:
@@ -113,9 +108,16 @@ Current state:
 - Repository policy and development plan are in place.
 - The `documents/` suite now has an explicit standards SSoT and index.
 - Kubernetes-forward repo scaffolding is in place: one Dockerfile, one Helm chart, Skaffold config, and kind config.
-- Helm and Skaffold validation paths now run successfully in this environment.
-- Phases 0 through 3 are implemented at the scaffold level: foundation, Haskell project, core DAG types, YAML parsing, and validation.
-- `cabal build all`, `cabal test unit-tests`, and harness-backed Pulsar/MinIO integration checks are passing.
+- The no-scripts policy, outer development-container model, and local storage doctrine are now documented and materially embodied in code.
+- All phases in the current development plan are complete through Phase 17.
+- The `studiomcp` CLI now includes native `dag validate ...`, `dag validate-fixtures`, `validate docs`, `validate cluster`, `validate pulsar`, `validate minio`, `validate boundary`, `validate ffmpeg-adapter`, `validate executor`, `validate e2e`, `validate worker`, `validate mcp`, `validate inference`, `validate observability`, `cluster up`, `cluster down`, `cluster status`, `cluster deploy ...`, and `cluster storage reconcile` commands.
+- `docker/docker-compose.yaml` now launches `studiomcp-env` as the outer development container instead of a local sidecar topology.
+- A real Haskell MinIO adapter now round-trips memo objects, manifests, and summaries through the deployed MinIO sidecar and maps missing-object lookups to a stable storage failure contract.
+- A real boundary runtime now executes deterministic helper processes with stdout/stderr capture, non-zero exit projection, and enforced timeout failure mapping, and `studiomcp validate boundary` exercises that contract.
+- A real FFmpeg adapter now runs on top of the boundary runtime, seeds a deterministic WAV fixture under `examples/assets/audio/`, validates one successful transcode, and asserts structured failure output for a missing input.
+- The server, inference, and worker entrypoints are all real HTTP runtimes with live validation coverage. The worker now exposes a direct execution surface that validates DAGs, executes them synchronously, and returns persisted summary and manifest references.
+- Verified commands now include `cabal build all`, `cabal test unit-tests`, `STUDIOMCP_RUN_INTEGRATION=1 cabal test integration-tests`, `cabal run studiomcp -- validate docs`, `docker compose -f docker/docker-compose.yaml exec -T studiomcp-env studiomcp validate cluster`, `... validate pulsar`, `... validate minio`, `... validate boundary`, `... validate ffmpeg-adapter`, `... validate executor`, `... validate e2e`, `... validate worker`, `... validate mcp`, `... validate inference`, `... validate observability`, plus `helm lint`, `skaffold diagnose`, and `skaffold render`.
+- The basic outer-container cluster workflow is now verified on this machine. Persistence-backed Helm releases remain a non-default local workflow, and the shipped `values-kind.yaml` keeps MinIO and Pulsar persistence disabled, so `cluster storage reconcile` is currently a no-op under the default local values.
 
 ## Contribution Guidance
 The repo treats documentation, architecture notes, and tests as first-class artifacts. Follow the suite index at [documents/README.md](/Users/matthewnowak/studioMCP/documents/README.md) and the documentation rules at [documents/documentation_standards.md](/Users/matthewnowak/studioMCP/documents/documentation_standards.md). LLM agents may edit files and run local validation, but commits and pushes are reserved for the human user. See [AGENTS.md](/Users/matthewnowak/studioMCP/AGENTS.md) and [CLAUDE.md](/Users/matthewnowak/studioMCP/CLAUDE.md).

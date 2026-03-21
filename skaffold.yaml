@@ -15,8 +15,6 @@ build:
         manual:
           - src: "documents/**/*.md"
             dest: /workspace
-          - src: "scripts/**/*.sh"
-            dest: /workspace
           - src: "examples/**/*.yaml"
             dest: /workspace
 deploy:

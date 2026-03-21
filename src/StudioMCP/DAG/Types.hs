@@ -15,11 +15,13 @@ import Data.Aeson
   ( FromJSON (parseJSON),
     ToJSON (toJSON),
     Value (String),
+    object,
     withObject,
     withText,
     (.:),
     (.:?),
     (.!=),
+    (.=),
   )
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -79,6 +81,12 @@ instance FromJSON TimeoutPolicy where
   parseJSON = withObject "TimeoutPolicy" $ \obj ->
     TimeoutPolicy <$> obj .: "seconds"
 
+instance ToJSON TimeoutPolicy where
+  toJSON timeoutPolicy =
+    object
+      [ "seconds" .= timeoutSeconds timeoutPolicy
+      ]
+
 data NodeSpec = NodeSpec
   { nodeId :: NodeId,
     nodeKind :: NodeKind,
@@ -101,6 +109,18 @@ instance FromJSON NodeSpec where
       <*> obj .: "timeout"
       <*> obj .: "memoization"
 
+instance ToJSON NodeSpec where
+  toJSON nodeSpec =
+    object
+      [ "id" .= nodeId nodeSpec,
+        "kind" .= nodeKind nodeSpec,
+        "tool" .= nodeTool nodeSpec,
+        "inputs" .= nodeInputs nodeSpec,
+        "outputType" .= nodeOutputType nodeSpec,
+        "timeout" .= nodeTimeout nodeSpec,
+        "memoization" .= nodeMemoization nodeSpec
+      ]
+
 data DagSpec = DagSpec
   { dagName :: Text,
     dagDescription :: Maybe Text,
@@ -114,3 +134,11 @@ instance FromJSON DagSpec where
       <$> obj .: "name"
       <*> obj .:? "description"
       <*> obj .: "nodes"
+
+instance ToJSON DagSpec where
+  toJSON dagSpec =
+    object
+      [ "name" .= dagName dagSpec,
+        "description" .= dagDescription dagSpec,
+        "nodes" .= dagNodes dagSpec
+      ]
