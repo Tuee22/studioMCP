@@ -3,80 +3,107 @@
 
 **Status**: Authoritative source
 **Supersedes**: legacy `documents/development/testing-strategy.md`
-**Referenced by**: [../README.md](../README.md#documentation-suite), [../architecture/overview.md](../architecture/overview.md#canonical-follow-on-documents), [../architecture/pulsar_vs_minio.md](../architecture/pulsar_vs_minio.md#testing-implication), [../reference/cli_surface.md](../reference/cli_surface.md#cross-references)
+**Referenced by**: [../README.md](../README.md#documentation-suite), [../architecture/overview.md](../architecture/overview.md#cross-references), [../reference/cli_surface.md](../reference/cli_surface.md#cross-references), [../../STUDIOMCP_DEVELOPMENT_PLAN.md](../../STUDIOMCP_DEVELOPMENT_PLAN.md#documentation-governance)
 
-> **Purpose**: Canonical testing policy for unit tests, integration tests, and native Haskell validation entrypoints in `studioMCP`.
+> **Purpose**: Canonical testing policy for unit tests, integration tests, protocol validation, auth validation, and runtime verification in `studioMCP`.
+
+## Testing Layers
+
+`studioMCP` requires five test layers:
+
+- unit tests
+- component integration tests
+- protocol validation tests
+- cluster and operational validation tests
+- product-surface end-to-end tests
 
 ## Unit Tests
 
-Unit tests are pure Haskell tests.
-
-- mock all side effects
-- do not talk to live Pulsar
-- do not talk to live MinIO
-- do not require network access
-- do not run external tools unless a phase gate explicitly allows a deterministic local helper-process fixture
-- use pure test doubles, in-memory interpreters, and deterministic fixtures
+Unit tests remain pure Haskell tests wherever possible.
 
 Use unit tests for:
 
 - DAG validation
-- railway semantics
-- timeout-to-failure projection
 - summary construction
-- memoization-key derivation
-- failure propagation
-- execution-state transitions
-- storage-key and manifest derivation
+- timeout projection
+- memoization contracts
+- protocol state machine behavior
+- tool schema validation
+- authz policy evaluation
+- artifact governance rules
+
+Unit tests must not depend on:
+
+- live Keycloak
+- live Redis
+- live object storage
+- live browsers
 
 ## Integration Tests
 
-Integration tests exercise real boundaries.
+Integration tests exercise real boundaries and must grow beyond the current sidecar-focused runtime checks.
 
-- use real Pulsar and MinIO sidecars
-- use the same foreign or process boundary style as production code when adapters exist
-- verify that Haskell contracts survive contact with real services and processes
-- phase exit gates must prove the relevant tests are wired into a Cabal test suite and actually executed; spec-file existence alone is not enough
+Required integration categories:
 
-Expected integration coverage grows by phase and should include at least:
+- storage and messaging boundaries
+- Keycloak-backed auth
+- session-store-backed reconnect behavior
+- real MCP transport behavior over `stdio`
+- real MCP transport behavior over Streamable HTTP
+- browser and BFF flows once implemented
 
-- Pulsar connectivity and event flow
-- MinIO object creation and retrieval
-- boundary execution against deterministic helper processes and later real tools
-- full end-to-end DAG execution
-- MCP protocol and observability behavior once the server surface exists
-- advisory inference behavior and unavailable-model-host projection
+## Protocol Validation
 
-Integration note: test orchestration must migrate into the Haskell CLI command surface rather than shell wrappers.
+Protocol validation is a first-class category and must not be reduced to ad hoc REST assertions.
 
-## Native Validation Rules
+Required protocol validation includes:
 
-- do not add repository shell scripts as supported validation entrypoints
-- repeated multi-step verification paths must be exposed as Haskell CLI commands
-- when a validation command starts long-lived processes, the Haskell implementation must own startup, readiness checks, assertions, and cleanup
-- do not treat a stray manually started process as phase verification
+- lifecycle negotiation
+- tool and resource behavior
+- prompt behavior where implemented
+- wrong-order lifecycle rejection
+- malformed protocol message rejection
+- Inspector connectivity
 
-## Reproducible Environment
+## Multi-Node Validation
 
-Stateful services still require a resettable environment.
+Because sticky sessions are forbidden, the test plan must include:
 
-That environment is expected to be managed through the containerized Haskell CLI workflow. It must be allowed to:
+- reconnect to a different listener pod
+- rolling deployment behavior
+- remote session-store outage behavior
+- resumption or deterministic reinitialization behavior
 
-- stop and recreate sidecars
-- wipe volumes
-- recreate buckets and other required service state
-- reseed deterministic fixtures
-- wait for readiness before tests start
+## Security Validation
 
-## Current Implemented Coverage
+Security validation must cover:
 
-- unit coverage currently exists for DAG validation, parser-fixture automation, railway semantics, timeout mapping, memoization key normalization, success and failure summary construction plus JSON round-trip, messaging event/state/topic contracts, storage key and manifest derivation, MinIO failure mapping, and deterministic boundary success, failure, and timeout projection
-- integration coverage currently includes the outer-container cluster workflow plus real Pulsar publish and consume validation, real MinIO memo, manifest, and summary round-trips against the deployed sidecars, native boundary validation through deterministic helper processes in the outer container, real FFmpeg adapter validation with deterministic fixture reseeding plus success and failure assertions, sequential executor validation, end-to-end DAG success and failure runs, live worker-runtime validation against the deployed sidecars, MCP submission and summary validation against the deployed server, advisory inference validation against a fake model host, and observability validation for metrics, health degradation, and correlation-bearing logs
-- the remaining gaps are no longer foundational test categories; they are future coverage expansions tied to new tools or new cluster commands
+- wrong-issuer rejection
+- wrong-audience rejection
+- cross-tenant access denial
+- service-account scope enforcement
+- no token passthrough behavior
+- forbidden permanent media deletion
+
+## Browser And BFF Validation
+
+Once the BFF and browser surface exist, end-to-end tests must cover:
+
+- login
+- upload
+- run submission
+- progress observation
+- artifact download
+- chat-assisted workflow operations
+
+## Current Repo Note
+
+The current repo already has strong foundational unit and integration coverage for execution and sidecar behavior. Its current `validate mcp` coverage, however, validates the legacy custom DAG HTTP surface rather than a true MCP protocol surface.
 
 ## Cross-References
 
-- [Local Development](local_dev.md#local-development)
-- [Pulsar vs MinIO](../architecture/pulsar_vs_minio.md#pulsar-vs-minio)
-- [Kubernetes-Native Development Policy](../engineering/k8s_native_dev_policy.md#kubernetes-native-development-policy)
-- [CLI Surface Reference](../reference/cli_surface.md#cli-surface-reference)
+- [Architecture Overview](../architecture/overview.md#architecture-overview)
+- [MCP Protocol Architecture](../architecture/mcp_protocol_architecture.md#mcp-protocol-architecture)
+- [Session Scaling](../engineering/session_scaling.md#session-scaling)
+- [Security Model](../engineering/security_model.md#security-model)
+- [Web Portal Surface](../reference/web_portal_surface.md#web-portal-surface)

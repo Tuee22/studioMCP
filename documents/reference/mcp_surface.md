@@ -3,80 +3,87 @@
 
 **Status**: Authoritative source
 **Supersedes**: N/A
-**Referenced by**: [../README.md](../README.md#documentation-suite), [../operations/runbook_local_debugging.md](../operations/runbook_local_debugging.md#cross-references), [../reference/cli_surface.md](../reference/cli_surface.md#cross-references), [../adr/0001_mcp_transport.md](../adr/0001_mcp_transport.md#cross-references), [../../STUDIOMCP_DEVELOPMENT_PLAN.md](../../STUDIOMCP_DEVELOPMENT_PLAN.md#phase-13-mcp-server-transport-handlers-and-protocol-level-tests)
+**Referenced by**: [../README.md](../README.md#documentation-suite), [../operations/runbook_local_debugging.md](../operations/runbook_local_debugging.md#cross-references), [../reference/cli_surface.md](../reference/cli_surface.md#cross-references), [../architecture/server_mode.md](../architecture/server_mode.md#cross-references), [../../STUDIOMCP_DEVELOPMENT_PLAN.md](../../STUDIOMCP_DEVELOPMENT_PLAN.md#documentation-governance)
 
-> **Purpose**: Canonical reference for the current public `studioMCP` control surface, including the implemented HTTP server, advisory inference surface, and the remaining runtime limitations.
+> **Purpose**: Canonical reference for the target public MCP-facing surface in `studioMCP`, including target transports, capability scope, operational endpoints, and the current implementation gap.
 
-## Current Public Surface
+## Current Repo Status
 
-The repo currently exposes these user-invokable entrypoints:
+The current repository does not yet expose a true MCP public surface.
 
-- `studiomcp server`
-- `studiomcp inference`
-- `studiomcp worker`
-- `studiomcp validate worker`
-- `studiomcp validate mcp`
-- `studiomcp validate inference`
-- `studiomcp validate observability`
-- `studiomcp-server`
-- `studiomcp-inference`
-- `studiomcp-worker`
+Implemented today:
 
-## Current Behavior
+- a custom DAG-oriented HTTP API on `studiomcp server`
+- a direct execution HTTP worker surface
+- an advisory inference HTTP surface
+- admin and observability endpoints
 
-### Implemented Today
+Current limitation:
 
-- `studiomcp server` starts the implemented HTTP control surface on port `3000`
-- that server exposes `POST /runs`, `GET /runs/:id/summary`, `GET /healthz`, `GET /version`, and `GET /metrics`
-- valid DAG submission returns a run identifier in `RunRunning` state and summary retrieval resolves once the persisted summary exists
-- `studiomcp validate mcp` deploys the server into kind, verifies invalid and valid submissions, verifies summary retrieval, and asserts `/healthz`, `/version`, and `/metrics`
-- `studiomcp worker` starts a direct execution HTTP service with `POST /execute`, `GET /healthz`, and `GET /version`
-- `studiomcp validate worker` verifies invalid and valid DAG execution against the real worker runtime and asserts the health and version surface
-- `studiomcp inference` starts an advisory HTTP service with `POST /advice`, `GET /healthz`, and `GET /version`
-- `studiomcp validate inference` verifies a successful advisory request against a fake model host and verifies typed failure behavior when the model host is unavailable
-- `studiomcp validate observability` verifies metrics growth, correlated log output, and degraded `/healthz` behavior when a dependency is made unavailable
+- the current `server` endpoint family is not standards-compliant MCP and should be treated as a migration surface only
 
-### Current Limitations
+## Target Public MCP Surface
 
-- the current server surface is HTTP-based only; an additional `stdio` transport remains optional future work
-- protocol validation currently uses repo-owned HTTP client assertions rather than a third-party MCP client library
+The target public MCP surface is:
 
-## CLI Reference
+- `stdio` for local development and local tooling
+- Streamable HTTP for remote clients and BFF mediation
+- a single MCP endpoint for remote protocol traffic
+- separate operational endpoints for `/healthz`, `/version`, and `/metrics`
 
-### `studiomcp server`
+## Capability Scope
 
-- starts the real HTTP server on port `3000`
-- exposes the current control and admin routes used by the live validation commands
+Release-priority capability groups:
 
-### `studiomcp inference`
+- workflow tools
+- artifact mediation tools
+- run and artifact resources
+- selected prompts for DAG planning and repair
 
-- starts the advisory HTTP inference service
-- calls the configured reference model host and applies prompt plus guardrail handling
+The exact catalog lives in [mcp_tool_catalog.md](mcp_tool_catalog.md#mcp-tool-catalog).
 
-### `studiomcp worker`
+## Current Versus Target
 
-- starts the real direct execution worker service on port `3002`
-- validates DAGs, executes them synchronously against the configured adapters and sidecars, and returns the persisted summary and manifest references
+```mermaid
+flowchart TB
+  Legacy[Legacy /runs Surface] --> Target[Target MCP Surface]
+  Target --> Tools[Tools]
+  Target --> Resources[Resources]
+  Target --> Prompts[Prompts]
+  Target --> Ops[Health Version Metrics]
+```
 
-## Transport Decision
+## Operational Endpoints
 
-The current target and implementation are:
+Operational endpoints remain out of band from MCP:
 
-- primary transport: HTTP on port `3000`
-- optional secondary transport: `stdio` later if it proves useful
-- same process admin surface for `/healthz`, `/metrics`, and `/version`
+- `GET /healthz`
+- `GET /version`
+- `GET /metrics`
 
-That decision is recorded in [../adr/0001_mcp_transport.md](../adr/0001_mcp_transport.md#adr-0001-mcp-transport).
+They exist for operational control, not as a substitute automation contract.
 
-Implementation note:
+## Auth Expectations
 
-- the transport and observability phases are complete in the current plan
-- the native `studiomcp validate mcp` and `studiomcp validate observability` commands own deployment, readiness checks, assertions, and cleanup for their target surfaces
+- remote MCP access is OAuth-protected
+- browser traffic reaches MCP through the BFF rather than ad hoc direct browser automation
+- external MCP clients authenticate directly through the MCP auth model
+- tenant scoping is enforced on every capability
+
+## Migration Rule
+
+The existing `validate mcp` command must eventually split into:
+
+- validation of the legacy migration surface while it still exists
+- validation of the real MCP `stdio` surface
+- validation of the real remote HTTP MCP surface
+
+New public feature work should target the MCP surface first.
 
 ## Cross-References
 
-- [ADR 0001: MCP Transport](../adr/0001_mcp_transport.md#adr-0001-mcp-transport)
-- [CLI Surface Reference](../reference/cli_surface.md#cli-surface-reference)
+- [MCP Protocol Architecture](../architecture/mcp_protocol_architecture.md#mcp-protocol-architecture)
 - [Server Mode](../architecture/server_mode.md#server-mode)
-- [Inference Mode](../architecture/inference_mode.md#inference-mode)
-- [Local Debugging Runbook](../operations/runbook_local_debugging.md#local-debugging-runbook)
+- [MCP Tool Catalog](mcp_tool_catalog.md#mcp-tool-catalog)
+- [Security Model](../engineering/security_model.md#security-model)
+- [Web Portal Surface](web_portal_surface.md#web-portal-surface)

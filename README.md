@@ -1,7 +1,7 @@
 # studioMCP
 
 ## Project Vision
-`studioMCP` is a Haskell-first MCP server for pure DAG-based studio workflows. It is intended to orchestrate free/open-source audio, image, and video tooling behind a typed execution model that makes timeouts, failures, memoization, and summaries explicit.
+`studioMCP` is a Haskell-first MCP platform for DAG-based studio workflows. The repository already contains the typed execution foundations, but the current public server surface is still being migrated from a custom DAG HTTP API to a standards-compliant MCP server.
 
 ## Why This Could Replace Large Parts of DAW / Photo / Video Toolchains
 Most studio workflows are long chains of deterministic transforms wrapped around a smaller number of impure boundaries. `studioMCP` treats those chains as typed DAGs instead of opaque editor sessions. That creates room for repeatability, memoization, better summaries, and safer automation.
@@ -15,7 +15,7 @@ Haskell is the ownership layer for:
 - summary construction
 - memoization-key derivation
 - storage and messaging contracts
-- the MCP-facing control plane
+- the MCP-facing protocol and execution plane
 
 The point is not novelty. The point is to make the orchestration semantics hard to accidentally weaken.
 
@@ -71,7 +71,8 @@ Current documentation categories:
 - `operations/`
 - `reference/`
 - `tools/`
-- `adr/`
+
+The governed suite is current-state declarative documentation. Historical decision trails live in git history, not an ADR folder.
 
 ## Server Mode
 `server` mode owns DAG submission, validation, execution orchestration, run-state progression, and summary retrieval. This is the authoritative execution path.
@@ -115,7 +116,7 @@ Current state:
 - A real Haskell MinIO adapter now round-trips memo objects, manifests, and summaries through the deployed MinIO sidecar and maps missing-object lookups to a stable storage failure contract.
 - A real boundary runtime now executes deterministic helper processes with stdout/stderr capture, non-zero exit projection, and enforced timeout failure mapping, and `studiomcp validate boundary` exercises that contract.
 - A real FFmpeg adapter now runs on top of the boundary runtime, seeds a deterministic WAV fixture under `examples/assets/audio/`, validates one successful transcode, and asserts structured failure output for a missing input.
-- The server, inference, and worker entrypoints are all real HTTP runtimes with live validation coverage. The worker now exposes a direct execution surface that validates DAGs, executes them synchronously, and returns persisted summary and manifest references.
+- The server, inference, and worker entrypoints are all real HTTP runtimes with live validation coverage. The current `server` runtime still exposes a legacy custom DAG HTTP surface and is planned to migrate to a proper MCP protocol surface under the revised development plan.
 - Verified commands now include `cabal build all`, `cabal test unit-tests`, `STUDIOMCP_RUN_INTEGRATION=1 cabal test integration-tests`, `cabal run studiomcp -- validate docs`, `docker compose -f docker/docker-compose.yaml exec -T studiomcp-env studiomcp validate cluster`, `... validate pulsar`, `... validate minio`, `... validate boundary`, `... validate ffmpeg-adapter`, `... validate executor`, `... validate e2e`, `... validate worker`, `... validate mcp`, `... validate inference`, `... validate observability`, plus `helm lint`, `skaffold diagnose`, and `skaffold render`.
 - The basic outer-container cluster workflow is now verified on this machine. Persistence-backed Helm releases remain a non-default local workflow, and the shipped `values-kind.yaml` keeps MinIO and Pulsar persistence disabled, so `cluster storage reconcile` is currently a no-op under the default local values.
 

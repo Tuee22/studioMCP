@@ -36,6 +36,10 @@ The codebase currently implements this subset:
 - `studiomcp cluster deploy server`
 - `studiomcp cluster storage reconcile`
 
+Current note:
+
+- `studiomcp validate mcp` currently validates the legacy custom DAG HTTP server surface, not a standards-compliant MCP surface.
+
 ## Required Target Surface
 
 The supported command surface must converge on one Haskell CLI with at least these families:
@@ -62,6 +66,9 @@ The supported command surface must converge on one Haskell CLI with at least the
 - `studiomcp validate inference`
 - `studiomcp validate integration`
 - `studiomcp validate mcp`
+- `studiomcp validate mcp-stdio`
+- `studiomcp validate mcp-http`
+- `studiomcp validate mcp-auth`
 - `studiomcp validate observability`
 
 The exact final taxonomy may evolve, but the repository must not reintroduce shell wrappers for these responsibilities.
@@ -76,7 +83,7 @@ docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp <subco
 
 ## Current Repo Note
 
-This reference intentionally describes both the implemented surface and the remaining target state. The command surface now covers cluster lifecycle, DAG validation, documentation validation, executor and end-to-end validation, worker-runtime validation, Pulsar, MinIO, boundary, FFmpeg-adapter, MCP, inference, and observability validation. Under the shipped values, `cluster storage reconcile` is currently a no-op because sidecar persistence is disabled by default. The remaining planned surface is limited to commands such as `cluster reset`, storage deletion, and any consolidated validation aliases the next plan decides to add.
+This reference intentionally describes both the implemented surface and the remaining target state. The current command surface covers cluster lifecycle, DAG validation, documentation validation, executor and end-to-end validation, worker-runtime validation, Pulsar, MinIO, boundary, FFmpeg-adapter, legacy MCP-surface validation, inference, and observability validation. The remaining target surface includes real MCP transport and auth validation commands in addition to future ergonomics such as `cluster reset` and controlled storage deletion workflows.
 
 ## Cross-References
 

@@ -1,382 +1,188 @@
-# COMPLETE KEYCLOAK-CENTRIC AUTH ARCHITECTURE GUIDE  
-## Multi-Tenant SaaS + Web Portal + MCP Server (Definitive Version)
+# File: documents/architecture/multi_tenant_saas_mcp_auth_architecture.md
+# Multi-Tenant SaaS MCP Auth Architecture
 
----
+**Status**: Authoritative source
+**Supersedes**: ad hoc auth notes and the earlier non-standard version of this file
+**Referenced by**: [overview.md](overview.md#canonical-follow-on-documents), [server_mode.md](server_mode.md#cross-references), [../engineering/security_model.md](../engineering/security_model.md#cross-references), [../reference/web_portal_surface.md](../reference/web_portal_surface.md#cross-references), [../../STUDIOMCP_DEVELOPMENT_PLAN.md](../../STUDIOMCP_DEVELOPMENT_PLAN.md#public-topology-baseline)
 
-# 1. Overview
+> **Purpose**: Canonical architecture for the publicly facing `studioMCP` service, including browser clients, external MCP clients, the BFF, Keycloak-based auth, tenant boundaries, and network topology.
 
-This guide defines a **complete, production-grade authentication and authorization architecture** for:
+## Summary
 
-- Multi-tenant SaaS
-- Web portal (browser + backend)
-- MCP server (OAuth-protected)
-- External MCP clients
-- Service accounts
-- Third-party integrations
+This document defines the target public topology for `studioMCP` as a secure multi-tenant SaaS product.
 
-It uses **Keycloak as the canonical identity provider and authorization server**.
+Scope boundary:
 
----
+- this document defines actors, trust relationships, and network topology
+- detailed enforcement rules live in [../engineering/security_model.md](../engineering/security_model.md#security-model)
+- remote session externalization rules live in [../engineering/session_scaling.md](../engineering/session_scaling.md#session-scaling)
 
-# 2. Core Identity Model
+The system has three first-class client classes:
 
-👉 **Keycloak is the ONLY issuer your system trusts**
+- browser users
+- external MCP clients
+- service accounts
 
-Your system components (Web API + MCP server) trust:
-- Keycloak-issued tokens ONLY
+All three authenticate through Keycloak-issued credentials and are authorized against tenant-aware server-side policy.
 
-They DO NOT trust tokens directly from:
-- Google
-- GitHub
-- Microsoft
-- any other public OAuth provider
+## Core Identity Rule
 
----
+`studioMCP` trusts only Keycloak-issued tokens for its public auth boundary.
 
-# 3. Identity Brokering (Important Clarification)
+External identity providers may be brokered through Keycloak, but the MCP server and BFF do not trust raw upstream provider tokens directly.
 
-Keycloak acts as an **identity broker**.
-
-This means:
-
-👉 Users may authenticate using:
-- Username/password (local Keycloak users)
-- ANY public OAuth provider (Google, GitHub, Microsoft, etc.)
-- Enterprise SSO (OIDC/SAML)
-
-BUT:
-
-👉 Your system ALWAYS receives:
-- **Keycloak-issued tokens**
-- NEVER raw tokens from external providers
-
----
-
-## 🔁 Generalized Flow (Any Public OAuth Provider)
-
-```mermaid
-sequenceDiagram
-    participant Browser
-    participant Keycloak
-    participant External as External OAuth Provider
-
-    Browser->>Keycloak: /authorize
-    Keycloak-->>Browser: show login options
-    Browser->>Keycloak: choose external provider
-    Keycloak->>External: redirect to provider
-    External-->>Keycloak: auth result
-    Keycloak-->>Browser: redirect with code
-```
-
-👉 This applies to ANY provider  
-(not just GitHub — GitHub is just one example)
-
----
-
-# 4. Critical Nuance (Credentials Handling)
-
-## 🔐 ALL credentials go through Keycloak
-
-This includes:
-- username/password
-- MFA
-- social login
-- enterprise login
-
----
-
-## ✅ Correct Pattern
-
-```mermaid
-sequenceDiagram
-    Browser->>BFF: open app
-    BFF-->>Browser: redirect to Keycloak
-    Browser->>Keycloak: login page
-    User->>Keycloak: enter credentials
-    Keycloak-->>Browser: redirect with code
-    Browser->>BFF: callback
-    BFF->>Keycloak: exchange code
-```
-
-👉 Your app NEVER sees:
-- passwords
-- external provider tokens
-
----
-
-## ❌ Incorrect Pattern
-
-```mermaid
-sequenceDiagram
-    Browser->>App: send credentials
-    App->>Keycloak: token request
-```
-
-❌ Avoid this:
-- insecure
-- deprecated flows
-- breaks architecture
-
----
-
-# 5. High-Level Architecture
+## Public Topology
 
 ```mermaid
 flowchart TB
-    Browser --> BFF
-    Browser --> MCP
-    MCPClient --> MCP
-    ServiceClient --> MCP
-
-    BFF --> Keycloak
-    MCP --> Keycloak
-    WebAPI --> Keycloak
-
-    BFF --> WebAPI
-    BFF --> MCP
-
-    MCP --> Policy
-    WebAPI --> Policy
+  Browser[Browser] --> BFF[BFF]
+  Browser --> Keycloak[Keycloak]
+  External[External MCP Client] --> MCP[MCP Listener]
+  Service[Service Account Client] --> MCP
+  BFF --> Keycloak
+  BFF --> MCP
+  MCP --> Keycloak
+  MCP --> Redis[HA Session Store]
+  MCP --> Runtime[Execution Runtime]
+  Runtime --> Storage[Tenant S3 Or MinIO]
+  Keycloak --> Pg[Dedicated Postgres]
 ```
 
----
+## Current Repo Note
 
-# 6. Keycloak Deployment (Kubernetes)
+This topology is a target-state document. The current repo does not yet implement the full public auth boundary, BFF, or remote MCP session topology described here.
 
-- Deploy via official Helm chart
-- Use external Postgres
-- TLS via ingress
-- Horizontal scaling
+## Client Classes
 
----
+### Browser User
 
-# 7. Development & Test Environments
+The browser interacts with:
 
-## 🔧 Key requirement: Seed Keycloak
+- the BFF for application workflows
+- Keycloak for authentication flows
+- presigned storage URLs where the BFF authorizes them
 
-Your dev/test environments must include:
+The browser does not hold direct long-lived credentials for the execution plane.
 
-- predefined realms
-- clients (web, MCP, service)
+### External MCP Client
+
+An external MCP client talks to the remote MCP server over Streamable HTTP and authenticates through OAuth with PKCE.
+
+This is the standards-compliant machine-facing integration surface.
+
+### Service Account
+
+Service accounts use confidential client credentials for tightly scoped automation paths.
+
+They must remain:
+
+- tenant-scoped or explicitly platform-scoped
+- auditable
+- narrower than human admin powers by default
+
+## BFF Role
+
+The BFF exists to serve browser product workflows.
+
+It is responsible for:
+
+- browser session management
+- user-facing API composition
+- upload and download orchestration
+- chat surface orchestration
+- calling MCP on behalf of the authenticated user
+
+It is not a replacement for the MCP server and should not invent a second execution semantics model.
+
+## Authorization Pipeline
+
+```mermaid
+flowchart TB
+  Token[Bearer Token] --> Verify[Verify Signature And Issuer]
+  Verify --> Audience[Validate Audience]
+  Audience --> Subject[Resolve Subject]
+  Subject --> Tenant[Resolve Tenant]
+  Tenant --> Scope[Check Scope And Roles]
+  Scope --> Policy[Apply Server Policy]
+  Policy --> Decision[Allow Or Deny]
+```
+
+## Token Rules
+
+- short-lived access tokens
+- refresh token rotation where applicable
+- strict audience validation
+- explicit tenant claims or resolvable tenant membership
+- no token passthrough to downstream services
+
+If the MCP server needs to call other protected resources, it must acquire downstream tokens under an explicit server-side client identity. It must not forward the inbound client token.
+
+## Tenant Rules
+
+- every mutable or tenant-private request resolves to exactly one tenant context
+- tenant membership is enforced server-side
+- tool, resource, prompt, and artifact access all inherit tenant constraints
+- platform operators are subject to explicit break-glass policy, not hidden superuser assumptions
+
+## Session Rules
+
+Remote session stickiness is forbidden as a scaling requirement.
+
+The public deployment must allow:
+
+- multiple MCP listener pods
+- reconnection to a different pod
+- shared session and resumability metadata
+- horizontal scaling without load-balancer affinity
+
+The session-store specifics live in [../engineering/session_scaling.md](../engineering/session_scaling.md#session-scaling).
+
+## Keycloak Deployment Model
+
+Keycloak may run on the Kubernetes cluster alongside the rest of the platform.
+
+The deployment baseline is:
+
+- dedicated Keycloak deployment
+- dedicated PostgreSQL instance or cluster for Keycloak only
+- TLS at ingress
+- realm and client bootstrap automation
+- no sharing of the Keycloak database with unrelated platform services
+
+For Helm-first deployments, the documented baseline is:
+
+- `codecentric/keycloakx` for Keycloak packaging
+- a dedicated PostgreSQL chart or managed PostgreSQL instance for Keycloak persistence
+
+The repo must keep the deployment packaging separate from the logical auth model. Chart choice is operational packaging, not the definition of the security boundary.
+
+## Realm Seeding Rule
+
+Development, test, and cluster validation environments must seed Keycloak consistently.
+
+Seeded artifacts include:
+
+- realms
+- clients
 - roles
+- scopes
 - test users
 - tenant mappings
 
-👉 This is CRITICAL because:
+Without deterministic seeding, auth validation in this repo is not credible.
 
-Keycloak is not just auth — it defines:
-- identities
-- roles
-- scopes
-- client config
+## Hard Security Rules
 
----
+- the browser never sends passwords to the BFF for resource-owner-password style login
+- the BFF and MCP server accept only Keycloak-issued credentials
+- invalid tokens return `401`
+- authenticated but unauthorized requests return `403`
+- external provider access tokens are not accepted as substitute bearer tokens for `studioMCP`
 
-## Recommended seeding approach
+## Cross-References
 
-- Use realm export JSON
-- Load on startup or via init job
-- Version control your auth config
-
----
-
-## Why this matters
-
-Without seeding:
-- dev is inconsistent
-- auth flows break
-- roles/scopes missing
-- MCP auth testing becomes unreliable
-
----
-
-## Dev vs Prod
-
-| Environment | Behavior |
-|------------|--------|
-| Dev/Test | Full OAuth lifecycle + seeded data |
-| Prod | Same flows + real providers |
-
-👉 No "fake auth" anywhere
-
----
-
-# 8. OAuth Lifecycle (All Environments)
-
-```mermaid
-sequenceDiagram
-    Client->>Keycloak: /authorize (PKCE)
-    Keycloak-->>Client: code
-    Client->>Keycloak: /token
-    Keycloak-->>Client: access + refresh
-    Client->>Resource: Bearer token
-```
-
----
-
-# 9. Token Model
-
-## Access Token (JWT)
-
-```json
-{
-  "iss": "https://auth.example.com",
-  "sub": "user_123",
-  "aud": "mcp-server",
-  "tenant_id": "tenant_acme",
-  "scope": "mcp:tool:run",
-  "exp": 123456
-}
-```
-
-- short-lived
-- audience-bound
-
-## Refresh Token
-- opaque
-- rotated
-- stored securely
-
----
-
-# 10. Authorization Model
-
-```
-ALLOW =
-  valid_token
-  AND correct_audience
-  AND tenant_membership
-  AND scope_valid
-  AND policy_valid
-```
-
----
-
-# 11. Authorization Pipeline
-
-```mermaid
-flowchart LR
-    Request --> ParseToken
-    ParseToken --> VerifyJWT
-    VerifyJWT --> ValidateAudience
-    ValidateAudience --> ResolveTenant
-    ResolveTenant --> Membership
-    Membership --> ScopeCheck
-    ScopeCheck --> Policy
-    Policy --> Decision
-```
-
----
-
-# 12. Auth State Machine
-
-```mermaid
-stateDiagram-v2
-    [*] --> Unauthenticated
-
-    Unauthenticated --> Discover
-    Discover --> Keycloak
-
-    Keycloak --> AuthFlow
-    AuthFlow --> Token
-
-    Token --> Active
-    Active --> Valid
-    Active --> Expired
-    Active --> Invalid
-
-    Valid --> Authorized
-    Valid --> Forbidden
-
-    Expired --> Refresh
-    Refresh --> Token
-```
-
----
-
-# 13. MCP Server Rules
-
-- Require Bearer tokens
-- Validate audience strictly
-- Return:
-  - 401 if invalid
-  - 403 if unauthorized
-- Never accept external provider tokens
-
----
-
-# 14. Multi-Tenant Model
-
-```mermaid
-flowchart TB
-    Token --> tenant_id
-    tenant_id --> Membership
-    Membership --> Policy
-```
-
-Rules:
-- tenant_id required
-- membership enforced server-side
-
----
-
-# 15. Service Accounts
-
-- Keycloak confidential clients
-- client_credentials flow
-- tenant-scoped
-- auditable
-
----
-
-# 16. Third-Party Integrations
-
-```mermaid
-sequenceDiagram
-    Backend->>ExternalAPI: OAuth
-    Backend->>Vault: store tokens
-```
-
-Rules:
-- do not pass MCP tokens
-- store external tokens separately
-
----
-
-# 17. Audit
-
-Log:
-- subject
-- tenant
-- action
-- decision
-
-Never log:
-- tokens
-- credentials
-
----
-
-# 18. Golden Rules
-
-1. Keycloak is the ONLY identity authority  
-2. ALL authentication goes through Keycloak  
-3. This includes username/password AND ANY public OAuth provider  
-4. Your system trusts ONLY Keycloak tokens  
-5. External providers are upstream identity sources ONLY  
-6. Dev/test MUST seed Keycloak config  
-7. Always validate audience  
-8. Always enforce tenant membership  
-9. No token passthrough  
-10. Use real OAuth flows everywhere  
-
----
-
-# FINAL SUMMARY
-
-👉 Keycloak = identity + token issuer  
-👉 MCP = protected resource server  
-👉 SaaS = tenant + policy layer  
-
-👉 ALL login methods (local OR external) are normalized through Keycloak  
-👉 Dev/test environments must replicate this via seeded Keycloak configuration  
+- [Architecture Overview](overview.md#architecture-overview)
+- [MCP Protocol Architecture](mcp_protocol_architecture.md#mcp-protocol-architecture)
+- [Security Model](../engineering/security_model.md#security-model)
+- [Session Scaling](../engineering/session_scaling.md#session-scaling)
+- [Web Portal Surface](../reference/web_portal_surface.md#web-portal-surface)

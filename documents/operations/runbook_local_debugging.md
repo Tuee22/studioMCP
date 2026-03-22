@@ -3,7 +3,7 @@
 
 **Status**: Authoritative source
 **Supersedes**: N/A
-**Referenced by**: [../README.md](../README.md#documentation-suite), [../tools/minio.md](../tools/minio.md#cross-references), [../tools/pulsar.md](../tools/pulsar.md#cross-references), [../reference/cli_surface.md](../reference/cli_surface.md#cross-references), [../../STUDIOMCP_DEVELOPMENT_PLAN.md](../../STUDIOMCP_DEVELOPMENT_PLAN.md#phase-16-complete-governed-documentation-suite-runbooks-and-adrs)
+**Referenced by**: [../README.md](../README.md#documentation-suite), [../tools/minio.md](../tools/minio.md#cross-references), [../tools/pulsar.md](../tools/pulsar.md#cross-references), [../reference/cli_surface.md](../reference/cli_surface.md#cross-references), [../../STUDIOMCP_DEVELOPMENT_PLAN.md](../../STUDIOMCP_DEVELOPMENT_PLAN.md#documentation-governance)
 
 > **Purpose**: Canonical runbook for debugging the local `studioMCP` repository state through the containerized native CLI workflow.
 
@@ -14,7 +14,7 @@ This runbook covers the repo as it exists today:
 - Haskell build and test validation
 - DAG validation
 - Docker and kind access validation
-- live MCP, inference, and observability validation
+- live legacy MCP-surface, inference, and observability validation
 - Helm and Skaffold render validation
 - documentation validation
 
@@ -38,6 +38,10 @@ Run these in roughly this order when debugging repo state:
 12. `helm lint chart -f chart/values.yaml -f chart/values-kind.yaml`
 13. `skaffold diagnose --yaml-only --profile kind`
 14. `skaffold render --offline --profile kind --digest-source=tag`
+
+Current note:
+
+- `validate mcp` currently validates the legacy custom DAG HTTP surface rather than a standards-compliant MCP surface.
 
 ## Current Outer-Container Workflow
 

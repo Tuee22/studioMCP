@@ -15,6 +15,13 @@
 - Supporting docs use `**Status**: Reference only` and link back to the canonical source.
 - When architecture or policy changes, update the authoritative document first and then update dependent links.
 
+### Current-State Declarative Docs Only
+- `documents/` describes the architecture, rules, and public contracts that are currently authoritative for the repo.
+- Do not add ADRs, decision logs, or other history-oriented design records to `documents/`.
+- If a rule is active, state it directly in the owning authoritative document.
+- If a rule changes, update or replace the owning document instead of preserving parallel historical decision files.
+- Git history is the chronology and rationale trail.
+
 ### Link, Do Not Copy
 - Do not duplicate long explanations, standards, diagrams, or procedures.
 - Brief reminders are acceptable only when they immediately link back to the SSoT.
@@ -36,9 +43,9 @@ The repository uses `documents/`, not `docs/`.
 - `documents/operations/`: runbooks and operability procedures
 - `documents/reference/`: public-surface and API-style reference material
 - `documents/tools/`: tool and sidecar integration notes
-- `documents/adr/`: architecture decision records
 
 The navigational index for the suite is [README.md](README.md#studiomcp-documentation-index).
+There is no ADR category in the governed suite. Historical decision trails belong in git history and code review, not in `documents/`.
 
 ## 3. Naming Rules
 
@@ -119,6 +126,7 @@ Validation checklist for each Mermaid diagram:
 
 - [ ] Update the authoritative source first.
 - [ ] Update dependent links and overlays.
+- [ ] Retire replaced historical or duplicate docs instead of creating decision-record side files.
 - [ ] Validate Mermaid diagrams after edits.
 - [ ] Keep `../README.md` and this suite index aligned when the structure changes.
 - [ ] Keep the suite index aligned when canonical documents are added, renamed, or retired.

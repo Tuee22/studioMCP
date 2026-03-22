@@ -9,7 +9,13 @@
 
 ## Role
 
-Pulsar carries:
+This document is the canonical Pulsar integration note, but it does not redefine the higher-level messaging and storage split.
+
+Canonical role definitions live in:
+
+- [Pulsar vs MinIO](../architecture/pulsar_vs_minio.md#pulsar-vs-minio)
+
+Within the current repo, Pulsar carries:
 
 - run submission events
 - node lifecycle transitions
@@ -43,7 +49,7 @@ HA deployment is the preferred mode where possible. See [../engineering/k8s_stor
 
 ## Current Maturity
 
-The repo currently includes Pulsar in the deployment topology, pure execution-event contracts, stable topic naming, a tested execution-state transition model, and a real Haskell wrapper that validates publish, consume, ordering, invalid-namespace failure behavior, and end-to-end run lifecycle behavior against the deployed cluster. The deployment now uses the official Apache Pulsar Helm chart in HA mode. Broader messaging features beyond the current runtime remain future expansion work. Delivery status is tracked in [../../STUDIOMCP_DEVELOPMENT_PLAN.md](../../STUDIOMCP_DEVELOPMENT_PLAN.md#phase-6-real-pulsar-adapter-and-lifecycle-integration).
+The repo currently includes Pulsar in the deployment topology, pure execution-event contracts, stable topic naming, a tested execution-state transition model, and a real Haskell wrapper that validates publish, consume, ordering, invalid-namespace failure behavior, and end-to-end run lifecycle behavior against the deployed cluster. The deployment now uses the official Apache Pulsar Helm chart in HA mode. Broader messaging features beyond the current runtime remain future expansion work. Current implementation status is tracked in [../../STUDIOMCP_DEVELOPMENT_PLAN.md](../../STUDIOMCP_DEVELOPMENT_PLAN.md#current-repo-assessment-against-this-plan).
 
 ## Storage Policy
 

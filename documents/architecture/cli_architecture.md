@@ -76,7 +76,7 @@ The exact spellings live in the CLI reference document, but the architectural sp
 
 ## Current Repo Note
 
-The implemented CLI surface now covers DAG validation, cluster lifecycle, sidecar deployment, server deployment, storage reconciliation, executor and end-to-end validation, MCP validation, inference validation, and observability validation. Future CLI work is incremental rather than foundational and is limited to commands such as `cluster reset`, storage deletion, or any further ergonomics the next plan chooses to add.
+The implemented CLI surface already covers DAG validation, cluster lifecycle, sidecar deployment, server deployment, storage reconciliation, executor and end-to-end validation, legacy MCP-surface validation, inference validation, and observability validation. Under the revised MCP-first plan, the CLI must grow new validation commands for true MCP `stdio`, Streamable HTTP, auth, and horizontal-session behavior.
 
 ## Cross-References
 

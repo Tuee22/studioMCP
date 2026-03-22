@@ -33,16 +33,29 @@ validateDocsCommand = do
   let requiredFiles =
         [ "documents/README.md"
         , "documents/documentation_standards.md"
+        , "documents/architecture/overview.md"
+        , "documents/architecture/mcp_protocol_architecture.md"
         , "documents/architecture/cli_architecture.md"
+        , "documents/architecture/server_mode.md"
+        , "documents/architecture/multi_tenant_saas_mcp_auth_architecture.md"
+        , "documents/architecture/artifact_storage_architecture.md"
         , "documents/architecture/parallel_scheduling.md"
+        , "documents/engineering/security_model.md"
+        , "documents/engineering/session_scaling.md"
         , "documents/engineering/docker_policy.md"
         , "documents/engineering/k8s_native_dev_policy.md"
         , "documents/engineering/k8s_storage.md"
+        , "documents/development/testing_strategy.md"
         , "documents/operations/runbook_local_debugging.md"
+        , "documents/operations/keycloak_realm_bootstrap_runbook.md"
         , "documents/reference/cli_surface.md"
         , "documents/reference/mcp_surface.md"
+        , "documents/reference/mcp_tool_catalog.md"
+        , "documents/reference/web_portal_surface.md"
         , "documents/adr/0001_mcp_transport.md"
         , "documents/adr/0002_parallel_scheduling.md"
+        , "documents/adr/0003_session_externalization.md"
+        , "documents/adr/0004_non_destructive_artifact_policy.md"
         ]
   requiredProblems <- fmap concat $
     forM requiredFiles $ \path -> do
@@ -77,6 +90,7 @@ validateDocText path content =
     <> statusProblems
     <> referenceProblems
     <> crossRefProblems
+    <> mermaidProblems
   where
     linesOfText = Text.lines content
     hasLinePrefix prefix = any (prefix `Text.isPrefixOf`) linesOfText
@@ -125,6 +139,9 @@ validateDocText path content =
           ]
         _ -> []
 
+    mermaidProblems =
+      concatMap validateMermaidBlock (extractMermaidBlocks linesOfText)
+
     packedPath = Text.pack path
     findLineWithPrefix prefix =
       case filter (Text.isPrefixOf (Text.pack prefix)) linesOfText of
@@ -134,6 +151,38 @@ validateDocText path content =
 renderProblems :: [DocProblem] -> Text
 renderProblems problems =
   Text.unlines ("Documentation validation failed:" : fmap ("- " <>) (sort problems))
+
+extractMermaidBlocks :: [Text] -> [[Text]]
+extractMermaidBlocks = go False []
+  where
+    go _ current [] =
+      [reverse current | not (null current)]
+    go False current (line : rest)
+      | Text.strip line == "```mermaid" = go True [] rest
+      | otherwise = go False current rest
+    go True current (line : rest)
+      | Text.strip line == "```" = reverse current : go False [] rest
+      | otherwise = go True (line : current) rest
+
+validateMermaidBlock :: [Text] -> [DocProblem]
+validateMermaidBlock mermaidLines =
+  concatMap forbiddenProblem forbiddenPatterns
+  where
+    blockText = Text.unlines mermaidLines
+    forbiddenPatterns =
+      [ ("subgraph", "Mermaid block uses forbidden `subgraph` syntax")
+      , ("-.->", "Mermaid block uses forbidden dotted arrows")
+      , ("==>", "Mermaid block uses forbidden thick arrows")
+      , (":::", "Mermaid block uses forbidden class syntax")
+      , ("%%", "Mermaid block uses forbidden Mermaid comments")
+      , ("stateDiagram", "Mermaid block uses forbidden state diagrams")
+      , ("sequenceDiagram", "Mermaid block uses forbidden sequence diagrams")
+      , ("flowchart RL", "Mermaid block uses forbidden right-to-left flowcharts")
+      , ("graph LR", "Mermaid block uses forbidden `graph LR` syntax")
+      , ("graph RL", "Mermaid block uses forbidden `graph RL` syntax")
+      ]
+    forbiddenProblem (patternText, message) =
+      [message | patternText `Text.isInfixOf` blockText]
 
 findMarkdownFiles :: FilePath -> IO [FilePath]
 findMarkdownFiles root = do

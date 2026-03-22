@@ -3,20 +3,27 @@
 
 **Status**: Authoritative source
 **Supersedes**: N/A
-**Referenced by**: [overview.md](overview.md#canonical-follow-on-documents), [../../STUDIOMCP_DEVELOPMENT_PLAN.md](../../STUDIOMCP_DEVELOPMENT_PLAN.md#phase-17-parallel-scheduling-and-optimization-design-package), [../adr/0002_parallel_scheduling.md](../adr/0002_parallel_scheduling.md#cross-references)
+**Referenced by**: [overview.md](overview.md#canonical-follow-on-documents), [../../STUDIOMCP_DEVELOPMENT_PLAN.md](../../STUDIOMCP_DEVELOPMENT_PLAN.md#current-repo-assessment-against-this-plan)
 
-> **Purpose**: Canonical design note for how `studioMCP` may add deterministic parallel scheduling without weakening the typed execution, timeout, and summary guarantees that already exist in the sequential runtime.
+> **Purpose**: Canonical current-state contract for how `studioMCP` may add deterministic parallel scheduling without weakening the typed execution, timeout, and summary guarantees that already exist in the sequential runtime.
 
 ## Summary
 
-`studioMCP` currently executes DAGs sequentially in topological order. Any future parallel executor must preserve the same externally visible semantics:
+`studioMCP` currently executes DAGs sequentially in topological order. Any future parallel executor is a bounded optimization layer over that baseline and must preserve the same externally visible semantics:
 
 - DAG validity is still decided before execution starts
 - every node still resolves to a typed success or structured failure
 - timeout remains a first-class failure outcome
 - the final summary remains the terminal immutable record of the run
 
-This document records the required guarantees for a future parallel scheduler. It does not claim that production parallel execution code exists today.
+This document defines the required guarantees for a future parallel scheduler. It does not claim that production parallel execution code exists today.
+
+## Correctness Baseline
+
+- the sequential executor remains the correctness baseline
+- DAG validation remains the authority for dependency correctness before execution starts
+- parallel scheduling may change throughput, but it may not redefine runtime semantics
+- the standalone `worker` entrypoint may support direct execution, but the server remains the authoritative orchestration runtime
 
 ## Scheduling Guarantees
 
@@ -52,5 +59,4 @@ This document records the required guarantees for a future parallel scheduler. I
 
 - [Architecture Overview](overview.md#architecture-overview)
 - [Server Mode](server_mode.md#server-mode)
-- [ADR 0002: Parallel Scheduling](../adr/0002_parallel_scheduling.md#adr-0002-parallel-scheduling)
-- [studioMCP Development Plan](../../STUDIOMCP_DEVELOPMENT_PLAN.md#phase-17-parallel-scheduling-and-optimization-design-package)
+- [studioMCP Development Plan](../../STUDIOMCP_DEVELOPMENT_PLAN.md#studiomcp-development-plan)

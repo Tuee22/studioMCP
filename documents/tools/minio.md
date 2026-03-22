@@ -9,12 +9,19 @@
 
 ## Role
 
-MinIO stores:
+This document is the canonical MinIO integration note, but it does not redefine the higher-level storage architecture.
+
+Canonical role definitions live in:
+
+- [Pulsar vs MinIO](../architecture/pulsar_vs_minio.md#pulsar-vs-minio)
+- [Artifact Storage Architecture](../architecture/artifact_storage_architecture.md#artifact-storage-architecture)
+
+Within the current repo, MinIO is the S3-compatible object store used for:
 
 - memoized node outputs
 - summaries
 - manifests
-- durable media artifacts
+- local and shared-cluster artifact storage
 
 ## Deployment
 
@@ -45,7 +52,7 @@ HA deployment is the preferred mode where possible. See [../engineering/k8s_stor
 
 ## Current Maturity
 
-The repo now includes a real Haskell MinIO adapter that uses the native CLI workflow to round-trip memo objects, manifests, and summaries through the deployed MinIO cluster. `studiomcp validate minio` exercises that live path and asserts the missing-object failure contract. The deployment now uses the official MinIO Helm chart in HA mode. Delivery status is tracked in [../../STUDIOMCP_DEVELOPMENT_PLAN.md](../../STUDIOMCP_DEVELOPMENT_PLAN.md#phase-8-real-minio-adapter-and-memoization-integration).
+The repo now includes a real Haskell MinIO adapter that uses the native CLI workflow to round-trip memo objects, manifests, and summaries through the deployed MinIO cluster. `studiomcp validate minio` exercises that live path and asserts the missing-object failure contract. The deployment now uses the official MinIO Helm chart in HA mode. Current implementation status is tracked in [../../STUDIOMCP_DEVELOPMENT_PLAN.md](../../STUDIOMCP_DEVELOPMENT_PLAN.md#current-repo-assessment-against-this-plan).
 
 ## Storage Policy
 
@@ -69,6 +76,7 @@ The following buckets are created during initialization:
 ## Cross-References
 
 - [Pulsar vs MinIO](../architecture/pulsar_vs_minio.md#pulsar-vs-minio)
+- [Artifact Storage Architecture](../architecture/artifact_storage_architecture.md#artifact-storage-architecture)
 - [Testing Strategy](../development/testing_strategy.md#testing-strategy)
 - [Kubernetes Storage Policy](../engineering/k8s_storage.md#kubernetes-storage-policy)
 - [Local Debugging Runbook](../operations/runbook_local_debugging.md#local-debugging-runbook)

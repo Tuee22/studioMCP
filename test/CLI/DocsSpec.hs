@@ -23,6 +23,10 @@ spec =
       validateDocText "documents/example.md" authoritativeWithoutCrossRefs
         `shouldSatisfy` any (Text.isInfixOf "Authoritative doc missing cross-references section")
 
+    it "rejects forbidden Mermaid constructs inside Mermaid blocks" $
+      validateDocText "documents/example.md" mermaidWithSequenceDiagram
+        `shouldSatisfy` any (Text.isInfixOf "Mermaid block uses forbidden sequence diagrams")
+
   where
     authoritativeDoc =
       Text.unlines
@@ -60,4 +64,23 @@ spec =
         , "**Referenced by**: other.md"
         , ""
         , "> **Purpose**: Example doc."
+        ]
+
+    mermaidWithSequenceDiagram =
+      Text.unlines
+        [ "# File: documents/example.md"
+        , "# Example"
+        , ""
+        , "**Status**: Authoritative source"
+        , "**Supersedes**: N/A"
+        , "**Referenced by**: other.md"
+        , ""
+        , "> **Purpose**: Example doc."
+        , ""
+        , "```mermaid"
+        , "sequenceDiagram"
+        , "  A->>B: bad"
+        , "```"
+        , ""
+        , "## Cross-References"
         ]

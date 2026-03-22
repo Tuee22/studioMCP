@@ -55,6 +55,10 @@ The repo now includes the outer development-container service and the first nati
 - `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp validate observability`
 - `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp validate docs`
 
+Current note:
+
+- `validate mcp` currently validates the legacy custom DAG HTTP surface rather than a true MCP transport.
+
 The outer container talks to the same engine through `/var/run/docker.sock`.
 By default the CLI derives the host-visible `./.data/` path for kind from the outer container's `/.data/` bind mount. Set `STUDIOMCP_KIND_HOST_DATA_PATH` only as an override for non-standard Docker contexts.
 
@@ -65,7 +69,7 @@ From Phase 1 onward, do not proceed to the next implementation phase until the H
 Target rule: for cluster and deployment work, enter the outer development container and run `studiomcp` there.
 Do not add new repository helper scripts for developer workflows.
 Do not rely on dynamic storage classes for local development; use the explicit `.data/` plus manual-PV flow defined in [../engineering/k8s_storage.md](../engineering/k8s_storage.md#kubernetes-storage-policy).
-Current repo note: the outer-container workflow is now verified on this machine for `cluster up`, `cluster status`, `cluster deploy sidecars`, `validate cluster`, `validate executor`, `validate e2e`, `validate worker`, `validate pulsar`, `validate minio`, `validate boundary`, `validate ffmpeg-adapter`, `validate mcp`, `validate inference`, `validate observability`, and `validate docs`. Persistence-backed Helm releases for MinIO and Pulsar remain disabled by default in the shipped local values, so `cluster storage reconcile` is currently a no-op unless persistence is explicitly enabled.
+Current repo note: the outer-container workflow is now verified on this machine for `cluster up`, `cluster status`, `cluster deploy sidecars`, `validate cluster`, `validate executor`, `validate e2e`, `validate worker`, `validate pulsar`, `validate minio`, `validate boundary`, `validate ffmpeg-adapter`, legacy `validate mcp`, `validate inference`, `validate observability`, and `validate docs`. Persistence-backed Helm releases for MinIO and Pulsar remain disabled by default in the shipped local values, so `cluster storage reconcile` is currently a no-op unless persistence is explicitly enabled.
 Use [../documentation_standards.md](../documentation_standards.md#studiomcp-documentation-standards) as the SSoT for documentation rules.
 
 ## Cross-References

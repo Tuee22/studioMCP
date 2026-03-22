@@ -3,52 +3,67 @@
 
 **Status**: Authoritative source
 **Supersedes**: N/A
-**Referenced by**: [../README.md](../README.md#documentation-suite), [pulsar_vs_minio.md](pulsar_vs_minio.md#cross-references), [server_mode.md](server_mode.md#cross-references), [inference_mode.md](inference_mode.md#cross-references), [cli_architecture.md](cli_architecture.md#cross-references)
+**Referenced by**: [../README.md](../README.md#documentation-suite), [mcp_protocol_architecture.md](mcp_protocol_architecture.md#cross-references), [server_mode.md](server_mode.md#cross-references), [multi_tenant_saas_mcp_auth_architecture.md](multi_tenant_saas_mcp_auth_architecture.md#cross-references), [artifact_storage_architecture.md](artifact_storage_architecture.md#cross-references)
 
-> **Purpose**: Canonical high-level description of the `studioMCP` system boundary, execution flow, and top-level documentation map for architecture topics.
+> **Purpose**: Canonical high-level description of the target `studioMCP` system boundary, major runtime components, and the top-level document map for the MCP-first architecture.
 
 ## Executive Summary
 
-`studioMCP` is a Haskell-first execution system for typed studio DAGs. Haskell owns the DAG model, failure algebra, timeout behavior, summary construction, and memoization contract. Impure tools and sidecars exist behind explicit boundaries. Repository deployment semantics are Kubernetes-forward: Helm defines topology, Skaffold drives the local loop, and kind is the default local cluster.
+`studioMCP` is a Haskell-first MCP platform for secure multi-tenant media workflows. The target system exposes a real MCP surface, not a custom REST automation API, and couples that protocol layer to a typed DAG execution engine, tenant-aware storage, and a browser-facing SaaS application.
 
-This document describes the target steady-state architecture. Current implementation maturity is tracked in [../../STUDIOMCP_DEVELOPMENT_PLAN.md](../../STUDIOMCP_DEVELOPMENT_PLAN.md#current-repo-assessment-against-this-plan).
+The target public topology has four major planes:
 
-## System Flow
+- browser and external MCP clients
+- BFF and auth plane
+- MCP listener plane
+- execution, metadata, and artifact plane
+
+## Current Repo Note
+
+The current codebase already includes strong execution foundations, but the shipped `server` binary still exposes a custom DAG-oriented HTTP surface rather than a proper MCP transport. The documents in this suite define the target architecture and the migration path called out in [../../STUDIOMCP_DEVELOPMENT_PLAN.md](../../STUDIOMCP_DEVELOPMENT_PLAN.md#current-repo-assessment-against-this-plan).
+
+## System Topology
 
 ```mermaid
 flowchart TB
-  Request[Validated DAG Request] --> Parser[Parser]
-  Parser --> Validator[Validator]
-  Validator --> Executor[Executor]
-  Executor --> Boundary[Boundary Nodes]
-  Executor --> Pulsar[Pulsar In Flight State]
-  Boundary --> MinIO[MinIO Immutable Storage]
-  Boundary --> Summary[Run Summary]
+  Browser[Browser Client] --> BFF[BFF]
+  External[External MCP Client] --> MCP[MCP Listener]
+  Browser --> Keycloak[Keycloak]
+  BFF --> Keycloak
+  BFF --> MCP
+  MCP --> Keycloak
+  MCP --> Redis[Session Store]
+  MCP --> Runtime[Execution Runtime]
+  Runtime --> Pulsar[Pulsar Eventing]
+  Runtime --> Storage[MinIO Or Tenant S3]
+  Runtime --> Tools[Tool Boundaries]
+  Keycloak --> Postgres[Keycloak Postgres]
 ```
 
 ## Architectural Pillars
 
-- typed DAG input and validation
-- explicit `Result success failure` semantics
-- timeout-first execution behavior
-- Kubernetes as deployment topology SSoT via Helm
-- Skaffold and kind as the preferred local orchestration path
-- Pulsar as the SSoT for in-flight execution state
-- MinIO as immutable persistent storage
-- a final summary object as the terminal truth for each run
+- standards-compliant MCP over `stdio` and Streamable HTTP
+- Haskell ownership of protocol, execution, failure algebra, and summary model
+- secure multi-tenant authn/authz with Keycloak as the trusted issuer
+- horizontally scalable non-sticky listener nodes
+- immutable artifact and manifest contracts
+- strict prohibition on permanent MCP-driven media deletion
+- browser product surface mediated through a BFF rather than direct browser-to-storage trust expansion
 
 ## Canonical Follow-On Documents
 
-- Storage split: [Pulsar vs MinIO](pulsar_vs_minio.md#pulsar-vs-minio)
-- Local control plane: [CLI Architecture](cli_architecture.md#cli-architecture)
-- Server runtime: [Server Mode](server_mode.md#server-mode)
-- Assistive model path: [Inference Mode](inference_mode.md#inference-mode)
-- Future concurrency design: [Parallel Scheduling](parallel_scheduling.md#parallel-scheduling)
-- DAG schema: [DAG Specification](../domain/dag_specification.md#dag-specification)
-- Deployment policy: [Kubernetes-Native Development Policy](../engineering/k8s_native_dev_policy.md#kubernetes-native-development-policy)
-- test policy: [Testing Strategy](../development/testing_strategy.md#testing-strategy)
+- protocol shape: [MCP Protocol Architecture](mcp_protocol_architecture.md#mcp-protocol-architecture)
+- server runtime: [Server Mode](server_mode.md#server-mode)
+- public network and auth topology: [Multi-Tenant SaaS MCP Auth Architecture](multi_tenant_saas_mcp_auth_architecture.md#multi-tenant-saas-mcp-auth-architecture)
+- artifact rules: [Artifact Storage Architecture](artifact_storage_architecture.md#artifact-storage-architecture)
+- storage split: [Pulsar vs MinIO](pulsar_vs_minio.md#pulsar-vs-minio)
+- security rules: [Security Model](../engineering/security_model.md#security-model)
+- non-sticky scaling rules: [Session Scaling](../engineering/session_scaling.md#session-scaling)
+- tool and resource catalog: [MCP Surface Reference](../reference/mcp_surface.md#mcp-surface-reference)
+- web/BFF product surface: [Web Portal Surface](../reference/web_portal_surface.md#web-portal-surface)
 
 ## Cross-References
 
 - [Documentation Standards](../documentation_standards.md#studiomcp-documentation-standards)
-- [Local Development](../development/local_dev.md#local-development)
+- [Testing Strategy](../development/testing_strategy.md#testing-strategy)
+- [studioMCP Development Plan](../../STUDIOMCP_DEVELOPMENT_PLAN.md#studiomcp-development-plan)
