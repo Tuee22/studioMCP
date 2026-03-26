@@ -1,13 +1,110 @@
-1/image:
+# Kind (Kubernetes in Docker) development configuration
+# Use with: helm install studiomcp chart -f chart/values.yaml -f chart/values-kind.yaml
+#
+# NOTE: Per Third-Party Service Deployment Doctrine, full HA is required in ALL
+# environments including local kind development. This ensures local development
+# mirrors production deployment patterns and exercises HA failover semantics.
+# See documents/engineering/k8s_storage.md
+
+image:
   pullPolicy: IfNotPresent
 
-pulsar:
-  persistence:
+# Full HA for MCP server (matches production)
+studiomcp:
+  replicas: 3
+  autoscaling:
+    enabled: false
+  health:
+    enabled: true
+
+# Full HA for workers (matches production)
+worker:
+  enabled: true
+  replicas: 3
+  autoscaling:
     enabled: false
 
+# BFF enabled with HA
+bff:
+  enabled: true
+  replicas: 2
+
+# MinIO with persistence and full HA
+# 4 replicas for distributed mode
 minio:
+  enabled: true
+  mode: distributed
+  replicas: 4
   persistence:
-    enabled: false
+    enabled: true
+    storageClass: "studiomcp-manual"
+    size: 10Gi
 
+# Pulsar with persistence and full HA
+# 3 replicas per component
+# NOTE: Pulsar chart uses volumes.data/journal/ledgers structure, not persistence
+pulsar:
+  enabled: true
+  zookeeper:
+    replicaCount: 3
+    volumes:
+      data:
+        size: 5Gi
+        storageClassName: "studiomcp-manual"
+  bookkeeper:
+    replicaCount: 3
+    volumes:
+      journal:
+        size: 10Gi
+        storageClassName: "studiomcp-manual"
+      ledgers:
+        size: 10Gi
+        storageClassName: "studiomcp-manual"
+  broker:
+    replicaCount: 3
+  proxy:
+    replicaCount: 2
+
+# PostgreSQL-HA with persistence
+# 3 replicas
+postgresql-ha:
+  enabled: true
+  postgresql:
+    replicaCount: 3
+  persistence:
+    enabled: true
+    storageClass: "studiomcp-manual"
+    size: 5Gi
+  pgpool:
+    replicaCount: 2
+
+# Redis with Sentinel mode for HA
+redis:
+  enabled: true
+  architecture: replication
+  sentinel:
+    enabled: true
+  master:
+    persistence:
+      enabled: true
+      storageClass: "studiomcp-manual"
+      size: 2Gi
+  replica:
+    replicaCount: 3
+    persistence:
+      enabled: true
+      storageClass: "studiomcp-manual"
+      size: 2Gi
+
+# Keycloak with HA
+keycloak:
+  enabled: true
+  replicaCount: 2
+
+# LLM reference disabled
 llmReference:
+  enabled: false
+
+# No ingress for local development (use port-forward)
+ingress:
   enabled: false

@@ -3,41 +3,289 @@ image:
   tag: latest
   pullPolicy: IfNotPresent
 
+global:
+  # Namespace for all components
+  namespace: default
+  # Enable TLS globally
+  tls:
+    enabled: false
+    secretName: studiomcp-tls
+  # Explicit null storage class - prevents dynamic provisioning
+  # See documents/engineering/k8s_storage.md for storage policy
+  storageClass: "studiomcp-manual"
+
+auth:
+  enabled: false
+
+# Main studioMCP MCP server
 studiomcp:
-  replicas: 1
+  replicas: 3
   mode: server
   service:
     type: ClusterIP
     port: 3000
-
-pulsar:
-  enabled: true
-  image: apachepulsar/pulsar:3.1.2
-  service:
-    httpPort: 8080
-    binaryPort: 6650
-  persistence:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  autoscaling:
     enabled: false
-    size: 8Gi
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+  health:
+    enabled: true
+    livenessProbe:
+      path: /health/live
+      port: 3000
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+    readinessProbe:
+      path: /health/ready
+      port: 3000
+      initialDelaySeconds: 5
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 3
 
-minio:
+# Worker deployment for DAG execution
+worker:
   enabled: true
-  image: minio/minio:latest
-  rootUser: minioadmin
-  rootPassword: minioadmin123
-  service:
-    apiPort: 9000
-    consolePort: 9001
-  buckets:
-    - studiomcp-memo
-    - studiomcp-artifacts
-    - studiomcp-summaries
-    - studiomcp-test-fixtures
-  persistence:
+  replicas: 3
+  image:
+    repository: studiomcp
+    tag: latest
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+  autoscaling:
     enabled: false
-    size: 20Gi
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+  health:
+    enabled: true
+    livenessProbe:
+      path: /health/live
+      port: 3002
+      initialDelaySeconds: 15
+      periodSeconds: 10
+    readinessProbe:
+      path: /health/ready
+      port: 3002
+      initialDelaySeconds: 10
+      periodSeconds: 5
 
+# BFF deployment (separate service for browser interface)
+bff:
+  enabled: true
+  replicas: 2
+  image:
+    repository: studiomcp-bff
+    tag: latest
+  service:
+    type: ClusterIP
+    port: 3002
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  health:
+    enabled: true
+    livenessProbe:
+      path: /health/live
+      port: 3002
+      initialDelaySeconds: 10
+      periodSeconds: 10
+    readinessProbe:
+      path: /health/ready
+      port: 3002
+      initialDelaySeconds: 5
+      periodSeconds: 5
+
+# Reference LLM service (optional)
 llmReference:
   enabled: false
   image: ollama/ollama:latest
   port: 11434
+  resources:
+    requests:
+      cpu: 500m
+      memory: 2Gi
+    limits:
+      cpu: 4000m
+      memory: 8Gi
+
+# Ingress configuration
+ingress:
+  enabled: false
+  className: nginx
+  annotations: {}
+  hosts:
+    - host: studiomcp.local
+      paths:
+        - path: /
+          pathType: Prefix
+          service: studiomcp
+          port: 3000
+        - path: /api
+          pathType: Prefix
+          service: bff
+          port: 3002
+        - path: /auth
+          pathType: Prefix
+          service: keycloak
+          port: 8080
+  tls: []
+
+# Secrets management
+secrets:
+  # Use external secrets (e.g., from Vault, AWS Secrets Manager)
+  external: false
+  # Secret names if using external secrets
+  externalSecrets:
+    minio: ""
+    postgres: ""
+    keycloak: ""
+    redis: ""
+    jwt: ""
+  # JWT signing configuration
+  jwt:
+    # Base64-encoded JWKS or RSA private key
+    signingKey: ""
+    # JWKS URI for token validation
+    jwksUri: ""
+
+# ============================================================================
+# Third-Party Service Subcharts
+# All deployed via HA Helm charts per Third-Party Service Deployment Doctrine
+# See documents/engineering/k8s_storage.md and STUDIOMCP_DEVELOPMENT_PLAN.md
+# ============================================================================
+
+# MinIO object storage (minio/minio official chart)
+# HA: 3+ replicas (distributed mode)
+minio:
+  enabled: true
+  mode: distributed
+  replicas: 4
+  rootUser: minioadmin
+  rootPassword: minioadmin123
+  persistence:
+    enabled: true
+    storageClass: "studiomcp-manual"
+    size: 20Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  buckets:
+    - name: studiomcp-memo
+      policy: none
+    - name: studiomcp-artifacts
+      policy: none
+    - name: studiomcp-summaries
+      policy: none
+    - name: studiomcp-test-fixtures
+      policy: none
+
+# Apache Pulsar message broker (apache/pulsar official chart)
+# HA: 3+ per component
+pulsar:
+  enabled: true
+  components:
+    zookeeper: true
+    bookkeeper: true
+    broker: true
+    proxy: true
+  zookeeper:
+    replicaCount: 3
+    persistence:
+      storageClassName: "studiomcp-manual"
+  bookkeeper:
+    replicaCount: 3
+    persistence:
+      storageClassName: "studiomcp-manual"
+  broker:
+    replicaCount: 3
+  proxy:
+    replicaCount: 2
+
+# PostgreSQL for Keycloak (bitnami/postgresql-ha chart)
+# HA: 3 replicas
+postgresql-ha:
+  enabled: true
+  postgresql:
+    replicaCount: 3
+    database: keycloak
+    username: keycloak
+    password: keycloak123
+    repmgrPassword: repmgr123
+  persistence:
+    enabled: true
+    storageClass: "studiomcp-manual"
+    size: 10Gi
+  pgpool:
+    replicaCount: 2
+    adminPassword: pgpool123
+
+# Redis session store (bitnami/redis chart)
+# HA: Sentinel mode
+redis:
+  enabled: true
+  architecture: replication
+  auth:
+    enabled: true
+    password: redis123
+  sentinel:
+    enabled: true
+  master:
+    persistence:
+      enabled: true
+      storageClass: "studiomcp-manual"
+      size: 5Gi
+  replica:
+    replicaCount: 3
+    persistence:
+      enabled: true
+      storageClass: "studiomcp-manual"
+      size: 5Gi
+
+# Keycloak identity provider (bitnami/keycloak chart)
+# HA: 2+ replicas
+keycloak:
+  enabled: true
+  replicaCount: 2
+  auth:
+    adminUser: admin
+    adminPassword: admin123
+  postgresql:
+    enabled: false
+  externalDatabase:
+    host: studiomcp-postgresql-ha-pgpool
+    port: 5432
+    database: keycloak
+    user: keycloak
+    password: keycloak123
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi

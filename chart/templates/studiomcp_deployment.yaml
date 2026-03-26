@@ -2,6 +2,9 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "studiomcp.fullname" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "studiomcp.fullname" . }}
+    app.kubernetes.io/component: studiomcp
 spec:
   replicas: {{ .Values.studiomcp.replicas }}
   selector:
@@ -22,24 +25,84 @@ spec:
           env:
             - name: STUDIO_MCP_MODE
               value: {{ .Values.studiomcp.mode | quote }}
+            - name: STUDIO_MCP_PORT
+              value: {{ .Values.studiomcp.service.port | quote }}
+            # Pulsar subchart service endpoints
             - name: STUDIO_MCP_PULSAR_HTTP_URL
-              value: "http://{{ include "studiomcp.fullname" . }}-pulsar:{{ .Values.pulsar.service.httpPort }}"
+              value: "http://{{ .Release.Name }}-pulsar-proxy:8080"
             - name: STUDIO_MCP_PULSAR_BINARY_URL
-              value: "pulsar://{{ include "studiomcp.fullname" . }}-pulsar:{{ .Values.pulsar.service.binaryPort }}"
+              value: "pulsar://{{ .Release.Name }}-pulsar-proxy:6650"
+            # MinIO subchart service endpoint
             - name: STUDIO_MCP_MINIO_ENDPOINT
-              value: "http://{{ include "studiomcp.fullname" . }}-minio:{{ .Values.minio.service.apiPort }}"
+              value: "http://{{ .Release.Name }}-minio:9000"
             - name: STUDIO_MCP_MINIO_ACCESS_KEY
-              value: {{ .Values.minio.rootUser | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-minio
+                  key: rootUser
             - name: STUDIO_MCP_MINIO_SECRET_KEY
-              value: {{ .Values.minio.rootPassword | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-minio
+                  key: rootPassword
+            # Redis subchart session store (Sentinel mode)
+            {{- if .Values.redis.enabled }}
+            - name: STUDIO_MCP_REDIS_URL
+              value: "redis://{{ .Release.Name }}-redis:6379"
+            - name: STUDIO_MCP_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-redis
+                  key: redis-password
+            {{- end }}
+            # Keycloak subchart configuration
+            {{- if .Values.keycloak.enabled }}
+            - name: STUDIO_MCP_KEYCLOAK_URL
+              value: "http://{{ .Release.Name }}-keycloak:8080"
+            - name: STUDIOMCP_KEYCLOAK_REALM
+              value: "studiomcp"
+            - name: STUDIOMCP_KEYCLOAK_ISSUER
+              value: "http://{{ .Release.Name }}-keycloak:8080/realms/studiomcp"
+            {{- end }}
+            # JWT configuration
+            {{- if .Values.secrets.jwt.jwksUri }}
+            - name: STUDIOMCP_JWKS_URI
+              value: {{ .Values.secrets.jwt.jwksUri | quote }}
+            {{- end }}
+            # Auth configuration
+            - name: STUDIOMCP_AUTH_ENABLED
+              value: "{{ if .Values.auth.enabled }}true{{ else }}false{{ end }}"
           ports:
             - containerPort: {{ .Values.studiomcp.service.port }}
               name: http
+          resources:
+            {{- toYaml .Values.studiomcp.resources | nindent 12 }}
+          {{- if .Values.studiomcp.health.enabled }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.studiomcp.health.livenessProbe.path }}
+              port: {{ .Values.studiomcp.health.livenessProbe.port }}
+            initialDelaySeconds: {{ .Values.studiomcp.health.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.studiomcp.health.livenessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.studiomcp.health.livenessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.studiomcp.health.livenessProbe.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.studiomcp.health.readinessProbe.path }}
+              port: {{ .Values.studiomcp.health.readinessProbe.port }}
+            initialDelaySeconds: {{ .Values.studiomcp.health.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.studiomcp.health.readinessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.studiomcp.health.readinessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.studiomcp.health.readinessProbe.failureThreshold }}
+          {{- end }}
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: {{ include "studiomcp.fullname" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "studiomcp.fullname" . }}
+    app.kubernetes.io/component: studiomcp
 spec:
   type: {{ .Values.studiomcp.service.type }}
   selector:
@@ -49,3 +112,33 @@ spec:
     - name: http
       port: {{ .Values.studiomcp.service.port }}
       targetPort: http
+{{- if .Values.studiomcp.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "studiomcp.fullname" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "studiomcp.fullname" . }}
+    app.kubernetes.io/component: studiomcp
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "studiomcp.fullname" . }}
+  minReplicas: {{ .Values.studiomcp.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.studiomcp.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.studiomcp.autoscaling.targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.studiomcp.autoscaling.targetMemoryUtilizationPercentage }}
+{{- end }}

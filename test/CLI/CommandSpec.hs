@@ -54,6 +54,14 @@ spec =
       parseCommand ["validate", "mcp"]
         `shouldBe` Right (ValidateCommand ValidateMcpCommand)
 
+    it "parses validate mcp-session-store" $
+      parseCommand ["validate", "mcp-session-store"]
+        `shouldBe` Right (ValidateCommand ValidateSessionStoreCommand)
+
+    it "parses validate mcp-horizontal-scale" $
+      parseCommand ["validate", "mcp-horizontal-scale"]
+        `shouldBe` Right (ValidateCommand ValidateHorizontalScaleCommand)
+
     it "parses validate inference" $
       parseCommand ["validate", "inference"]
         `shouldBe` Right (ValidateCommand ValidateInferenceCommand)
@@ -61,6 +69,10 @@ spec =
     it "parses validate observability" $
       parseCommand ["validate", "observability"]
         `shouldBe` Right (ValidateCommand ValidateObservabilityCommand)
+
+    it "parses validate storage-policy" $
+      parseCommand ["validate", "storage-policy"]
+        `shouldBe` Right (ValidateCommand ValidateStoragePolicyCommand)
 
     it "parses cluster up" $
       parseCommand ["cluster", "up"]

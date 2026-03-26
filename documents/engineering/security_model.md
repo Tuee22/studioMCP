@@ -56,6 +56,152 @@ Every boundary must validate identity explicitly. No boundary may rely on hidden
 - tokens received by the MCP server are not forwarded unchanged to downstream APIs
 - downstream API calls use separate server-acquired credentials
 
+## JWKS Integration
+
+### Endpoint Configuration
+
+The MCP server must be configured with the Keycloak JWKS endpoint:
+
+```
+STUDIOMCP_KEYCLOAK_ISSUER=https://auth.example.com/realms/studiomcp
+STUDIOMCP_KEYCLOAK_AUDIENCE=studiomcp-mcp
+```
+
+The JWKS endpoint is derived: `{issuer}/protocol/openid-connect/certs`
+
+### JWKS Caching
+
+| Parameter | Value | Rationale |
+|-----------|-------|-----------|
+| Cache TTL | 5 minutes | Balance freshness vs. request latency |
+| Refresh threshold | 1 minute before expiry | Proactive refresh |
+| Fetch timeout | 5 seconds | Fail fast on connectivity issues |
+| Retry count | 2 | Handle transient failures |
+
+### Key Rotation Handling
+
+```
+1. Validate token signature with cached JWKS
+2. If signature fails and JWKS is >1 minute old:
+   a. Refresh JWKS from Keycloak
+   b. Retry signature validation
+3. If still fails, reject token with 401
+```
+
+### Algorithm Restrictions
+
+| Algorithm | Status |
+|-----------|--------|
+| RS256 | Required, must support |
+| RS384 | Supported |
+| RS512 | Supported |
+| ES256 | Supported |
+| HS256 | Rejected (symmetric keys prohibited) |
+| none | Rejected (unsigned tokens prohibited) |
+
+### Haskell Implementation
+
+```haskell
+-- Configuration type
+data KeycloakConfig = KeycloakConfig
+  { kcIssuer :: Text       -- e.g., "https://auth.example.com/realms/studiomcp"
+  , kcAudience :: Text     -- e.g., "studiomcp-mcp"
+  , kcJwksCacheTtl :: Int  -- seconds
+  }
+
+-- JWKS cache
+data JwksCache = JwksCache
+  { jwksKeys :: JWKSet
+  , jwksFetchedAt :: UTCTime
+  , jwksExpiresAt :: UTCTime
+  }
+
+-- Validation result
+validateToken :: KeycloakConfig -> JwksCache -> ByteString -> IO (Either AuthError JwtClaims)
+```
+
+## Token Exchange
+
+### When Token Exchange Is Required
+
+Token exchange is used when the MCP server needs to call downstream services that require their own tokens:
+
+| Scenario | Source Token | Target Token |
+|----------|--------------|--------------|
+| MCP → Storage service | User access token | Service account token |
+| BFF → MCP | User session token | MCP access token |
+| MCP → External API | User access token | Delegated token |
+
+### Token Exchange Flow (RFC 8693)
+
+```http
+POST /realms/studiomcp/protocol/openid-connect/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=urn:ietf:params:oauth:grant-type:token-exchange
+&subject_token=<original_access_token>
+&subject_token_type=urn:ietf:params:oauth:token-type:access_token
+&requested_token_type=urn:ietf:params:oauth:token-type:access_token
+&audience=<target_service>
+&client_id=studiomcp-mcp
+&client_secret=<service_secret>
+```
+
+### No Passthrough Rule Enforcement
+
+The MCP server must never:
+
+```
+✗ Forward user's access_token to downstream services unchanged
+✗ Embed user's refresh_token in any outbound request
+✗ Store user tokens in logs, summaries, or manifests
+✗ Include user tokens in error messages
+```
+
+The MCP server must:
+
+```
+✓ Use its own service account for downstream calls
+✓ Use token exchange when user context is needed downstream
+✓ Scope downstream tokens narrowly to required operations
+✓ Audit downstream token acquisition events
+```
+
+## Token Redaction
+
+### Redaction Patterns
+
+These patterns must be redacted from all logs and error messages:
+
+| Pattern | Regex | Replacement |
+|---------|-------|-------------|
+| Bearer tokens | `Bearer [A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+` | `Bearer [REDACTED]` |
+| Authorization header | `Authorization: .*` | `Authorization: [REDACTED]` |
+| Refresh tokens | `refresh_token=[^&]+` | `refresh_token=[REDACTED]` |
+| Client secrets | `client_secret=[^&]+` | `client_secret=[REDACTED]` |
+| Presigned URLs (signature) | `X-Amz-Signature=[^&]+` | `X-Amz-Signature=[REDACTED]` |
+
+### Haskell Implementation
+
+```haskell
+redactSecrets :: Text -> Text
+redactSecrets =
+    redactBearer
+  . redactRefreshToken
+  . redactClientSecret
+  . redactPresignedSig
+
+-- Must be applied to all log output and error messages
+logInfo :: (HasRequestContext m, MonadIO m) => Text -> m ()
+logInfo msg = do
+  ctx <- askContext
+  liftIO $ writeLog $ LogEntry
+    { logLevel = Info
+    , logCorrelationId = ctxCorrelationId ctx
+    , logMessage = redactSecrets msg
+    }
+```
+
 ## Session Rules
 
 - remote listener pods must not require sticky load balancing

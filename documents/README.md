@@ -44,8 +44,11 @@
 - [MCP Tool Catalog](reference/mcp_tool_catalog.md#mcp-tool-catalog)
 - [Web Portal Surface](reference/web_portal_surface.md#web-portal-surface)
 - [FFmpeg](tools/ffmpeg.md#ffmpeg)
+- [Keycloak](tools/keycloak.md#keycloak)
 - [MinIO](tools/minio.md#minio)
+- [PostgreSQL](tools/postgres.md#postgresql)
 - [Pulsar](tools/pulsar.md#pulsar)
+- [Redis](tools/redis.md#redis)
 
 ## Working Rules
 

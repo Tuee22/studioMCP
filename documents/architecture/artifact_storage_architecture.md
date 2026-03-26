@@ -56,11 +56,139 @@ Supported storage patterns:
 - object keys should be immutable and version-oriented rather than path-overwrite oriented
 - replacing an artifact means writing a new version and updating metadata, not destructive overwrite
 
+## Tenant Storage Configuration
+
+### Configuration Schema
+
+```haskell
+data TenantStorageConfig = TenantStorageConfig
+  { tscEndpoint :: Text           -- S3-compatible endpoint
+  , tscRegion :: Text             -- AWS region or "us-east-1" for MinIO
+  , tscBucket :: Text             -- Bucket name
+  , tscPrefix :: Text             -- Key prefix for tenant isolation
+  , tscCredentials :: StorageCredentials
+  }
+
+data StorageCredentials
+  = StaticCredentials
+      { scAccessKey :: Text
+      , scSecretKey :: Text
+      }
+  | AssumeRole
+      { arRoleArn :: Text
+      , arExternalId :: Maybe Text
+      }
+  | InstanceProfile
+```
+
+### Configuration Sources
+
+| Environment | Source |
+|-------------|--------|
+| Development | Environment variables or config file |
+| Kubernetes | Kubernetes Secret mounted as env vars |
+| Production | External secrets manager (Vault, AWS Secrets Manager) |
+
+### Example Configuration
+
+```yaml
+# Per-tenant storage configuration
+tenants:
+  tenant-acme:
+    storage:
+      endpoint: "https://s3.us-west-2.amazonaws.com"
+      region: "us-west-2"
+      bucket: "acme-media-prod"
+      prefix: "studiomcp/"
+      credentials:
+        type: "assume_role"
+        roleArn: "arn:aws:iam::123456789:role/studiomcp-access"
+        externalId: "acme-external-id"
+
+  tenant-globex:
+    storage:
+      endpoint: "https://minio.globex.internal:9000"
+      region: "us-east-1"
+      bucket: "media"
+      prefix: "studiomcp/globex/"
+      credentials:
+        type: "static"
+        accessKey: "${GLOBEX_ACCESS_KEY}"
+        secretKey: "${GLOBEX_SECRET_KEY}"
+```
+
+## Artifact Versioning
+
+### Version Identifiers
+
+```
+{tenant}/{artifact-type}/{artifact-id}/v{version-number}/{filename}
+```
+
+Example:
+```
+tenant-acme/renders/render-abc123/v1/output.mp4
+tenant-acme/renders/render-abc123/v2/output.mp4
+```
+
+### Version Metadata
+
+```haskell
+data ArtifactVersion = ArtifactVersion
+  { avArtifactId :: ArtifactId
+  , avVersion :: Int
+  , avContentHash :: Text         -- SHA-256 of content
+  , avSize :: Int64
+  , avContentType :: Text
+  , avCreatedAt :: UTCTime
+  , avCreatedBy :: SubjectId
+  , avState :: ArtifactState
+  , avSupersededBy :: Maybe ArtifactVersion
+  }
+
+data ArtifactState
+  = Active                        -- Normal state
+  | Hidden                        -- Hidden from listings, still accessible
+  | Archived                      -- Archived, may be in cold storage
+  | Superseded ArtifactId         -- Replaced by another version
+  deriving (Eq, Show)
+```
+
+### Version Operations
+
+| Operation | Effect | Reversible |
+|-----------|--------|------------|
+| Create | New version added | N/A |
+| Hide | `state = Hidden` | Yes |
+| Unhide | `state = Active` | Yes |
+| Archive | `state = Archived` | Yes (may be slow) |
+| Supersede | `state = Superseded, supersededBy = newId` | Yes |
+
 ## No Permanent Delete Rule
 
 Hard rule:
 
 - the MCP server must not permanently delete media artifacts
+
+### Artifact State Summary
+
+| State | Visible in Listings | Retrievable | Restorable |
+|-------|---------------------|-------------|------------|
+| Active | Yes | Yes | N/A |
+| Hidden | No | Yes | Yes |
+| Archived | No | Yes (may be delayed) | Yes |
+| Superseded | No | Yes | Yes |
+
+### Policy Rationale
+
+The non-destructive artifact policy was adopted for the following reasons:
+
+- **Data protection**: Prevents accidental loss of valuable media artifacts
+- **Audit compliance**: All artifacts remain auditable throughout their lifecycle
+- **Recovery capability**: Mistakes can be reversed without data loss
+- **Security boundary**: Limits blast radius of compromised credentials
+
+This policy implies that storage costs accumulate without automatic purge, admin processes are required for permanent cleanup outside MCP, quota enforcement must track hidden/archived artifacts, and audit logs must record all state transitions.
 
 Implications:
 
@@ -92,6 +220,130 @@ Forbidden:
 
 - hard delete through MCP tools
 - automated garbage collection that permanently removes tenant media without an explicit tenant-side storage policy outside MCP
+
+## Governance Implementation
+
+### Module Structure
+
+```haskell
+-- src/StudioMCP/Storage/Governance.hs
+-- This module INTENTIONALLY does not export any delete functions
+
+module StudioMCP.Storage.Governance
+  ( -- State transitions (all metadata-only)
+    hideArtifact
+  , unhideArtifact
+  , archiveArtifact
+  , unarchiveArtifact
+  , supersedeArtifact
+    -- Queries
+  , getArtifactState
+  , listVersions
+  , isAccessible
+    -- NO DELETE OPERATIONS EXPORTED
+  ) where
+```
+
+### Hide Operation
+
+```haskell
+hideArtifact :: TenantId -> ArtifactId -> IO (Either GovernanceError ())
+hideArtifact tenantId artifactId = do
+  -- 1. Verify tenant owns artifact
+  -- 2. Update metadata: state = Hidden
+  -- 3. Record audit event
+  -- Object remains in storage, just hidden from listings
+```
+
+### Archive Operation
+
+```haskell
+archiveArtifact :: TenantId -> ArtifactId -> IO (Either GovernanceError ())
+archiveArtifact tenantId artifactId = do
+  -- 1. Verify tenant owns artifact
+  -- 2. Update metadata: state = Archived
+  -- 3. Record audit event
+  -- 4. Optionally trigger storage class transition (e.g., S3 Glacier)
+  -- Object remains in storage, may be moved to cold tier
+```
+
+### Supersede Operation
+
+```haskell
+supersedeArtifact :: TenantId -> ArtifactId -> ArtifactId -> IO (Either GovernanceError ())
+supersedeArtifact tenantId oldId newId = do
+  -- 1. Verify tenant owns both artifacts
+  -- 2. Update old artifact: state = Superseded, supersededBy = newId
+  -- 3. Record audit event with lineage
+  -- Old object remains accessible but marked as superseded
+```
+
+### Audit Trail
+
+All governance operations are logged:
+
+```haskell
+data GovernanceAuditEvent = GovernanceAuditEvent
+  { gaeTimestamp :: UTCTime
+  , gaeTenantId :: TenantId
+  , gaeSubjectId :: SubjectId
+  , gaeArtifactId :: ArtifactId
+  , gaeOperation :: GovernanceOperation
+  , gaePreviousState :: ArtifactState
+  , gaeNewState :: ArtifactState
+  , gaeCorrelationId :: CorrelationId
+  }
+
+data GovernanceOperation
+  = OpHide
+  | OpUnhide
+  | OpArchive
+  | OpUnarchive
+  | OpSupersede ArtifactId
+```
+
+### Type-Level Delete Prevention
+
+The storage module uses the type system to prevent accidental delete operations:
+
+```haskell
+-- The storage interface does NOT include delete
+class ArtifactStorage s where
+  createArtifact :: s -> TenantId -> ArtifactSpec -> IO ArtifactId
+  readArtifact :: s -> TenantId -> ArtifactId -> IO (Maybe Artifact)
+  listArtifacts :: s -> TenantId -> ListOptions -> IO [ArtifactSummary]
+  updateMetadata :: s -> TenantId -> ArtifactId -> MetadataUpdate -> IO ()
+  generatePresignedUrl :: s -> TenantId -> ArtifactId -> PresignOptions -> IO PresignedUrl
+  -- NO deleteArtifact method
+
+-- If delete is ever needed for platform operations (NOT MCP):
+-- It would live in a separate, privileged module with explicit authorization
+```
+
+### Validation Tests
+
+```haskell
+-- test/Storage/GovernanceSpec.hs
+
+spec :: Spec
+spec = describe "Artifact Governance" $ do
+  it "hides artifact successfully" $ do
+    -- ...
+
+  it "archives artifact successfully" $ do
+    -- ...
+
+  it "supersedes artifact with lineage" $ do
+    -- ...
+
+  it "does not expose delete operation" $ do
+    -- Compile-time verification: no delete function in public API
+    -- Runtime verification: no MCP tool for delete
+    shouldNotCompile "deleteArtifact"
+
+  it "audit trail records all operations" $ do
+    -- ...
+```
 
 ## Retention Boundary
 

@@ -5,89 +5,68 @@ where
 
 import Control.Monad (unless)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import System.Environment (lookupEnv)
 import System.Exit (ExitCode (ExitSuccess))
 import System.IO.Unsafe (unsafePerformIO)
 import System.Process (readProcessWithExitCode)
-import Test.Hspec (Spec, describe, it, pendingWith, shouldBe, shouldContain)
+import Test.Hspec (Spec, describe, it, shouldBe, shouldContain)
 
 spec :: Spec
 spec =
   describe "integration harness" $ do
-    it "validates deterministic helper processes through the outer-container CLI" $
-      runIfEnabled $ do
-        ensureOuterContainer
-        output <- runOuterCliExpectSuccess ["validate", "boundary"]
-        output `shouldContain` "Boundary validation passed."
+    it "validates deterministic helper processes through the outer-container CLI" $ do
+      ensureOuterContainer
+      output <- runOuterCliExpectSuccess ["validate", "boundary"]
+      output `shouldContain` "Boundary validation passed."
 
-    it "runs the FFmpeg adapter against deterministic fixtures through the outer-container CLI" $
-      runIfEnabled $ do
-        ensureOuterContainer
-        output <- runOuterCliExpectSuccess ["validate", "ffmpeg-adapter"]
-        output `shouldContain` "FFmpeg adapter validation passed."
+    it "runs the FFmpeg adapter against deterministic fixtures through the outer-container CLI" $ do
+      ensureOuterContainer
+      output <- runOuterCliExpectSuccess ["validate", "ffmpeg-adapter"]
+      output `shouldContain` "FFmpeg adapter validation passed."
 
-    it "runs the sequential executor validation through the outer-container CLI" $
-      runIfEnabled $ do
-        ensureOuterContainer
-        output <- runOuterCliExpectSuccess ["validate", "executor"]
-        output `shouldContain` "Executor validation passed."
+    it "runs the sequential executor validation through the outer-container CLI" $ do
+      ensureOuterContainer
+      output <- runOuterCliExpectSuccess ["validate", "executor"]
+      output `shouldContain` "Executor validation passed."
 
-    it "runs the worker runtime validation through the outer-container CLI" $
-      runIfEnabled $ do
-        ensureOuterEnvironment
-        output <- runOuterCliExpectSuccess ["validate", "worker"]
-        output `shouldContain` "Worker validation passed."
+    it "runs the worker runtime validation through the outer-container CLI" $ do
+      ensureOuterEnvironment
+      output <- runOuterCliExpectSuccess ["validate", "worker"]
+      output `shouldContain` "Worker validation passed."
 
-    it "validates the cluster through the outer-container CLI" $
-      runIfEnabled $ do
-        ensureOuterEnvironment
-        _ <- runOuterCliExpectSuccess ["validate", "cluster"]
-        pure ()
+    it "validates the cluster through the outer-container CLI" $ do
+      ensureOuterEnvironment
+      _ <- runOuterCliExpectSuccess ["validate", "cluster"]
+      pure ()
 
-    it "runs a real successful and failing DAG end to end through the outer-container CLI" $
-      runIfEnabled $ do
-        ensureOuterEnvironment
-        output <- runOuterCliExpectSuccess ["validate", "e2e"]
-        output `shouldContain` "End-to-end validation passed."
+    it "runs a real successful and failing DAG end to end through the outer-container CLI" $ do
+      ensureOuterEnvironment
+      output <- runOuterCliExpectSuccess ["validate", "e2e"]
+      output `shouldContain` "End-to-end validation passed."
 
-    it "publishes and consumes a validation lifecycle through real Pulsar" $
-      runIfEnabled $ do
-        ensureOuterEnvironment
-        output <- runOuterCliExpectSuccess ["validate", "pulsar"]
-        output `shouldContain` "Pulsar validation passed."
+    it "publishes and consumes a validation lifecycle through real Pulsar" $ do
+      ensureOuterEnvironment
+      output <- runOuterCliExpectSuccess ["validate", "pulsar"]
+      output `shouldContain` "Pulsar validation passed."
 
-    it "round-trips immutable objects through real MinIO" $
-      runIfEnabled $ do
-        ensureOuterEnvironment
-        output <- runOuterCliExpectSuccess ["validate", "minio"]
-        output `shouldContain` "MinIO validation passed."
+    it "round-trips immutable objects through real MinIO" $ do
+      ensureOuterEnvironment
+      output <- runOuterCliExpectSuccess ["validate", "minio"]
+      output `shouldContain` "MinIO validation passed."
 
-    it "exercises the MCP transport through the outer-container CLI" $
-      runIfEnabled $ do
-        ensureOuterEnvironment
-        output <- runOuterCliExpectSuccess ["validate", "mcp"]
-        output `shouldContain` "MCP validation passed."
+    it "exercises the MCP transport through the outer-container CLI" $ do
+      ensureOuterEnvironment
+      output <- runOuterCliExpectSuccess ["validate", "mcp"]
+      output `shouldContain` "MCP validation passed."
 
-    it "runs the inference advisory mode validation through the outer-container CLI" $
-      runIfEnabled $ do
-        ensureOuterContainer
-        output <- runOuterCliExpectSuccess ["validate", "inference"]
-        output `shouldContain` "Inference validation passed."
+    it "runs the inference advisory mode validation through the outer-container CLI" $ do
+      ensureOuterContainer
+      output <- runOuterCliExpectSuccess ["validate", "inference"]
+      output `shouldContain` "Inference validation passed."
 
-    it "exercises the observability surface through the outer-container CLI" $
-      runIfEnabled $ do
-        ensureOuterEnvironment
-        output <- runOuterCliExpectSuccess ["validate", "observability"]
-        output `shouldContain` "Observability validation passed."
-
-runIfEnabled :: IO () -> IO ()
-runIfEnabled action = do
-  enabled <- lookupEnv "STUDIOMCP_RUN_INTEGRATION"
-  case enabled of
-    Just "1" -> action
-    _ ->
-      pendingWith
-        "set STUDIOMCP_RUN_INTEGRATION=1 to run the outer-container integration workflow"
+    it "exercises the observability surface through the outer-container CLI" $ do
+      ensureOuterEnvironment
+      output <- runOuterCliExpectSuccess ["validate", "observability"]
+      output `shouldContain` "Observability validation passed."
 
 ensureOuterContainer :: IO ()
 ensureOuterContainer = do

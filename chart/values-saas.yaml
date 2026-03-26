@@ -1,0 +1,230 @@
+# Production SaaS configuration
+# Use with: helm install studiomcp chart -f chart/values.yaml -f chart/values-saas.yaml
+#
+# All third-party services deployed via HA Helm charts per Third-Party Service
+# Deployment Doctrine. See documents/engineering/k8s_storage.md
+
+image:
+  pullPolicy: Always
+
+global:
+  tls:
+    enabled: true
+    secretName: studiomcp-tls
+  # Explicit null storage class - prevents dynamic provisioning
+  # See documents/engineering/k8s_storage.md for storage policy
+  storageClass: "studiomcp-manual"
+
+auth:
+  enabled: true
+
+# MCP server with autoscaling for production
+studiomcp:
+  replicas: 3
+  service:
+    type: ClusterIP
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+  health:
+    enabled: true
+
+# Worker pool with autoscaling
+worker:
+  enabled: true
+  replicas: 3
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 4000m
+      memory: 4Gi
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 70
+
+# BFF with autoscaling
+bff:
+  enabled: true
+  replicas: 2
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 70
+
+# LLM reference disabled in production (use external API)
+llmReference:
+  enabled: false
+
+# Ingress with TLS
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "1024m"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+  hosts:
+    - host: studiomcp.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+          service: studiomcp
+          port: 3000
+        - path: /api
+          pathType: Prefix
+          service: bff
+          port: 3002
+        - path: /auth
+          pathType: Prefix
+          service: keycloak
+          port: 8080
+  tls:
+    - secretName: studiomcp-tls
+      hosts:
+        - studiomcp.example.com
+
+# Secrets configuration
+secrets:
+  external: true
+  jwt:
+    jwksUri: "http://studiomcp-keycloak:8080/realms/studiomcp/protocol/openid-connect/certs"
+
+# ============================================================================
+# Third-Party Service Subcharts - Production Configuration
+# ============================================================================
+
+# MinIO with production HA and larger storage
+minio:
+  enabled: true
+  mode: distributed
+  replicas: 4
+  rootUser: "CHANGE_ME_IN_PRODUCTION"
+  rootPassword: "CHANGE_ME_IN_PRODUCTION"
+  persistence:
+    enabled: true
+    storageClass: "studiomcp-manual"
+    size: 500Gi
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+
+# Pulsar with production HA
+pulsar:
+  enabled: true
+  zookeeper:
+    replicaCount: 3
+    persistence:
+      storageClassName: "studiomcp-manual"
+      size: 20Gi
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+  bookkeeper:
+    replicaCount: 3
+    persistence:
+      storageClassName: "studiomcp-manual"
+      size: 50Gi
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+  broker:
+    replicaCount: 3
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+  proxy:
+    replicaCount: 2
+
+# PostgreSQL-HA with production settings
+postgresql-ha:
+  enabled: true
+  postgresql:
+    replicaCount: 3
+    password: "CHANGE_ME_IN_PRODUCTION"
+    repmgrPassword: "CHANGE_ME_IN_PRODUCTION"
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+  persistence:
+    enabled: true
+    storageClass: "studiomcp-manual"
+    size: 50Gi
+  pgpool:
+    replicaCount: 2
+    adminPassword: "CHANGE_ME_IN_PRODUCTION"
+
+# Redis with Sentinel mode for production
+redis:
+  enabled: true
+  architecture: replication
+  auth:
+    enabled: true
+    password: "CHANGE_ME_IN_PRODUCTION"
+  sentinel:
+    enabled: true
+  master:
+    persistence:
+      enabled: true
+      storageClass: "studiomcp-manual"
+      size: 10Gi
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
+  replica:
+    replicaCount: 3
+    persistence:
+      enabled: true
+      storageClass: "studiomcp-manual"
+      size: 10Gi
+
+# Keycloak with production settings
+keycloak:
+  enabled: true
+  replicaCount: 2
+  auth:
+    adminUser: admin
+    adminPassword: "CHANGE_ME_IN_PRODUCTION"
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2000m
+      memory: 2Gi

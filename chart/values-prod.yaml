@@ -1,18 +1,56 @@
+# Production configuration (standalone, non-SaaS)
+# Use with: helm install studiomcp chart -f chart/values.yaml -f chart/values-prod.yaml
+
 image:
   pullPolicy: IfNotPresent
 
+# Multi-replica deployment
 studiomcp:
   replicas: 2
+  autoscaling:
+    enabled: false
+  health:
+    enabled: true
 
+# Worker pool
+worker:
+  enabled: true
+  replicas: 2
+  autoscaling:
+    enabled: false
+
+# Redis with persistence
+redis:
+  enabled: true
+  persistence:
+    enabled: true
+    size: 5Gi
+
+# Keycloak enabled
+keycloak:
+  enabled: true
+
+# PostgreSQL with persistence
+postgres:
+  enabled: true
+  persistence:
+    enabled: true
+    size: 10Gi
+
+# Pulsar with persistence
 pulsar:
+  enabled: true
   persistence:
     enabled: true
     size: 20Gi
 
+# MinIO with persistence
 minio:
+  enabled: true
   persistence:
     enabled: true
     size: 100Gi
 
+# LLM reference enabled for production inference
 llmReference:
   enabled: true

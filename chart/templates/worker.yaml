@@ -1,0 +1,119 @@
+{{- if .Values.worker.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "studiomcp.fullname" . }}-worker
+  labels:
+    app.kubernetes.io/name: {{ include "studiomcp.fullname" . }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ .Values.worker.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "studiomcp.fullname" . }}
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "studiomcp.fullname" . }}
+        app.kubernetes.io/component: worker
+    spec:
+      serviceAccountName: {{ include "studiomcp.fullname" . }}
+      containers:
+        - name: worker
+          image: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["studiomcp", "worker"]
+          env:
+            - name: STUDIO_MCP_MODE
+              value: "worker"
+            - name: STUDIO_MCP_WORKER_PORT
+              value: "3002"
+            # Pulsar subchart service endpoints
+            - name: STUDIO_MCP_PULSAR_HTTP_URL
+              value: "http://{{ .Release.Name }}-pulsar-proxy:8080"
+            - name: STUDIO_MCP_PULSAR_BINARY_URL
+              value: "pulsar://{{ .Release.Name }}-pulsar-proxy:6650"
+            # MinIO subchart service endpoint
+            - name: STUDIO_MCP_MINIO_ENDPOINT
+              value: "http://{{ .Release.Name }}-minio:9000"
+            - name: STUDIO_MCP_MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-minio
+                  key: rootUser
+            - name: STUDIO_MCP_MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-minio
+                  key: rootPassword
+            {{- if .Values.redis.enabled }}
+            # Redis subchart service endpoint (Sentinel mode)
+            - name: STUDIO_MCP_REDIS_URL
+              value: "redis://{{ .Release.Name }}-redis:6379"
+            - name: STUDIO_MCP_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-redis
+                  key: redis-password
+            {{- end }}
+          ports:
+            - containerPort: 3002
+              name: http
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+          {{- if .Values.worker.health.enabled }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.worker.health.livenessProbe.path }}
+              port: {{ .Values.worker.health.livenessProbe.port }}
+            initialDelaySeconds: {{ .Values.worker.health.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.worker.health.livenessProbe.periodSeconds }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.worker.health.readinessProbe.path }}
+              port: {{ .Values.worker.health.readinessProbe.port }}
+            initialDelaySeconds: {{ .Values.worker.health.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.worker.health.readinessProbe.periodSeconds }}
+          {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "studiomcp.fullname" . }}-worker
+  labels:
+    app.kubernetes.io/name: {{ include "studiomcp.fullname" . }}
+    app.kubernetes.io/component: worker
+spec:
+  selector:
+    app.kubernetes.io/name: {{ include "studiomcp.fullname" . }}
+    app.kubernetes.io/component: worker
+  ports:
+    - name: http
+      port: 3002
+      targetPort: http
+{{- if .Values.worker.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "studiomcp.fullname" . }}-worker
+  labels:
+    app.kubernetes.io/name: {{ include "studiomcp.fullname" . }}
+    app.kubernetes.io/component: worker
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "studiomcp.fullname" . }}-worker
+  minReplicas: {{ .Values.worker.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.worker.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.worker.autoscaling.targetCPUUtilizationPercentage }}
+{{- end }}
+{{- end }}

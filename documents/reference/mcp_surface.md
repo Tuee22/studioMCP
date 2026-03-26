@@ -9,18 +9,21 @@
 
 ## Current Repo Status
 
-The current repository does not yet expose a true MCP public surface.
+The current repository now exposes a real MCP surface alongside the legacy `/runs` migration surface.
 
 Implemented today:
 
-- a custom DAG-oriented HTTP API on `studiomcp server`
-- a direct execution HTTP worker surface
-- an advisory inference HTTP surface
-- admin and observability endpoints
+- MCP JSON-RPC handling with `initialize`, `tools/*`, `resources/*`, and `prompts/*`
+- Streamable HTTP on `POST /mcp` plus SSE bootstrap on `GET /mcp`
+- admin and observability endpoints on `/healthz`, `/version`, and `/metrics`
+- `validate mcp-stdio` and `validate mcp-http` transport validators
+- a custom DAG-oriented `/runs` HTTP API that still coexists for migration
 
-Current limitation:
+Current limitations:
 
-- the current `server` endpoint family is not standards-compliant MCP and should be treated as a migration surface only
+- the legacy `/runs` surface has not yet been retired
+- the stdio transport is validated locally but is not yet exposed as a `studiomcp stdio` CLI entry point
+- production auth hardening still lacks cryptographic JWT signature verification
 
 ## Target Public MCP Surface
 
@@ -30,6 +33,208 @@ The target public MCP surface is:
 - Streamable HTTP for remote clients and BFF mediation
 - a single MCP endpoint for remote protocol traffic
 - separate operational endpoints for `/healthz`, `/version`, and `/metrics`
+
+## Stdio Transport Specification
+
+The stdio transport is used for local development, CLI tooling, and MCP Inspector integration.
+
+### Message Framing
+
+Messages are newline-delimited JSON:
+
+```
+<JSON message>\n
+<JSON message>\n
+...
+```
+
+Each message is a complete JSON-RPC 2.0 object on a single line. No length prefix is used.
+
+### Streams
+
+| Stream | Direction | Purpose |
+|--------|-----------|---------|
+| `stdin` | Client → Server | JSON-RPC requests and notifications |
+| `stdout` | Server → Client | JSON-RPC responses and notifications |
+| `stderr` | Server → (logs) | Diagnostic logging only (not protocol) |
+
+### Lifecycle
+
+1. Server starts and waits for `initialize` on stdin
+2. Server sends `initialize` response on stdout
+3. Client sends `notifications/initialized` on stdin
+4. Normal request/response flow on stdin/stdout
+5. Client closes stdin or sends shutdown to end session
+
+### Example Session
+
+```
+→ {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"claude-code","version":"1.0.0"}}}
+← {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{},"resources":{},"prompts":{}},"serverInfo":{"name":"studioMCP","version":"0.1.0"}}}
+→ {"jsonrpc":"2.0","method":"notifications/initialized"}
+→ {"jsonrpc":"2.0","id":2,"method":"tools/list"}
+← {"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"workflow.submit","description":"Submit a DAG for execution","inputSchema":{...}}]}}
+```
+
+### CLI Invocation
+
+```bash
+studiomcp validate mcp-stdio       # Validate stdio transport
+```
+
+**Note**: The stdio transport core exists and `validate mcp-stdio` passes locally. A first-class `studiomcp stdio` entry point is still future CLI work.
+
+## Streamable HTTP Transport Specification
+
+The Streamable HTTP transport is used for remote SaaS access and BFF mediation.
+
+### Endpoint
+
+```
+POST /mcp
+```
+
+All MCP protocol traffic uses a single HTTP endpoint. This is not a REST API with multiple routes.
+
+### Request Format
+
+```http
+POST /mcp HTTP/1.1
+Host: api.example.com
+Content-Type: application/json
+Authorization: Bearer <token>
+Mcp-Session-Id: <session-id>          (optional, for session resumption)
+
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{...}}
+```
+
+### Response Format
+
+For synchronous responses:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Mcp-Session-Id: <session-id>
+
+{"jsonrpc":"2.0","id":1,"result":{...}}
+```
+
+For streaming responses (Server-Sent Events):
+
+```http
+HTTP/1.1 200 OK
+Content-Type: text/event-stream
+Mcp-Session-Id: <session-id>
+
+event: message
+data: {"jsonrpc":"2.0","id":1,"result":{...}}
+
+event: message
+data: {"jsonrpc":"2.0","method":"notifications/progress","params":{...}}
+```
+
+### Session Management
+
+| Header | Purpose |
+|--------|---------|
+| `Mcp-Session-Id` | Session identifier for correlation and resumption |
+| `Authorization` | Bearer token for authentication |
+
+Session behavior:
+- First request (initialize) creates a new session
+- Server returns `Mcp-Session-Id` in response
+- Client includes `Mcp-Session-Id` in subsequent requests
+- Sessions expire after inactivity timeout (default: 30 minutes)
+- Session state currently flows through the session-store abstraction with local horizontal-scale validation; production Redis hardening remains open work
+
+### HTTP Status Codes
+
+| Status | Meaning |
+|--------|---------|
+| `200` | Success (check JSON-RPC response for errors) |
+| `401` | Authentication required or token invalid |
+| `403` | Authorization denied |
+| `404` | Endpoint not found |
+| `429` | Rate limit exceeded |
+| `500` | Server error |
+
+Note: JSON-RPC protocol errors return HTTP 200 with error in the JSON body.
+
+### CLI Validation
+
+```bash
+studiomcp validate mcp-http        # Validate HTTP transport
+```
+
+**Note**: `validate mcp-http` exercises initialize, `tools/list`, `resources/list`, `prompts/list`, `ping`, parse-error handling, unknown-method handling, and the SSE bootstrap event.
+
+## Capability Negotiation
+
+### Initialize Request
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "initialize",
+  "params": {
+    "protocolVersion": "2024-11-05",
+    "capabilities": {
+      "roots": { "listChanged": true },
+      "sampling": {}
+    },
+    "clientInfo": {
+      "name": "my-client",
+      "version": "1.0.0"
+    }
+  }
+}
+```
+
+### Initialize Response
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "protocolVersion": "2024-11-05",
+    "capabilities": {
+      "tools": { "listChanged": true },
+      "resources": { "subscribe": true, "listChanged": true },
+      "prompts": { "listChanged": true },
+      "logging": {}
+    },
+    "serverInfo": {
+      "name": "studioMCP",
+      "version": "0.1.0"
+    }
+  }
+}
+```
+
+### Server Capabilities
+
+| Capability | Description | Supported |
+|------------|-------------|-----------|
+| `tools` | Tool invocation | Yes |
+| `tools.listChanged` | Notify when tool list changes | Yes |
+| `resources` | Resource access | Yes |
+| `resources.subscribe` | Resource change subscriptions | Yes |
+| `resources.listChanged` | Notify when resource list changes | Yes |
+| `prompts` | Prompt templates | Yes |
+| `prompts.listChanged` | Notify when prompt list changes | Yes |
+| `logging` | Server-to-client logging | Yes |
+
+### Protocol Version
+
+The target protocol version is `2024-11-05` (MCP specification version).
+
+Version negotiation:
+- Client sends requested version in `initialize`
+- Server responds with actual version it will use
+- If versions incompatible, server returns error `-32003`
 
 ## Capability Scope
 

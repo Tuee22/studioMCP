@@ -18,6 +18,30 @@
 
 This document defines the required guarantees for a future parallel scheduler. It does not claim that production parallel execution code exists today.
 
+## Execution Model
+
+A parallel scheduler reduces wall-clock time for workflows with independent stages:
+
+```
+DAG: A -> [B, C] -> D
+
+Sequential: A, B, C, D (4 time units)
+Parallel:   A, (B || C), D (3 time units)
+```
+
+Independent nodes (B and C above) may execute concurrently while respecting dependency edges.
+
+## Design Rationale
+
+Parallel scheduling was chosen for the following reasons:
+
+- **Performance**: Parallel execution reduces total workflow time for DAGs with independent branches
+- **Type safety**: Typed boundaries prevent data races between parallel stages
+- **Observability**: Deterministic scheduling enables reproducible debugging
+- **Backward compatibility**: Sequential semantics preserved for linear DAGs
+
+This design implies that worker pool sizing affects parallel throughput, Pulsar topic partitioning must support concurrent consumers, resource quotas must account for parallel resource consumption, and monitoring must track both per-stage and aggregate metrics.
+
 ## Correctness Baseline
 
 - the sequential executor remains the correctness baseline

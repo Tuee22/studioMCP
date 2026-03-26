@@ -7,7 +7,7 @@ test:
 	cabal test unit-tests
 
 test-integration:
-	STUDIOMCP_RUN_INTEGRATION=1 cabal test integration-tests
+	cabal test integration-tests
 
 repl:
 	cabal repl

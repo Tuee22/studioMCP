@@ -55,6 +55,17 @@ Remote MCP traffic must terminate at a single coherent Streamable HTTP MCP endpo
 
 WebSockets are not the canonical transport.
 
+### Transport Selection Rationale
+
+Both transports were selected for specific reasons:
+
+- **MCP compliance**: Both stdio and Streamable HTTP are specified in the MCP standard
+- **Use case coverage**: stdio enables CLI tooling (e.g., Claude Code), HTTP enables browser SaaS
+- **Security model alignment**: HTTP transport integrates with Keycloak OAuth flow
+- **Horizontal scaling**: HTTP transport supports non-sticky load balancing with externalized sessions
+
+This dual-transport approach requires maintaining two transport implementations. Testing must cover both transport paths, and documentation must clarify transport selection for different deployment scenarios.
+
 ## Transport Split
 
 ```mermaid
@@ -137,14 +148,173 @@ Inference-oriented prompts may exist, but the MCP server must remain authoritati
 - summary creation
 - artifact policy
 
+## JSON-RPC 2.0 Message Format
+
+All MCP messages use JSON-RPC 2.0 framing. The protocol defines three message types:
+
+### Request
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": <string | number>,
+  "method": "<method_name>",
+  "params": { ... }
+}
+```
+
+- `id`: Client-provided identifier for correlating responses. Must be unique per session.
+- `method`: The MCP method name (e.g., `initialize`, `tools/list`, `tools/call`).
+- `params`: Method-specific parameters object.
+
+### Response
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": <string | number>,
+  "result": { ... }
+}
+```
+
+Or for errors:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": <string | number>,
+  "error": {
+    "code": <integer>,
+    "message": "<error_message>",
+    "data": { ... }
+  }
+}
+```
+
+### Notification
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "<notification_name>",
+  "params": { ... }
+}
+```
+
+Notifications have no `id` field and expect no response.
+
+### Core MCP Methods
+
+| Method | Direction | Description |
+|--------|-----------|-------------|
+| `initialize` | Client → Server | Begin session, negotiate capabilities |
+| `notifications/initialized` | Client → Server | Confirm initialization complete |
+| `tools/list` | Client → Server | List available tools |
+| `tools/call` | Client → Server | Invoke a tool |
+| `resources/list` | Client → Server | List available resources |
+| `resources/read` | Client → Server | Read a resource |
+| `prompts/list` | Client → Server | List available prompts |
+| `prompts/get` | Client → Server | Get a prompt template |
+| `notifications/progress` | Server → Client | Report progress on long operations |
+| `logging/message` | Server → Client | Send log message to client |
+
+## Protocol State Machine
+
+The MCP protocol follows a strict lifecycle state machine:
+
+```mermaid
+flowchart TB
+    Start[Start] --> Uninitialized[Uninitialized]
+    Uninitialized --> Initializing[Initializing]
+    Initializing --> Ready[Ready]
+    Initializing --> Failed[Failed]
+    Ready --> Ready
+    Ready --> ShuttingDown[ShuttingDown]
+    ShuttingDown --> Terminated[Terminated]
+    Failed --> End[End]
+    Terminated --> End
+```
+
+### State Descriptions
+
+| State | Description | Valid Operations |
+|-------|-------------|------------------|
+| `Uninitialized` | Connection established, no initialize yet | Only `initialize` accepted |
+| `Initializing` | Initialize received, awaiting confirmation | Only `notifications/initialized` accepted |
+| `Ready` | Session active, normal operation | All capability methods |
+| `ShuttingDown` | Graceful shutdown in progress | Cleanup only |
+| `Terminated` | Session ended | None |
+| `Failed` | Initialization or fatal error | None |
+
+### Lifecycle Enforcement
+
+- Requests received before `initialize` must be rejected with error code `-32002` (Server not initialized)
+- Requests received during `Initializing` (except `notifications/initialized`) must be rejected
+- The server must track lifecycle state per session
+- Lifecycle violations are protocol errors, not domain errors
+
+## Error Codes
+
+The protocol uses JSON-RPC 2.0 standard error codes plus MCP-specific and domain-specific ranges:
+
+### JSON-RPC 2.0 Standard Errors
+
+| Code | Name | Description |
+|------|------|-------------|
+| `-32700` | Parse error | Invalid JSON |
+| `-32600` | Invalid request | JSON is not a valid request object |
+| `-32601` | Method not found | Method does not exist or not available |
+| `-32602` | Invalid params | Invalid method parameters |
+| `-32603` | Internal error | Internal JSON-RPC error |
+
+### MCP Protocol Errors (-32000 to -32099)
+
+| Code | Name | Description |
+|------|------|-------------|
+| `-32001` | Connection closed | Transport connection lost |
+| `-32002` | Server not initialized | Request before initialize |
+| `-32003` | Unsupported protocol version | Version negotiation failed |
+| `-32004` | Capability not supported | Requested capability not available |
+
+### studioMCP Domain Errors (-31000 to -31999)
+
+| Code | Name | Description |
+|------|------|-------------|
+| `-31001` | Authentication required | Missing or invalid bearer token |
+| `-31002` | Authorization denied | Insufficient scopes or permissions |
+| `-31003` | Tenant not found | Invalid tenant context |
+| `-31004` | DAG validation failed | Schema or structural validation error |
+| `-31005` | Execution failed | Runtime execution error |
+| `-31006` | Resource not found | Requested resource does not exist |
+| `-31007` | Artifact access denied | Artifact not accessible to tenant |
+| `-31008` | Quota exceeded | Tenant quota limit reached |
+
+### Error Data Structure
+
+Domain errors should include structured `data` for debugging:
+
+```json
+{
+  "code": -31004,
+  "message": "DAG validation failed",
+  "data": {
+    "category": "ValidationFailure",
+    "details": [
+      { "path": "nodes[0].kind", "message": "unknown node kind: invalid" }
+    ],
+    "correlationId": "req-abc-123"
+  }
+}
+```
+
 ## Error Model
 
 The protocol must distinguish:
 
-- protocol errors
-- authn/authz failures
-- tool or domain failures
-- transport failures
+- protocol errors (JSON-RPC level: -32700 to -32603, -32000 to -32099)
+- authn/authz failures (domain level: -31001, -31002)
+- tool or domain failures (domain level: -31003 to -31999)
+- transport failures (connection-level, not JSON-RPC)
 
 Structured domain failures belong in tool results or typed resource errors. Malformed JSON-RPC, invalid lifecycle order, or unsupported methods are protocol-level failures.
 
@@ -160,6 +330,103 @@ The Haskell implementation should be organized around explicit layers:
 - infrastructure adapters for storage, messaging, and external tools
 
 Because there is no official Haskell MCP SDK at the time this document was written, `studioMCP` must own these layers explicitly rather than assuming an ecosystem framework will define them correctly.
+
+### Target Module Structure
+
+```
+src/StudioMCP/MCP/
+├── JsonRpc.hs              -- JSON-RPC 2.0 types and Aeson instances
+├── Core.hs                 -- Protocol loop and dispatch
+├── Context.hs              -- Request context threading
+├── Protocol/
+│   ├── Types.hs            -- MCP protocol types (capabilities, etc.)
+│   ├── StateMachine.hs     -- Pure lifecycle state machine
+│   └── Errors.hs           -- MCP-specific error types
+├── Transport/
+│   ├── Types.hs            -- Transport abstraction typeclass
+│   ├── Stdio.hs            -- stdin/stdout transport
+│   └── Http.hs             -- Streamable HTTP transport
+├── Session/
+│   ├── Types.hs            -- Session types (SessionId, Session, etc.)
+│   └── Store.hs            -- Session store interface
+├── Tools/                  -- Phase 18: Tool implementations
+├── Resources/              -- Phase 18: Resource implementations
+└── Prompts/                -- Phase 18: Prompt implementations
+```
+
+### Core Type Signatures
+
+The following Haskell type signatures define the implementation contract:
+
+```haskell
+-- Transport abstraction
+class Transport t where
+  receiveMessage :: TransportHandle t -> IO (Either TransportError RawMessage)
+  sendMessage :: TransportHandle t -> RawMessage -> IO (Either TransportError ())
+  closeTransport :: TransportHandle t -> IO ()
+
+-- Protocol state machine (pure)
+data LifecycleState = Uninitialized | Initializing | Ready | ShuttingDown | Terminated | Failed
+data LifecycleEvent = InitializeReceived | InitializedReceived | MethodReceived | ShutdownReceived | ErrorOccurred
+transition :: LifecycleState -> LifecycleEvent -> Either ProtocolError LifecycleState
+
+-- Session types
+newtype SessionId = SessionId Text
+data Session = Session
+  { sessionId :: SessionId
+  , sessionState :: LifecycleState
+  , sessionProtocolVersion :: Maybe ProtocolVersion
+  , sessionCapabilities :: NegotiatedCapabilities
+  , sessionSubject :: Maybe SubjectContext      -- Populated by auth layer
+  , sessionTenant :: Maybe TenantContext        -- Populated by auth layer
+  , sessionCreatedAt :: UTCTime
+  , sessionLastActiveAt :: UTCTime
+  }
+
+-- Request context
+newtype CorrelationId = CorrelationId Text
+data RequestContext = RequestContext
+  { ctxCorrelationId :: CorrelationId
+  , ctxSession :: Session
+  , ctxMethod :: Text
+  , ctxReceivedAt :: UTCTime
+  }
+
+-- JSON-RPC types
+data JsonRpcRequest = JsonRpcRequest
+  { reqJsonRpc :: Text                -- Always "2.0"
+  , reqId :: Maybe Value              -- Absent for notifications
+  , reqMethod :: Text
+  , reqParams :: Maybe Value
+  }
+
+data JsonRpcResponse = JsonRpcResponse
+  { respJsonRpc :: Text               -- Always "2.0"
+  , respId :: Value
+  , respResult :: Maybe Value
+  , respError :: Maybe JsonRpcError
+  }
+
+data JsonRpcError = JsonRpcError
+  { errCode :: Int
+  , errMessage :: Text
+  , errData :: Maybe Value
+  }
+```
+
+### Transport-Agnostic Protocol Core
+
+The protocol core must be transport-agnostic:
+
+```haskell
+-- Main protocol loop (transport-agnostic)
+runProtocol :: Transport t => TransportHandle t -> ProtocolEnv -> IO ()
+
+-- Message dispatch (pure routing)
+dispatch :: RequestContext -> JsonRpcRequest -> IO JsonRpcResponse
+```
+
+This design allows the same protocol logic to be tested via in-memory transports, exercised via stdio for local development, and deployed via HTTP for remote access.
 
 ## Compatibility Rules
 

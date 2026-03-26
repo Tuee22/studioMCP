@@ -21,3 +21,5 @@ examples/assets
 .minio
 .pulsar
 docker-compose.override.yaml
+chart/Chart.lock
+chart/charts/

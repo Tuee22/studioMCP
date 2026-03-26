@@ -52,10 +52,7 @@ validateDocsCommand = do
         , "documents/reference/mcp_surface.md"
         , "documents/reference/mcp_tool_catalog.md"
         , "documents/reference/web_portal_surface.md"
-        , "documents/adr/0001_mcp_transport.md"
-        , "documents/adr/0002_parallel_scheduling.md"
-        , "documents/adr/0003_session_externalization.md"
-        , "documents/adr/0004_non_destructive_artifact_policy.md"
+        -- ADR files removed per documentation_standards.md (no ADRs in documents/)
         ]
   requiredProblems <- fmap concat $
     forM requiredFiles $ \path -> do

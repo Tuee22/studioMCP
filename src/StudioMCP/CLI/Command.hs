@@ -34,9 +34,26 @@ data ValidateCommand
   | ValidateBoundaryCommand
   | ValidateFFmpegAdapterCommand
   | ValidateExecutorCommand
-  | ValidateMcpCommand
+  | ValidateMcpCommand -- Legacy MCP validation (deprecated in Phase 18)
+  | ValidateMcpStdioCommand -- Phase 13: MCP over stdio transport
+  | ValidateMcpHttpCommand -- Phase 13: MCP over HTTP transport
+  | ValidateKeycloakCommand -- Phase 14: Keycloak connectivity
+  | ValidateMcpAuthCommand -- Phase 14: MCP auth validation
+  | ValidateSessionStoreCommand -- Phase 15: Session store validation
+  | ValidateHorizontalScaleCommand -- Phase 15: Horizontal scaling validation
+  | ValidateWebBffCommand -- Phase 16: Web BFF validation
+  | ValidateArtifactStorageCommand -- Phase 17: Artifact storage validation
+  | ValidateArtifactGovernanceCommand -- Phase 17: Artifact governance validation
+  | ValidateMcpToolsCommand -- Phase 18: MCP tools validation
+  | ValidateMcpResourcesCommand -- Phase 18: MCP resources validation
+  | ValidateMcpPromptsCommand -- Phase 18: MCP prompts validation
   | ValidateInferenceCommand
   | ValidateObservabilityCommand
+  | ValidateAuditCommand -- Phase 19: Audit validation
+  | ValidateQuotasCommand -- Phase 19: Quota validation
+  | ValidateRateLimitCommand -- Phase 19: Rate limit validation
+  | ValidateMcpConformanceCommand -- Phase 21: MCP protocol conformance
+  | ValidateStoragePolicyCommand -- Storage policy enforcement validation
   deriving (Eq, Show)
 
 data ClusterCommand
@@ -75,8 +92,27 @@ parseCommand args =
     ["validate", "ffmpeg-adapter"] -> Right (ValidateCommand ValidateFFmpegAdapterCommand)
     ["validate", "executor"] -> Right (ValidateCommand ValidateExecutorCommand)
     ["validate", "mcp"] -> Right (ValidateCommand ValidateMcpCommand)
+    ["validate", "mcp-stdio"] -> Right (ValidateCommand ValidateMcpStdioCommand)
+    ["validate", "mcp-http"] -> Right (ValidateCommand ValidateMcpHttpCommand)
+    ["validate", "keycloak"] -> Right (ValidateCommand ValidateKeycloakCommand)
+    ["validate", "mcp-auth"] -> Right (ValidateCommand ValidateMcpAuthCommand)
+    ["validate", "session-store"] -> Right (ValidateCommand ValidateSessionStoreCommand)
+    ["validate", "mcp-session-store"] -> Right (ValidateCommand ValidateSessionStoreCommand)
+    ["validate", "horizontal-scale"] -> Right (ValidateCommand ValidateHorizontalScaleCommand)
+    ["validate", "mcp-horizontal-scale"] -> Right (ValidateCommand ValidateHorizontalScaleCommand)
+    ["validate", "web-bff"] -> Right (ValidateCommand ValidateWebBffCommand)
+    ["validate", "artifact-storage"] -> Right (ValidateCommand ValidateArtifactStorageCommand)
+    ["validate", "artifact-governance"] -> Right (ValidateCommand ValidateArtifactGovernanceCommand)
+    ["validate", "mcp-tools"] -> Right (ValidateCommand ValidateMcpToolsCommand)
+    ["validate", "mcp-resources"] -> Right (ValidateCommand ValidateMcpResourcesCommand)
+    ["validate", "mcp-prompts"] -> Right (ValidateCommand ValidateMcpPromptsCommand)
     ["validate", "inference"] -> Right (ValidateCommand ValidateInferenceCommand)
     ["validate", "observability"] -> Right (ValidateCommand ValidateObservabilityCommand)
+    ["validate", "audit"] -> Right (ValidateCommand ValidateAuditCommand)
+    ["validate", "quotas"] -> Right (ValidateCommand ValidateQuotasCommand)
+    ["validate", "rate-limit"] -> Right (ValidateCommand ValidateRateLimitCommand)
+    ["validate", "mcp-conformance"] -> Right (ValidateCommand ValidateMcpConformanceCommand)
+    ["validate", "storage-policy"] -> Right (ValidateCommand ValidateStoragePolicyCommand)
     ["cluster", "up"] -> Right (ClusterCommand ClusterUpCommand)
     ["cluster", "down"] -> Right (ClusterCommand ClusterDownCommand)
     ["cluster", "status"] -> Right (ClusterCommand ClusterStatusCommand)
@@ -104,9 +140,28 @@ usageText =
     , "  studiomcp validate boundary"
     , "  studiomcp validate ffmpeg-adapter"
     , "  studiomcp validate executor"
-    , "  studiomcp validate mcp"
+    , "  studiomcp validate mcp              # Legacy MCP validation"
+    , "  studiomcp validate mcp-stdio        # MCP over stdio transport"
+    , "  studiomcp validate mcp-http         # MCP over HTTP transport"
+    , "  studiomcp validate keycloak         # Keycloak connectivity"
+    , "  studiomcp validate mcp-auth         # MCP auth validation"
+    , "  studiomcp validate session-store    # Session store validation"
+    , "  studiomcp validate mcp-session-store # Session store validation (alias)"
+    , "  studiomcp validate horizontal-scale # Horizontal scaling validation"
+    , "  studiomcp validate mcp-horizontal-scale # Horizontal scaling validation (alias)"
+    , "  studiomcp validate web-bff          # Web BFF validation"
+    , "  studiomcp validate artifact-storage # Artifact storage validation"
+    , "  studiomcp validate artifact-governance # Artifact governance validation"
+    , "  studiomcp validate mcp-tools        # MCP tools catalog validation"
+    , "  studiomcp validate mcp-resources    # MCP resources catalog validation"
+    , "  studiomcp validate mcp-prompts      # MCP prompts catalog validation"
     , "  studiomcp validate inference"
     , "  studiomcp validate observability"
+    , "  studiomcp validate audit            # Audit trail validation"
+    , "  studiomcp validate quotas           # Quota enforcement validation"
+    , "  studiomcp validate rate-limit       # Rate limiting validation"
+    , "  studiomcp validate mcp-conformance # MCP protocol conformance"
+    , "  studiomcp validate storage-policy # Storage policy enforcement"
     , "  studiomcp cluster up"
     , "  studiomcp cluster down"
     , "  studiomcp cluster status"

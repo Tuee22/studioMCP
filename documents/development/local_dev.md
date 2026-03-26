@@ -22,7 +22,7 @@
 
 - `cabal build all`
 - `cabal test unit-tests`
-- `STUDIOMCP_RUN_INTEGRATION=1 cabal test integration-tests`
+- `cabal test integration-tests` (requires outer container and cluster)
 - `cabal run studiomcp -- validate-dag examples/dags/transcode-basic.yaml`
 - `cabal run studiomcp -- dag validate-fixtures`
 - `cabal run studiomcp -- validate docs`

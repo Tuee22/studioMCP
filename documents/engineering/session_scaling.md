@@ -15,6 +15,17 @@ That requires explicit externalization of any session metadata needed by the rem
 
 All remote session metadata required for correctness lives outside individual listener pods. Durable business state remains outside the session store.
 
+## Design Rationale
+
+Session externalization to Redis was selected for the following reasons:
+
+- **Horizontal scaling**: Stateless pods scale independently without coordination
+- **Operational simplicity**: No sticky session configuration required at the load balancer
+- **Fault tolerance**: Pod restarts do not lose session state
+- **Resource efficiency**: Session memory offloaded from application pods to Redis
+
+This design introduces Redis as a critical dependency. Network latency is added to session operations, Redis cluster sizing must account for session count, and session serialization/deserialization adds processing overhead.
+
 ## Current Repo Note
 
 The current repository does not yet implement the remote session architecture described here. This document defines the target scaling contract.
@@ -62,6 +73,229 @@ Redis is used here for:
 - cross-pod reconnect continuity
 
 Redis is not the artifact store and is not the identity source of truth.
+
+## Redis Key Schema
+
+All MCP session keys use a consistent prefix and structure:
+
+### Key Prefixes
+
+| Prefix | Purpose |
+|--------|---------|
+| `mcp:session:` | Session metadata |
+| `mcp:sub:` | Subscription state |
+| `mcp:cursor:` | Stream cursor positions |
+| `mcp:lock:` | Distributed locks |
+
+### Session Keys
+
+```
+mcp:session:{session_id}
+```
+
+Value: JSON-serialized SessionData
+
+```json
+{
+  "sessionId": "sess-abc123",
+  "state": "Ready",
+  "protocolVersion": "2024-11-05",
+  "capabilities": {
+    "tools": true,
+    "resources": true,
+    "prompts": true
+  },
+  "subject": {
+    "id": "user-uuid",
+    "roles": ["user"]
+  },
+  "tenant": {
+    "id": "tenant-acme"
+  },
+  "createdAt": "2024-01-15T10:30:00Z",
+  "lastActiveAt": "2024-01-15T11:45:00Z"
+}
+```
+
+### Subscription Keys
+
+```
+mcp:sub:{session_id}:{resource_uri}
+```
+
+Value: JSON-serialized subscription state
+
+```json
+{
+  "resourceUri": "studiomcp://tenants/acme/runs/123/events",
+  "subscribedAt": "2024-01-15T11:00:00Z",
+  "lastEventId": "evt-456"
+}
+```
+
+### Cursor Keys
+
+```
+mcp:cursor:{session_id}:{stream_name}
+```
+
+Value: Cursor position (string or number)
+
+### Lock Keys
+
+```
+mcp:lock:session:{session_id}
+```
+
+Value: Pod ID holding the lock, with TTL
+
+## TTL Policies
+
+| Key Type | TTL | Rationale |
+|----------|-----|-----------|
+| Session | 30 minutes | Idle session expiration |
+| Subscription | Session TTL | Tied to session lifetime |
+| Cursor | Session TTL | Tied to session lifetime |
+| Lock | 30 seconds | Short lock duration for failover |
+
+### TTL Refresh
+
+Session TTL is refreshed on every MCP request:
+
+```
+1. Receive MCP request
+2. Lookup session by Mcp-Session-Id header
+3. If found, refresh TTL (EXPIRE command)
+4. Process request
+5. Update lastActiveAt in session data
+```
+
+### TTL Commands
+
+```redis
+# Set session with TTL
+SET mcp:session:{id} {json} EX 1800
+
+# Refresh session TTL
+EXPIRE mcp:session:{id} 1800
+
+# Check TTL remaining
+TTL mcp:session:{id}
+```
+
+## Session Data Serialization
+
+### Format: JSON
+
+Session data is serialized as JSON for:
+
+- Human readability during debugging
+- Compatibility with Redis inspection tools
+- Schema evolution flexibility
+
+### Compression
+
+For sessions with large subscription lists or metadata:
+
+- Compress JSON if >1KB
+- Use gzip compression
+- Store with prefix byte indicating compression
+
+### Haskell Types
+
+```haskell
+-- Session store interface
+class SessionStore s where
+  createSession :: s -> Session -> IO (Either SessionStoreError SessionId)
+  lookupSession :: s -> SessionId -> IO (Maybe Session)
+  updateSession :: s -> SessionId -> (Session -> Session) -> IO (Either SessionStoreError Session)
+  deleteSession :: s -> SessionId -> IO ()
+  touchSession :: s -> SessionId -> IO ()  -- Refresh TTL only
+
+-- Redis implementation
+data RedisSessionStore = RedisSessionStore
+  { redisConnection :: Connection
+  , redisKeyPrefix :: Text
+  , redisSessionTtl :: Int  -- seconds
+  }
+
+instance SessionStore RedisSessionStore where
+  createSession store session = do
+    let key = redisKeyPrefix store <> "session:" <> unSessionId (sessionId session)
+    let value = encode session
+    let ttl = redisSessionTtl store
+    runRedis (redisConnection store) $ setex key ttl value
+    return $ Right (sessionId session)
+
+  lookupSession store sid = do
+    let key = redisKeyPrefix store <> "session:" <> unSessionId sid
+    result <- runRedis (redisConnection store) $ get key
+    case result of
+      Right (Just bytes) -> return $ decode bytes
+      _ -> return Nothing
+
+  touchSession store sid = do
+    let key = redisKeyPrefix store <> "session:" <> unSessionId sid
+    let ttl = redisSessionTtl store
+    void $ runRedis (redisConnection store) $ expire key ttl
+```
+
+## Redis Configuration
+
+### Connection Settings
+
+| Setting | Development | Production |
+|---------|-------------|------------|
+| Host | `localhost` | `redis-master.studiomcp.svc` |
+| Port | 6379 | 6379 |
+| Database | 0 | 0 |
+| Pool Size | 5 | 50 |
+| Timeout | 5s | 5s |
+
+### HA Configuration
+
+Production deployments use Redis Sentinel or Redis Cluster:
+
+```yaml
+# Helm values for Redis HA
+redis:
+  sentinel:
+    enabled: true
+    masterSet: studiomcp-redis
+  replica:
+    replicaCount: 3
+```
+
+### Environment Variables
+
+```bash
+STUDIOMCP_REDIS_HOST=localhost
+STUDIOMCP_REDIS_PORT=6379
+STUDIOMCP_REDIS_PASSWORD=  # Optional
+STUDIOMCP_REDIS_DATABASE=0
+STUDIOMCP_REDIS_POOL_SIZE=10
+STUDIOMCP_SESSION_TTL=1800  # 30 minutes
+```
+
+## Graceful Degradation
+
+### Redis Unavailable
+
+When Redis is unavailable:
+
+1. New sessions cannot be created (reject with 503)
+2. Existing in-flight requests may complete if session was cached
+3. Health check reports degraded status
+4. Reconnecting clients receive reinitialize signal
+
+### Failover Behavior
+
+During Redis failover (Sentinel switching master):
+
+1. Brief connection errors (1-5 seconds typical)
+2. Retry with exponential backoff
+3. Sessions remain valid (data persisted)
+4. No data loss for committed sessions
 
 ## Topology
 

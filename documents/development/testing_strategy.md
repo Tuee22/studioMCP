@@ -7,6 +7,25 @@
 
 > **Purpose**: Canonical testing policy for unit tests, integration tests, protocol validation, auth validation, and runtime verification in `studioMCP`.
 
+## No Silent Failures Policy
+
+Tests must never be silently skipped, suppressed, or gated behind environment variables.
+
+Forbidden practices:
+
+- environment variable gates that convert tests to "pending"
+- catch-all exception handlers that swallow failures
+- conditional test registration based on environment
+- any mechanism that makes `0 failures` appear when tests haven't run
+
+Acceptable practices:
+
+- tests that fail with clear error messages when infrastructure is unavailable
+- tests that fail with actionable remediation steps (e.g., "run `studiomcp cluster up` first")
+- CI configurations that run different test suites in different jobs (with explicit job names)
+
+Rationale: a test suite that reports "0 failures" must mean all tests actually executed and passed. Silent skips create false confidence and hide integration gaps.
+
 ## Testing Layers
 
 `studioMCP` requires five test layers:

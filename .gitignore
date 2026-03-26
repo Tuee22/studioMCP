@@ -51,6 +51,10 @@ docker-compose.override.yaml
 .pulsar/
 tmp/
 
+# Helm generated files
+chart/Chart.lock
+chart/charts/
+
 # Media artifacts
 artifacts/
 scratch/

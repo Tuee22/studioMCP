@@ -38,18 +38,32 @@ import StudioMCP.DAG.Summary (RunId (..), RunStatus (RunRunning), Summary, summa
 import StudioMCP.DAG.Types (DagSpec)
 import StudioMCP.DAG.Validator (validateDag)
 import StudioMCP.MCP.Protocol (SubmissionResponse (..))
+import StudioMCP.MCP.Resources (ResourceCatalog, newResourceCatalogWithRuntime)
+import StudioMCP.MCP.Tools (ToolCatalog, newToolCatalogWithRuntime)
 import StudioMCP.Messaging.Topics (defaultExecutionTopic)
+import StudioMCP.Observability.McpMetrics (McpMetricsService, newMcpMetricsService)
+import StudioMCP.Observability.Quotas (QuotaService, defaultQuotaConfig, newQuotaService)
+import StudioMCP.Observability.RateLimiting (RateLimiterService, defaultRateLimiterConfig, newRateLimiterService)
 import StudioMCP.Result.Failure (FailureDetail)
 import StudioMCP.Result.Types (Result (Failure, Success))
+import StudioMCP.Storage.Governance (GovernanceService, defaultGovernancePolicy, newGovernanceService)
 import StudioMCP.Storage.MinIO (MinIOConfig (..), readSummary)
 import StudioMCP.Storage.Keys (summaryRefForRun)
+import StudioMCP.Storage.TenantStorage (TenantStorageService, defaultTenantStorageConfig, newTenantStorageService)
 import StudioMCP.Messaging.Pulsar (PulsarConfig (..))
 
 data ServerEnv = ServerEnv
   { serverAppConfig :: AppConfig,
     serverRuntimeConfig :: RuntimeConfig,
     serverMetricsRef :: IORef MetricsSnapshot,
-    serverHttpManager :: Manager
+    serverHttpManager :: Manager,
+    serverMcpMetrics :: McpMetricsService,
+    serverRateLimiter :: RateLimiterService,
+    serverQuotaService :: QuotaService,
+    serverTenantStorage :: TenantStorageService,
+    serverGovernance :: GovernanceService,
+    serverToolCatalog :: ToolCatalog,
+    serverResourceCatalog :: ResourceCatalog
   }
 
 data SubmissionResult
@@ -62,17 +76,38 @@ createServerEnv appConfig = do
   let AppConfig _ pulsarHttp pulsarBinary minioUrl minioAccess minioSecret = appConfig
   metricsRef <- newIORef emptyMetricsSnapshot
   manager <- newManager defaultManagerSettings
+  mcpMetrics <- newMcpMetricsService
+  rateLimiter <- newRateLimiterService defaultRateLimiterConfig
+  quotaService <- newQuotaService defaultQuotaConfig
+  tenantStorage <- newTenantStorageService defaultTenantStorageConfig
+  governance <- newGovernanceService defaultGovernancePolicy
+  let runtimeConfig =
+        RuntimeConfig
+          { runtimePulsarConfig = PulsarConfig pulsarHttp pulsarBinary,
+            runtimeMinioConfig = MinIOConfig minioUrl minioAccess minioSecret,
+            runtimeTopicName = defaultExecutionTopic
+          }
+  toolCatalog <- newToolCatalogWithRuntime runtimeConfig tenantStorage governance (Just mcpMetrics)
+  resourceCatalog <-
+    newResourceCatalogWithRuntime
+      (runtimeMinioConfig runtimeConfig)
+      tenantStorage
+      governance
+      toolCatalog
+      quotaService
   pure
     ServerEnv
       { serverAppConfig = appConfig,
-        serverRuntimeConfig =
-          RuntimeConfig
-            { runtimePulsarConfig = PulsarConfig pulsarHttp pulsarBinary,
-              runtimeMinioConfig = MinIOConfig minioUrl minioAccess minioSecret,
-              runtimeTopicName = defaultExecutionTopic
-            },
+        serverRuntimeConfig = runtimeConfig,
         serverMetricsRef = metricsRef,
-        serverHttpManager = manager
+        serverHttpManager = manager,
+        serverMcpMetrics = mcpMetrics,
+        serverRateLimiter = rateLimiter,
+        serverQuotaService = quotaService,
+        serverTenantStorage = tenantStorage,
+        serverGovernance = governance,
+        serverToolCatalog = toolCatalog,
+        serverResourceCatalog = resourceCatalog
       }
 
 submitDag :: ServerEnv -> DagSpec -> IO SubmissionResult

@@ -17,8 +17,12 @@ spec:
           args:
             - |
               set -eu
-              mc alias set local http://{{ include "studiomcp.fullname" . }}-minio:{{ .Values.minio.service.apiPort }} {{ .Values.minio.rootUser }} {{ .Values.minio.rootPassword }}
+              mc alias set local http://{{ include "studiomcp.fullname" . }}-minio:9000 {{ .Values.minio.rootUser }} {{ .Values.minio.rootPassword }}
               {{- range .Values.minio.buckets }}
+              {{- if kindIs "string" . }}
               mc mb --ignore-existing local/{{ . }}
+              {{- else }}
+              mc mb --ignore-existing local/{{ .name }}
+              {{- end }}
               {{- end }}
 {{- end }}

@@ -1,5 +1,13 @@
+# Kind cluster configuration for studioMCP
+# See documents/engineering/k8s_storage.md for storage policy
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 name: studiomcp
 nodes:
   - role: control-plane
+    extraMounts:
+      # Bind mount ./.data into the kind node for persistent storage
+      # This path is resolved by kind at cluster creation time
+      - hostPath: ./.data
+        containerPath: /.data
+        propagation: HostToContainer

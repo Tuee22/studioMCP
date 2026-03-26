@@ -19,6 +19,8 @@ services:
       STUDIOMCP_KIND_HOST_DATA_PATH: ${STUDIOMCP_KIND_HOST_DATA_PATH:-}
     volumes:
       - ..:/workspace
+      # Persistent data stored in project root directory, mounted into container
+      # This path is passed through to kind cluster via STUDIOMCP_KIND_HOST_DATA_PATH
       - ../.data:/.data
       - ${HOME}/.docker:/root/.docker:ro
       - /var/run/docker.sock:/var/run/docker.sock

@@ -15,7 +15,21 @@ The runtime must support horizontal listener scaling without sticky sessions. Ex
 
 ## Current Repo Note
 
-The current `studiomcp server` binary already exposes a Haskell HTTP runtime, but its public API is still a custom DAG control surface. This document defines the target server mode once the MCP protocol migration lands.
+The current `studiomcp server` binary already exposes a Haskell HTTP runtime, but its public API is still a custom DAG control surface.
+
+**Current Implementation Status:**
+
+| Feature | Status |
+|---------|--------|
+| HTTP server runtime | ✅ Implemented |
+| Legacy `/runs` surface | ✅ Implemented (primary surface) |
+| MCP `/mcp` endpoint | ✅ Partially implemented |
+| stdio transport | 📋 Planned (Phase 13) |
+| Auth middleware (Keycloak) | ⚠️ Code exists, not wired to routes |
+| Session externalization (Redis) | ⚠️ Code exists, not integrated |
+| BFF command | 📋 Planned (Phase 16) |
+
+The legacy `/runs` surface remains the primary automation interface until Phase 21 completes. This document defines the target server mode once the MCP protocol migration lands.
 
 ## Responsibilities
 

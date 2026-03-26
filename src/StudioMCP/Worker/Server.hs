@@ -102,6 +102,10 @@ application workerEnv request respond =
           handleExecution workerEnv executionRequest respond
     ["healthz"] | requestMethod request == methodGet ->
       handleHealth workerEnv respond
+    ["health", "live"] | requestMethod request == methodGet ->
+      respond (jsonResponse status200 (object ["status" .= ("ok" :: String)]))
+    ["health", "ready"] | requestMethod request == methodGet ->
+      respond (jsonResponse status200 (object ["status" .= ("ready" :: String)]))
     ["version"] | requestMethod request == methodGet ->
       respond (jsonResponse status200 (currentVersionInfo workerEnv))
     _ ->

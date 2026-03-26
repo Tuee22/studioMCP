@@ -64,7 +64,8 @@ spec =
     timeoutCommand =
       BoundaryCommand
         { boundaryExecutable = "sh",
-          boundaryArguments = ["-c", "printf 'timeout-stdout'; printf 'timeout-stderr' 1>&2; sleep 2"],
+          -- Use a short output followed by sleep, flush stdout/stderr first
+          boundaryArguments = ["-c", "printf 'timeout-stdout' && printf 'timeout-stderr' 1>&2 && sleep 60"],
           boundaryStdin = "",
           boundaryTimeoutSeconds = 1
         }
