@@ -1,38 +1,46 @@
+{{- if .Values.bff.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "studiomcp.fullname" . }}
+  name: {{ include "studiomcp.fullname" . }}-bff
   labels:
     app.kubernetes.io/name: {{ include "studiomcp.fullname" . }}
-    app.kubernetes.io/component: studiomcp
+    app.kubernetes.io/component: bff
 spec:
-  replicas: {{ .Values.studiomcp.replicas }}
+  replicas: {{ .Values.bff.replicas }}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ include "studiomcp.fullname" . }}
-      app.kubernetes.io/component: studiomcp
+      app.kubernetes.io/component: bff
   template:
     metadata:
       labels:
         app.kubernetes.io/name: {{ include "studiomcp.fullname" . }}
-        app.kubernetes.io/component: studiomcp
+        app.kubernetes.io/component: bff
     spec:
       serviceAccountName: {{ include "studiomcp.fullname" . }}
       containers:
-        - name: studiomcp
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        - name: bff
+          image: "{{ .Values.bff.image.repository }}:{{ .Values.bff.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["studiomcp", "bff"]
           env:
             - name: STUDIO_MCP_MODE
-              value: {{ .Values.studiomcp.mode | quote }}
-            - name: STUDIO_MCP_PORT
-              value: {{ .Values.studiomcp.service.port | quote }}
-            # Pulsar subchart service endpoints
+              value: "server"
+            - name: STUDIO_MCP_BFF_PORT
+              value: {{ .Values.bff.service.port | quote }}
+            - name: STUDIO_MCP_BFF_MCP_ENDPOINT
+              value: "http://{{ .Release.Name }}:{{ .Values.studiomcp.service.port }}"
+            - name: STUDIO_MCP_MCP_ENDPOINT
+              value: "http://{{ .Release.Name }}:{{ .Values.studiomcp.service.port }}"
+            {{- if .Values.llmReference.enabled }}
+            - name: STUDIO_MCP_REFERENCE_MODEL_URL
+              value: "http://{{ include "studiomcp.fullname" . }}-llm-reference:{{ .Values.llmReference.port }}/api/generate"
+            {{- end }}
             - name: STUDIO_MCP_PULSAR_HTTP_URL
               value: "http://{{ .Release.Name }}-pulsar-proxy"
             - name: STUDIO_MCP_PULSAR_BINARY_URL
               value: "pulsar://{{ .Release.Name }}-pulsar-proxy:6650"
-            # MinIO subchart service endpoint
             - name: STUDIO_MCP_MINIO_ENDPOINT
               value: "http://{{ .Release.Name }}-minio:9000"
             - name: STUDIO_MCP_MINIO_ACCESS_KEY
@@ -45,7 +53,6 @@ spec:
                 secretKeyRef:
                   name: {{ .Release.Name }}-minio
                   key: rootPassword
-            # Redis subchart session store (Sentinel mode)
             {{- if .Values.redis.enabled }}
             - name: STUDIO_MCP_REDIS_URL
               value: "redis://{{ .Release.Name }}-redis-master:6379"
@@ -55,7 +62,6 @@ spec:
                   name: {{ .Release.Name }}-redis
                   key: redis-password
             {{- end }}
-            # Keycloak subchart configuration
             {{- if .Values.keycloak.enabled }}
             - name: STUDIO_MCP_KEYCLOAK_URL
               value: "http://{{ .Release.Name }}-keycloak:8080"
@@ -64,81 +70,70 @@ spec:
             - name: STUDIOMCP_KEYCLOAK_ISSUER
               value: "http://{{ .Release.Name }}-keycloak:8080/realms/studiomcp"
             {{- end }}
-            # JWT configuration
             {{- if .Values.secrets.jwt.jwksUri }}
             - name: STUDIOMCP_JWKS_URI
               value: {{ .Values.secrets.jwt.jwksUri | quote }}
             {{- end }}
-            # Auth configuration
             - name: STUDIOMCP_AUTH_ENABLED
               value: "{{ if .Values.auth.enabled }}true{{ else }}false{{ end }}"
           ports:
-            - containerPort: {{ .Values.studiomcp.service.port }}
+            - containerPort: {{ .Values.bff.service.port }}
               name: http
           resources:
-            {{- toYaml .Values.studiomcp.resources | nindent 12 }}
-          {{- if .Values.studiomcp.health.enabled }}
+            {{- toYaml .Values.bff.resources | nindent 12 }}
+          {{- if .Values.bff.health.enabled }}
           livenessProbe:
             httpGet:
-              path: {{ .Values.studiomcp.health.livenessProbe.path }}
-              port: {{ .Values.studiomcp.health.livenessProbe.port }}
-            initialDelaySeconds: {{ .Values.studiomcp.health.livenessProbe.initialDelaySeconds }}
-            periodSeconds: {{ .Values.studiomcp.health.livenessProbe.periodSeconds }}
-            timeoutSeconds: {{ .Values.studiomcp.health.livenessProbe.timeoutSeconds }}
-            failureThreshold: {{ .Values.studiomcp.health.livenessProbe.failureThreshold }}
+              path: {{ .Values.bff.health.livenessProbe.path }}
+              port: {{ .Values.bff.health.livenessProbe.port }}
+            initialDelaySeconds: {{ .Values.bff.health.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.bff.health.livenessProbe.periodSeconds }}
           readinessProbe:
             httpGet:
-              path: {{ .Values.studiomcp.health.readinessProbe.path }}
-              port: {{ .Values.studiomcp.health.readinessProbe.port }}
-            initialDelaySeconds: {{ .Values.studiomcp.health.readinessProbe.initialDelaySeconds }}
-            periodSeconds: {{ .Values.studiomcp.health.readinessProbe.periodSeconds }}
-            timeoutSeconds: {{ .Values.studiomcp.health.readinessProbe.timeoutSeconds }}
-            failureThreshold: {{ .Values.studiomcp.health.readinessProbe.failureThreshold }}
+              path: {{ .Values.bff.health.readinessProbe.path }}
+              port: {{ .Values.bff.health.readinessProbe.port }}
+            initialDelaySeconds: {{ .Values.bff.health.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.bff.health.readinessProbe.periodSeconds }}
           {{- end }}
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "studiomcp.fullname" . }}
+  name: {{ include "studiomcp.fullname" . }}-bff
   labels:
     app.kubernetes.io/name: {{ include "studiomcp.fullname" . }}
-    app.kubernetes.io/component: studiomcp
+    app.kubernetes.io/component: bff
 spec:
-  type: {{ .Values.studiomcp.service.type }}
+  type: {{ .Values.bff.service.type }}
   selector:
     app.kubernetes.io/name: {{ include "studiomcp.fullname" . }}
-    app.kubernetes.io/component: studiomcp
+    app.kubernetes.io/component: bff
   ports:
     - name: http
-      port: {{ .Values.studiomcp.service.port }}
+      port: {{ .Values.bff.service.port }}
       targetPort: http
-{{- if .Values.studiomcp.autoscaling.enabled }}
+{{- if .Values.bff.autoscaling.enabled }}
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: {{ include "studiomcp.fullname" . }}
+  name: {{ include "studiomcp.fullname" . }}-bff
   labels:
     app.kubernetes.io/name: {{ include "studiomcp.fullname" . }}
-    app.kubernetes.io/component: studiomcp
+    app.kubernetes.io/component: bff
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: {{ include "studiomcp.fullname" . }}
-  minReplicas: {{ .Values.studiomcp.autoscaling.minReplicas }}
-  maxReplicas: {{ .Values.studiomcp.autoscaling.maxReplicas }}
+    name: {{ include "studiomcp.fullname" . }}-bff
+  minReplicas: {{ .Values.bff.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.bff.autoscaling.maxReplicas }}
   metrics:
     - type: Resource
       resource:
         name: cpu
         target:
           type: Utilization
-          averageUtilization: {{ .Values.studiomcp.autoscaling.targetCPUUtilizationPercentage }}
-    - type: Resource
-      resource:
-        name: memory
-        target:
-          type: Utilization
-          averageUtilization: {{ .Values.studiomcp.autoscaling.targetMemoryUtilizationPercentage }}
+          averageUtilization: {{ .Values.bff.autoscaling.targetCPUUtilizationPercentage }}
+{{- end }}
 {{- end }}

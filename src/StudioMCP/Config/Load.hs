@@ -12,8 +12,8 @@ import System.Environment (lookupEnv)
 loadAppConfig :: IO AppConfig
 loadAppConfig = do
   appModeValue <- envMode "STUDIO_MCP_MODE" ServerMode
-  pulsarHttp <- envText "STUDIO_MCP_PULSAR_HTTP_URL" "http://studiomcp-pulsar:8080"
-  pulsarBinary <- envText "STUDIO_MCP_PULSAR_BINARY_URL" "pulsar://studiomcp-pulsar:6650"
+  pulsarHttp <- envText "STUDIO_MCP_PULSAR_HTTP_URL" "http://studiomcp-pulsar-proxy"
+  pulsarBinary <- envText "STUDIO_MCP_PULSAR_BINARY_URL" "pulsar://studiomcp-pulsar-proxy:6650"
   minio <- envText "STUDIO_MCP_MINIO_ENDPOINT" "http://studiomcp-minio:9000"
   minioAccess <- envText "STUDIO_MCP_MINIO_ACCESS_KEY" "minioadmin"
   minioSecret <- envText "STUDIO_MCP_MINIO_SECRET_KEY" "minioadmin123"

@@ -96,6 +96,8 @@ import qualified StudioMCP.MCP.Transport.Types as Transport
 import StudioMCP.Observability.McpMetrics
   ( McpMetricsService,
     recordMethodCall,
+    recordPromptGet,
+    recordResourceRead,
   )
 import StudioMCP.Observability.RateLimiting
   ( RateLimiterService,
@@ -430,6 +432,10 @@ handleResourcesRead server ctx reqId params = do
         Nothing -> do
           let tenant = requestTenant (ctxAuthContext ctx)
           result <- readResource (msResourceCatalog server) tenant readParams
+          case msMetrics server of
+            Just metrics ->
+              recordResourceRead metrics (rrpUri readParams) tenant (either (const False) (const True) result) False
+            Nothing -> pure ()
           pure $
             case result of
               Right resourceResult -> makeResponse reqId (toJSON resourceResult)
@@ -455,6 +461,10 @@ handlePromptsGet server ctx reqId params = do
         Nothing -> do
           let tenant = requestTenant (ctxAuthContext ctx)
           result <- getPrompt (msPromptCatalog server) tenant getParams
+          case msMetrics server of
+            Just metrics ->
+              recordPromptGet metrics (gppName getParams) tenant (either (const False) (const True) result)
+            Nothing -> pure ()
           pure $
             case result of
               Right promptResult -> makeResponse reqId (toJSON promptResult)

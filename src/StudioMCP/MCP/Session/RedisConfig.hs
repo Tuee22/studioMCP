@@ -24,6 +24,8 @@ module StudioMCP.MCP.Session.RedisConfig
   )
 where
 
+import Control.Exception (throwIO)
+import Control.Monad (when)
 import Data.Aeson
   ( FromJSON (parseJSON),
     ToJSON (toJSON),
@@ -33,10 +35,15 @@ import Data.Aeson
     (.:?),
     (.=),
   )
+import Data.Char (toLower)
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 import StudioMCP.MCP.Session.Types (SessionId (..))
+import StudioMCP.Util.Startup
+  ( invalidEnvironmentVariable,
+    startupFailure,
+  )
 import System.Environment (lookupEnv)
 
 -- | Redis connection configuration
@@ -112,18 +119,27 @@ defaultRedisConfig =
 -- | Load Redis configuration from environment variables
 loadRedisConfigFromEnv :: IO RedisConfig
 loadRedisConfigFromEnv = do
-  host <- lookupEnvText "STUDIOMCP_REDIS_HOST" "localhost"
-  port <- lookupEnvInt "STUDIOMCP_REDIS_PORT" 6379
-  password <- lookupEnvMaybe "STUDIOMCP_REDIS_PASSWORD"
-  database <- lookupEnvInt "STUDIOMCP_REDIS_DATABASE" 0
-  poolSize <- lookupEnvInt "STUDIOMCP_REDIS_POOL_SIZE" 10
-  timeout <- lookupEnvInt "STUDIOMCP_REDIS_TIMEOUT" 5
-  sessionTtl <- lookupEnvInt "STUDIOMCP_SESSION_TTL" 1800
-  lockTtl <- lookupEnvInt "STUDIOMCP_LOCK_TTL" 30
-  keyPrefix <- lookupEnvText "STUDIOMCP_REDIS_KEY_PREFIX" "mcp:"
-  useTls <- lookupEnvBool "STUDIOMCP_REDIS_TLS" False
+  maybeRedisUrl <- lookupEnvAny ["STUDIO_MCP_REDIS_URL", "STUDIOMCP_REDIS_URL"]
+  urlConfig <-
+    case maybeRedisUrl of
+      Nothing -> pure defaultRedisConfig
+      Just (envName, redisUrl) -> applyRedisUrlConfig envName (T.pack redisUrl)
 
-  pure
+  host <- lookupEnvTextAny ["STUDIO_MCP_REDIS_HOST", "STUDIOMCP_REDIS_HOST"] (rcHost urlConfig)
+  port <- lookupEnvIntAny ["STUDIO_MCP_REDIS_PORT", "STUDIOMCP_REDIS_PORT"] (rcPort urlConfig)
+  explicitPassword <- lookupEnvMaybeAny ["STUDIO_MCP_REDIS_PASSWORD", "STUDIOMCP_REDIS_PASSWORD"]
+  database <- lookupEnvIntAny ["STUDIO_MCP_REDIS_DATABASE", "STUDIOMCP_REDIS_DATABASE"] (rcDatabase urlConfig)
+  poolSize <- lookupEnvIntAny ["STUDIO_MCP_REDIS_POOL_SIZE", "STUDIOMCP_REDIS_POOL_SIZE"] (rcPoolSize defaultRedisConfig)
+  timeout <- lookupEnvIntAny ["STUDIO_MCP_REDIS_TIMEOUT", "STUDIOMCP_REDIS_TIMEOUT"] (rcConnectionTimeout defaultRedisConfig)
+  sessionTtl <- lookupEnvIntAny ["STUDIO_MCP_SESSION_TTL", "STUDIOMCP_SESSION_TTL"] (rcSessionTtl defaultRedisConfig)
+  lockTtl <- lookupEnvIntAny ["STUDIO_MCP_LOCK_TTL", "STUDIOMCP_LOCK_TTL"] (rcLockTtl defaultRedisConfig)
+  keyPrefix <- lookupEnvTextAny ["STUDIO_MCP_REDIS_KEY_PREFIX", "STUDIOMCP_REDIS_KEY_PREFIX"] (rcKeyPrefix defaultRedisConfig)
+  useTls <- lookupEnvBoolAny ["STUDIO_MCP_REDIS_TLS", "STUDIOMCP_REDIS_TLS"] (rcUseTls urlConfig)
+  let password = case explicitPassword of
+        Just value -> Just value
+        Nothing -> rcPassword urlConfig
+
+  validateRedisConfig
     RedisConfig
       { rcHost = host,
         rcPort = port,
@@ -138,35 +154,234 @@ loadRedisConfigFromEnv = do
       }
 
 -- | Helper to lookup text env var with default
-lookupEnvText :: String -> Text -> IO Text
-lookupEnvText name def = maybe def T.pack <$> lookupEnv name
+lookupEnvAny :: [String] -> IO (Maybe (String, String))
+lookupEnvAny [] = pure Nothing
+lookupEnvAny (name : remaining) = do
+  value <- lookupEnv name
+  case value of
+    Just current -> pure (Just (name, current))
+    Nothing -> lookupEnvAny remaining
+
+-- | Helper to lookup text env var with default
+lookupEnvTextAny :: [String] -> Text -> IO Text
+lookupEnvTextAny names def = maybe def (T.pack . snd) <$> lookupEnvAny names
 
 -- | Helper to lookup optional text env var
-lookupEnvMaybe :: String -> IO (Maybe Text)
-lookupEnvMaybe name = fmap T.pack <$> lookupEnv name
+lookupEnvMaybeAny :: [String] -> IO (Maybe Text)
+lookupEnvMaybeAny names = fmap (T.pack . snd) <$> lookupEnvAny names
 
 -- | Helper to lookup int env var with default
-lookupEnvInt :: String -> Int -> IO Int
-lookupEnvInt name def = do
-  mVal <- lookupEnv name
-  pure $ case mVal of
-    Just s -> maybe def id (readMaybe s)
-    Nothing -> def
+lookupEnvIntAny :: [String] -> Int -> IO Int
+lookupEnvIntAny names def = do
+  mVal <- lookupEnvAny names
+  case mVal of
+    Just (envName, rawValue) ->
+      case readMaybe rawValue of
+        Just value -> pure value
+        Nothing ->
+          throwIO $
+            invalidEnvironmentVariable
+              envName
+              "expected an integer"
+              ( Just
+                  ( "Set "
+                      <> T.pack envName
+                      <> " to a valid integer or unset it to use the default "
+                      <> T.pack (show def)
+                  )
+              )
+    Nothing -> pure def
   where
     readMaybe s = case reads s of
       [(v, "")] -> Just v
       _ -> Nothing
 
 -- | Helper to lookup bool env var with default
-lookupEnvBool :: String -> Bool -> IO Bool
-lookupEnvBool name def = do
-  mVal <- lookupEnv name
-  pure $ case mVal of
-    Just "true" -> True
-    Just "1" -> True
-    Just "false" -> False
-    Just "0" -> False
-    _ -> def
+lookupEnvBoolAny :: [String] -> Bool -> IO Bool
+lookupEnvBoolAny names def = do
+  mVal <- lookupEnvAny names
+  case mVal of
+    Just (envName, rawValue) ->
+      case map toLower rawValue of
+        "true" -> pure True
+        "1" -> pure True
+        "false" -> pure False
+        "0" -> pure False
+        _ ->
+          throwIO $
+            invalidEnvironmentVariable
+              envName
+              "expected a boolean value of true, false, 1, or 0"
+              ( Just
+                  ( "Set "
+                      <> T.pack envName
+                      <> " to true or false, or unset it to use the default "
+                      <> T.pack (show def)
+                  )
+              )
+    Nothing -> pure def
+
+applyRedisUrlConfig :: String -> Text -> IO RedisConfig
+applyRedisUrlConfig envName redisUrl =
+  case parseRedisUrl redisUrl of
+    Left err ->
+      throwIO $
+        invalidEnvironmentVariable
+          envName
+          ("invalid Redis URL (" <> T.pack err <> ")")
+          (Just ("Set " <> T.pack envName <> " to redis://host:6379/0 or unset it."))
+    Right parsed ->
+      pure $
+        defaultRedisConfig
+          { rcHost = rucHost parsed,
+            rcPort = rucPort parsed,
+            rcPassword = rucPassword parsed,
+            rcDatabase = rucDatabase parsed,
+            rcUseTls = rucUseTls parsed
+          }
+
+validateRedisConfig :: RedisConfig -> IO RedisConfig
+validateRedisConfig config = do
+  when (T.null (T.strip (rcHost config))) $
+    throwIO $
+      startupFailure
+        "Invalid Redis configuration: host must not be empty"
+        (Just "Set STUDIO_MCP_REDIS_HOST or STUDIO_MCP_REDIS_URL to a valid Redis host.")
+  when (rcPort config < 1 || rcPort config > 65535) $
+    throwIO $
+      startupFailure
+        "Invalid Redis configuration: port must be between 1 and 65535"
+        (Just "Set STUDIO_MCP_REDIS_PORT or STUDIO_MCP_REDIS_URL to a valid Redis port.")
+  when (rcDatabase config < 0) $
+    throwIO $
+      startupFailure
+        "Invalid Redis configuration: database number must be zero or greater"
+        (Just "Set STUDIO_MCP_REDIS_DATABASE or STUDIO_MCP_REDIS_URL to a valid Redis database number.")
+  when (rcPoolSize config <= 0) $
+    throwIO $
+      startupFailure
+        "Invalid Redis configuration: pool size must be greater than zero"
+        (Just "Set STUDIO_MCP_REDIS_POOL_SIZE to a positive integer.")
+  when (rcConnectionTimeout config <= 0) $
+    throwIO $
+      startupFailure
+        "Invalid Redis configuration: connection timeout must be greater than zero"
+        (Just "Set STUDIO_MCP_REDIS_TIMEOUT to a positive integer number of seconds.")
+  when (rcSessionTtl config <= 0) $
+    throwIO $
+      startupFailure
+        "Invalid Redis configuration: session TTL must be greater than zero"
+        (Just "Set STUDIO_MCP_SESSION_TTL to a positive integer number of seconds.")
+  when (rcLockTtl config <= 0) $
+    throwIO $
+      startupFailure
+        "Invalid Redis configuration: lock TTL must be greater than zero"
+        (Just "Set STUDIO_MCP_LOCK_TTL to a positive integer number of seconds.")
+  pure config
+
+data RedisUrlConfig = RedisUrlConfig
+  { rucHost :: Text,
+    rucPort :: Int,
+    rucPassword :: Maybe Text,
+    rucDatabase :: Int,
+    rucUseTls :: Bool
+  }
+
+parseRedisUrl :: Text -> Either String RedisUrlConfig
+parseRedisUrl redisUrl = do
+  (useTls, remainder) <- parseScheme redisUrl
+  let (authority, pathAndQuery) = T.breakOn "/" remainder
+  (host, port, password) <- parseAuthority authority
+  database <- parseDatabase pathAndQuery
+  pure
+    RedisUrlConfig
+      { rucHost = host,
+        rucPort = port,
+        rucPassword = password,
+        rucDatabase = database,
+        rucUseTls = useTls
+      }
+  where
+    parseScheme url
+      | "redis://" `T.isPrefixOf` url = Right (False, T.drop 8 url)
+      | "rediss://" `T.isPrefixOf` url = Right (True, T.drop 9 url)
+      | otherwise = Left "expected redis:// or rediss:// scheme"
+
+parseAuthority :: Text -> Either String (Text, Int, Maybe Text)
+parseAuthority authority
+  | T.null authority = Left "missing Redis host"
+  | otherwise = do
+      let (authPart, hostPort) =
+            case T.breakOnEnd "@" authority of
+              ("", _) -> (Nothing, authority)
+              (prefix, remainder) -> (Just (T.dropEnd 1 prefix), remainder)
+      password <- pure (extractPassword =<< authPart)
+      (host, port) <- parseHostPort hostPort
+      pure (host, port, password)
+
+parseHostPort :: Text -> Either String (Text, Int)
+parseHostPort hostPort
+  | T.null hostPort = Left "missing Redis host"
+  | "[" `T.isPrefixOf` hostPort = parseIpv6HostPort hostPort
+  | otherwise =
+      case T.breakOnEnd ":" hostPort of
+        ("", _) -> Right (hostPort, 6379)
+        (prefix, portText) ->
+          if T.null portText
+            then Left "missing Redis port"
+            else do
+              let host = T.dropEnd 1 prefix
+              if T.null host
+                then Left "missing Redis host"
+                else pure ()
+              port <- readIntText "port" portText
+              pure (host, port)
+
+parseIpv6HostPort :: Text -> Either String (Text, Int)
+parseIpv6HostPort hostPort = do
+  let withoutOpenBracket = T.drop 1 hostPort
+      (hostPart, remainder) = T.breakOn "]" withoutOpenBracket
+  if T.null remainder
+    then Left "unterminated IPv6 Redis host"
+    else do
+      let host = "[" <> hostPart <> "]"
+          portSuffix = T.drop 1 remainder
+      if T.null host
+        then Left "missing Redis host"
+        else
+          case portSuffix of
+            "" -> Right (host, 6379)
+            _ ->
+              if ":" `T.isPrefixOf` portSuffix
+                then do
+                  port <- readIntText "port" (T.drop 1 portSuffix)
+                  pure (host, port)
+                else Left "invalid IPv6 Redis host format"
+
+parseDatabase :: Text -> Either String Int
+parseDatabase pathAndQuery =
+  case T.stripPrefix "/" pathAndQuery of
+    Nothing -> Right 0
+    Just pathText ->
+      let dbText = T.takeWhile (/= '?') pathText
+       in if T.null dbText
+            then Right 0
+            else readIntText "database" dbText
+
+extractPassword :: Text -> Maybe Text
+extractPassword authPart
+  | T.null authPart = Nothing
+  | otherwise =
+      case T.breakOn ":" authPart of
+        ("", suffix) | not (T.null suffix) -> Just (T.drop 1 suffix)
+        (username, "") -> Just username
+        (_, suffix) -> Just (T.drop 1 suffix)
+
+readIntText :: String -> Text -> Either String Int
+readIntText fieldName rawValue =
+  case reads (T.unpack rawValue) of
+    [(value, "")] -> Right value
+    _ -> Left ("invalid Redis " <> fieldName <> ": " <> T.unpack rawValue)
 
 -- | Key prefix for MCP sessions
 redisKeyPrefix :: RedisConfig -> Text

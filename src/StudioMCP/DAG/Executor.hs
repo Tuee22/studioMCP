@@ -4,12 +4,15 @@ module StudioMCP.DAG.Executor
   ( ExecutionReport (..),
     ExecutorAdapters (..),
     executeSequential,
+    executeParallel,
     validateExecutorRuntime,
   )
 where
 
+import Control.Concurrent (threadDelay)
+import Control.Concurrent.Async (mapConcurrently)
 import Control.Monad (foldM)
-import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef, readIORef, writeIORef)
 import Data.List.NonEmpty (NonEmpty ((:|)))
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -17,7 +20,7 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Time (UTCTime (UTCTime), fromGregorian, secondsToDiffTime)
 import StudioMCP.DAG.Provenance (emptyProvenance)
-import StudioMCP.DAG.Scheduler (scheduleTopologically)
+import StudioMCP.DAG.Scheduler (scheduleInParallelBatches, scheduleTopologically)
 import StudioMCP.DAG.Summary
   ( NodeExecutionStatus (..),
     NodeOutcome (..),
@@ -85,6 +88,28 @@ executeSequential adapters runIdValue startedAt dagSpec =
               }
         )
 
+executeParallel ::
+  ExecutorAdapters ->
+  RunId ->
+  UTCTime ->
+  DagSpec ->
+  IO (Either FailureDetail ExecutionReport)
+executeParallel adapters runIdValue startedAt dagSpec =
+  case scheduleInParallelBatches dagSpec of
+    Left failureDetail -> pure (Left failureDetail)
+    Right nodeBatches -> do
+      finalState <- foldM (executeNodeBatch adapters runIdValue) emptyExecutionState nodeBatches
+      let summary = buildSummary runIdValue startedAt (emptyProvenance (dagName dagSpec)) (stateOutcomes finalState)
+      observeSummary adapters summary
+      pure
+        ( Right
+            ExecutionReport
+              { reportOrder = stateOrder finalState,
+                reportSummary = summary,
+                reportOutputs = stateOutputs finalState
+              }
+        )
+
 validateExecutorRuntime :: IO (Either FailureDetail ())
 validateExecutorRuntime = do
   observedOutcomesRef <- newIORef []
@@ -120,7 +145,27 @@ validateExecutorRuntime = do
                       observedFailureSummary <- readIORef failureObservedSummaryRef
                       if length observedFailureOutcomes /= 3 || observedFailureSummary == Nothing
                         then pure (Left executorObserverMismatch)
-                        else pure (Right ())
+                        else do
+                          parallelObservedOutcomesRef <- newIORef []
+                          parallelObservedSummaryRef <- newIORef Nothing
+                          runningCountRef <- newIORef (0 :: Int)
+                          maxConcurrencyRef <- newIORef (0 :: Int)
+                          parallelResult <-
+                            executeParallel
+                              (parallelAdapters parallelObservedOutcomesRef parallelObservedSummaryRef runningCountRef maxConcurrencyRef)
+                              (RunId "executor-parallel")
+                              fixedTime
+                              parallelDag
+                          case parallelResult of
+                            Left failureDetail -> pure (Left failureDetail)
+                            Right parallelReport -> do
+                              maxConcurrency <- readIORef maxConcurrencyRef
+                              if reportOrder parallelReport /= [NodeId "a", NodeId "b", NodeId "summary"]
+                                then pure (Left executorParallelOrderMismatch)
+                                else
+                                  if maxConcurrency < 2
+                                    then pure (Left executorParallelConcurrencyMismatch)
+                                    else pure (Right ())
 
 executeNode ::
   ExecutorAdapters ->
@@ -129,6 +174,33 @@ executeNode ::
   NodeSpec ->
   IO ExecutionState
 executeNode adapters runIdValue executionState nodeSpec = do
+  nodeOutcome <- executeNodeOutcome adapters runIdValue executionState nodeSpec
+  observeNodeOutcome adapters nodeOutcome
+  pure (recordNodeOutcome executionState nodeOutcome)
+
+executeNodeBatch ::
+  ExecutorAdapters ->
+  RunId ->
+  ExecutionState ->
+  [NodeSpec] ->
+  IO ExecutionState
+executeNodeBatch adapters runIdValue executionState nodeBatch = do
+  nodeOutcomes <- mapConcurrently (executeNodeOutcome adapters runIdValue executionState) nodeBatch
+  foldM
+    ( \state nodeOutcome -> do
+        observeNodeOutcome adapters nodeOutcome
+        pure (recordNodeOutcome state nodeOutcome)
+    )
+    executionState
+    nodeOutcomes
+
+executeNodeOutcome ::
+  ExecutorAdapters ->
+  RunId ->
+  ExecutionState ->
+  NodeSpec ->
+  IO NodeOutcome
+executeNodeOutcome adapters runIdValue executionState nodeSpec = do
   let upstreamFailures =
         [ dependencyOutcome
         | dependencyNodeId <- nodeInputs nodeSpec,
@@ -164,17 +236,19 @@ executeNode adapters runIdValue executionState nodeSpec = do
                   outcomeOutputReference = Just (summaryOutputReference runIdValue),
                   outcomeFailure = Nothing
                 }
-  observeNodeOutcome adapters nodeOutcome
-  pure
-    ExecutionState
-      { stateOutputs =
-          case outcomeOutputReference nodeOutcome of
-            Just outputReference -> Map.insert (outcomeNodeId nodeOutcome) outputReference (stateOutputs executionState)
-            Nothing -> stateOutputs executionState,
-        stateOutcomes = stateOutcomes executionState <> [nodeOutcome],
-        stateOutcomeByNode = Map.insert (outcomeNodeId nodeOutcome) nodeOutcome (stateOutcomeByNode executionState),
-        stateOrder = stateOrder executionState <> [nodeId nodeSpec]
-      }
+  pure nodeOutcome
+
+recordNodeOutcome :: ExecutionState -> NodeOutcome -> ExecutionState
+recordNodeOutcome executionState nodeOutcome =
+  ExecutionState
+    { stateOutputs =
+        case outcomeOutputReference nodeOutcome of
+          Just outputReference -> Map.insert (outcomeNodeId nodeOutcome) outputReference (stateOutputs executionState)
+          Nothing -> stateOutputs executionState,
+      stateOutcomes = stateOutcomes executionState <> [nodeOutcome],
+      stateOutcomeByNode = Map.insert (outcomeNodeId nodeOutcome) nodeOutcome (stateOutcomeByNode executionState),
+      stateOrder = stateOrder executionState <> [outcomeNodeId nodeOutcome]
+    }
 
 projectNodeResult :: NodeSpec -> Either FailureDetail Text -> IO NodeOutcome
 projectNodeResult nodeSpec result =
@@ -262,6 +336,30 @@ failureAdapters observedOutcomesRef observedSummaryRef =
       observeSummary = writeIORef observedSummaryRef . Just
     }
 
+parallelAdapters ::
+  IORef [NodeOutcome] ->
+  IORef (Maybe Summary) ->
+  IORef Int ->
+  IORef Int ->
+  ExecutorAdapters
+parallelAdapters observedOutcomesRef observedSummaryRef runningCountRef maxConcurrencyRef =
+  ExecutorAdapters
+    { executePureNode = \nodeSpec _ -> withConcurrentSlot (pure (Right ("pure://" <> unNodeId (nodeId nodeSpec)))),
+      executeBoundaryNode = \nodeSpec inputReferences ->
+        withConcurrentSlot
+          (pure (Right ("boundary://" <> unNodeId (nodeId nodeSpec) <> "/" <> Text.intercalate "+" inputReferences))),
+      observeNodeOutcome = \nodeOutcome -> modifyIORef' observedOutcomesRef (<> [nodeOutcome]),
+      observeSummary = writeIORef observedSummaryRef . Just
+    }
+  where
+    withConcurrentSlot action = do
+      concurrentCount <- atomicModifyIORef' runningCountRef (\current -> let next = current + 1 in (next, next))
+      modifyIORef' maxConcurrencyRef (max concurrentCount)
+      threadDelay 50000
+      result <- action
+      atomicModifyIORef' runningCountRef (\current -> (current - 1, ()))
+      pure result
+
 fixedTime :: UTCTime
 fixedTime = UTCTime (fromGregorian 2026 3 19) (secondsToDiffTime 0)
 
@@ -301,9 +399,49 @@ successDag =
         ]
     }
 
+parallelDag :: DagSpec
+parallelDag =
+  DagSpec
+    { dagName = "executor-parallel-validation",
+      dagDescription = Just "Executor validation DAG with parallelizable branches.",
+      dagNodes =
+        [ NodeSpec
+            { nodeId = NodeId "a",
+              nodeKind = PureNode,
+              nodeTool = Nothing,
+              nodeInputs = [],
+              nodeOutputType = OutputType "text/plain",
+              nodeTimeout = TimeoutPolicy 5,
+              nodeMemoization = "memoize"
+            },
+          NodeSpec
+            { nodeId = NodeId "b",
+              nodeKind = PureNode,
+              nodeTool = Nothing,
+              nodeInputs = [],
+              nodeOutputType = OutputType "text/plain",
+              nodeTimeout = TimeoutPolicy 5,
+              nodeMemoization = "memoize"
+            },
+          NodeSpec
+            { nodeId = NodeId "summary",
+              nodeKind = SummaryNode,
+              nodeTool = Nothing,
+              nodeInputs = [NodeId "a", NodeId "b"],
+              nodeOutputType = OutputType "summary/run",
+              nodeTimeout = TimeoutPolicy 5,
+              nodeMemoization = "no-memoize"
+            }
+        ]
+    }
+
 executorOrderMismatch :: FailureDetail
 executorOrderMismatch =
   validationFailure "executor-order-mismatch" "Executor did not preserve the expected topological node order."
+
+executorParallelOrderMismatch :: FailureDetail
+executorParallelOrderMismatch =
+  validationFailure "executor-parallel-order-mismatch" "Parallel executor did not preserve the expected deterministic batch order."
 
 executorSuccessSummaryMismatch :: FailureDetail
 executorSuccessSummaryMismatch =
@@ -324,6 +462,10 @@ executorFailureOutcomesMismatch =
 executorObserverMismatch :: FailureDetail
 executorObserverMismatch =
   validationFailure "executor-observer-mismatch" "Executor observers did not receive the expected node outcomes and summary."
+
+executorParallelConcurrencyMismatch :: FailureDetail
+executorParallelConcurrencyMismatch =
+  validationFailure "executor-parallel-concurrency-mismatch" "Parallel executor did not overlap independent nodes."
 
 maybeToList :: Maybe a -> [a]
 maybeToList maybeValue =

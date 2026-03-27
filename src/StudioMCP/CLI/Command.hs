@@ -12,6 +12,8 @@ where
 
 data Command
   = ServerCommand
+  | StdioCommand
+  | BffCommand
   | InferenceCommand
   | WorkerCommand
   | ValidateDagCommand FilePath
@@ -34,7 +36,6 @@ data ValidateCommand
   | ValidateBoundaryCommand
   | ValidateFFmpegAdapterCommand
   | ValidateExecutorCommand
-  | ValidateMcpCommand -- Legacy MCP validation (deprecated in Phase 18)
   | ValidateMcpStdioCommand -- Phase 13: MCP over stdio transport
   | ValidateMcpHttpCommand -- Phase 13: MCP over HTTP transport
   | ValidateKeycloakCommand -- Phase 14: Keycloak connectivity
@@ -59,6 +60,7 @@ data ValidateCommand
 data ClusterCommand
   = ClusterUpCommand
   | ClusterDownCommand
+  | ClusterResetCommand
   | ClusterStatusCommand
   | ClusterDeployCommand ClusterDeployTarget
   | ClusterStorageCommand ClusterStorageCommand
@@ -71,12 +73,15 @@ data ClusterDeployTarget
 
 data ClusterStorageCommand
   = ClusterStorageReconcile
+  | ClusterStorageDelete String
   deriving (Eq, Show)
 
 parseCommand :: [String] -> Either String Command
 parseCommand args =
   case args of
     ["server"] -> Right ServerCommand
+    ["stdio"] -> Right StdioCommand
+    ["bff"] -> Right BffCommand
     ["inference"] -> Right InferenceCommand
     ["worker"] -> Right WorkerCommand
     ["validate-dag", dagPath] -> Right (ValidateDagCommand dagPath)
@@ -91,7 +96,6 @@ parseCommand args =
     ["validate", "boundary"] -> Right (ValidateCommand ValidateBoundaryCommand)
     ["validate", "ffmpeg-adapter"] -> Right (ValidateCommand ValidateFFmpegAdapterCommand)
     ["validate", "executor"] -> Right (ValidateCommand ValidateExecutorCommand)
-    ["validate", "mcp"] -> Right (ValidateCommand ValidateMcpCommand)
     ["validate", "mcp-stdio"] -> Right (ValidateCommand ValidateMcpStdioCommand)
     ["validate", "mcp-http"] -> Right (ValidateCommand ValidateMcpHttpCommand)
     ["validate", "keycloak"] -> Right (ValidateCommand ValidateKeycloakCommand)
@@ -115,10 +119,12 @@ parseCommand args =
     ["validate", "storage-policy"] -> Right (ValidateCommand ValidateStoragePolicyCommand)
     ["cluster", "up"] -> Right (ClusterCommand ClusterUpCommand)
     ["cluster", "down"] -> Right (ClusterCommand ClusterDownCommand)
+    ["cluster", "reset"] -> Right (ClusterCommand ClusterResetCommand)
     ["cluster", "status"] -> Right (ClusterCommand ClusterStatusCommand)
     ["cluster", "deploy", "sidecars"] -> Right (ClusterCommand (ClusterDeployCommand DeploySidecars))
     ["cluster", "deploy", "server"] -> Right (ClusterCommand (ClusterDeployCommand DeployServer))
     ["cluster", "storage", "reconcile"] -> Right (ClusterCommand (ClusterStorageCommand ClusterStorageReconcile))
+    ["cluster", "storage", "delete", volumeName] -> Right (ClusterCommand (ClusterStorageCommand (ClusterStorageDelete volumeName)))
     _ -> Left usageText
 
 usageText :: String
@@ -126,6 +132,8 @@ usageText =
   unlines
     [ "usage:"
     , "  studiomcp server"
+    , "  studiomcp stdio"
+    , "  studiomcp bff"
     , "  studiomcp inference"
     , "  studiomcp worker"
     , "  studiomcp validate-dag <path>"
@@ -140,7 +148,6 @@ usageText =
     , "  studiomcp validate boundary"
     , "  studiomcp validate ffmpeg-adapter"
     , "  studiomcp validate executor"
-    , "  studiomcp validate mcp              # Legacy MCP validation"
     , "  studiomcp validate mcp-stdio        # MCP over stdio transport"
     , "  studiomcp validate mcp-http         # MCP over HTTP transport"
     , "  studiomcp validate keycloak         # Keycloak connectivity"
@@ -164,8 +171,10 @@ usageText =
     , "  studiomcp validate storage-policy # Storage policy enforcement"
     , "  studiomcp cluster up"
     , "  studiomcp cluster down"
+    , "  studiomcp cluster reset"
     , "  studiomcp cluster status"
     , "  studiomcp cluster deploy sidecars"
     , "  studiomcp cluster deploy server"
     , "  studiomcp cluster storage reconcile"
+    , "  studiomcp cluster storage delete <name>"
     ]

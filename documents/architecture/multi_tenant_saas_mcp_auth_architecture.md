@@ -9,7 +9,7 @@
 
 ## Summary
 
-This document defines the target public topology for `studioMCP` as a secure multi-tenant SaaS product.
+This document defines the public topology for `studioMCP` as a secure multi-tenant SaaS product.
 
 Scope boundary:
 
@@ -23,7 +23,7 @@ The system has three first-class client classes:
 - external MCP clients
 - service accounts
 
-All three authenticate through Keycloak-issued credentials and are authorized against tenant-aware server-side policy.
+External MCP clients and service-account-style calls already authenticate through Keycloak-issued credentials at the MCP boundary. The browser-user path described here is now implemented in the repo as a browser-session-issuing BFF layered on top of the MCP HTTP surface.
 
 ## Core Identity Rule
 
@@ -50,13 +50,13 @@ flowchart TB
 
 ## Current Repo Note
 
-This topology is a target-state document. The current repo does not yet implement the full public auth boundary, BFF, or remote MCP session topology described here.
+The current repo implements the MCP listener, Keycloak/JWKS auth boundary, Redis-backed MCP session store, and a BFF that validates browser-provided access tokens, issues Redis-backed server-side browser sessions, serves a built-in browser UI, and calls MCP over the live HTTP transport.
 
 ## Client Classes
 
 ### Browser User
 
-The browser interacts with:
+The intended browser flow is:
 
 - the BFF for application workflows
 - Keycloak for authentication flows
@@ -248,12 +248,12 @@ flowchart TB
 
 | Tool | Required Scopes |
 |------|-----------------|
-| `workflow.submit_dag` | `workflow:write` |
-| `workflow.list_runs` | `workflow:read` |
-| `workflow.get_run` | `workflow:read` |
-| `workflow.cancel_run` | `workflow:write` |
-| `artifact.prepare_upload` | `artifact:write` |
-| `artifact.prepare_download` | `artifact:read` |
+| `workflow.submit` | `workflow:write` |
+| `workflow.list` | `workflow:read` |
+| `workflow.status` | `workflow:read` |
+| `workflow.cancel` | `workflow:write` |
+| `artifact.upload_url` | `artifact:write` |
+| `artifact.download_url` | `artifact:read` |
 | `artifact.hide` | `artifact:manage` |
 | `artifact.archive` | `artifact:manage` |
 
@@ -273,13 +273,12 @@ flowchart TB
 ### BFF Session Flow
 
 ```
-1. Browser initiates login via BFF
-2. BFF redirects to Keycloak authorize endpoint
-3. User authenticates
-4. Keycloak redirects to BFF callback
-5. BFF exchanges code for tokens (confidential client)
-6. BFF stores tokens in server-side session
-7. BFF uses tokens for MCP calls on user's behalf
+1. Browser obtains a Keycloak-issued access token
+2. Browser submits the access token to the BFF login route
+3. BFF validates the token and resolves subject and tenant
+4. BFF stores browser-session state server-side and returns a session cookie
+5. BFF opens or resumes an MCP session as needed
+6. BFF uses the stored user access token for MCP calls on the user's behalf
 ```
 
 ### Service Account Flow
@@ -319,18 +318,22 @@ flowchart TB
 }
 ```
 
-### BFF Client
+### Browser App Client
 
 ```json
 {
-  "clientId": "studiomcp-bff",
-  "publicClient": false,
-  "secret": "***",
-  "redirectUris": ["https://app.example.com/callback"],
-  "webOrigins": ["https://app.example.com"],
-  "defaultClientScopes": ["openid", "profile", "workflow:read", "workflow:write", "artifact:read", "artifact:write"]
+  "clientId": "studiomcp-web",
+  "publicClient": true,
+  "redirectUris": ["https://app.example.com/*", "http://localhost:*"],
+  "webOrigins": ["https://app.example.com", "http://localhost:*"],
+  "defaultClientScopes": ["openid", "profile", "workflow:read", "workflow:write", "artifact:read", "artifact:write"],
+  "attributes": {
+    "pkce.code.challenge.method": "S256"
+  }
 }
 ```
+
+This browser-facing client obtains the access token that the BFF login route validates before issuing a server-side browser session cookie.
 
 ## Tenant Rules
 

@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 
@@ -10,6 +11,7 @@ module StudioMCP.Storage.TenantStorage
     -- * Tenant Storage Service
     TenantStorageService (..),
     newTenantStorageService,
+    newTenantStorageServiceWithFile,
 
     -- * Tenant Artifact
     TenantArtifact (..),
@@ -18,8 +20,14 @@ module StudioMCP.Storage.TenantStorage
     getTenantBucket,
     getTenantArtifactKey,
     createTenantArtifact,
+    createTenantArtifactVersion,
     getTenantArtifact,
+    getTenantArtifactVersion,
     listTenantArtifacts,
+    listArtifactVersions,
+    configureTenantBackend,
+    getTenantBackend,
+    loadTenantBackendConfigFile,
 
     -- * Presigned URLs
     generateUploadUrl,
@@ -33,20 +41,40 @@ module StudioMCP.Storage.TenantStorage
 where
 
 import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO, readTVarIO)
+import Crypto.Hash (Digest, SHA256, hash)
+import Crypto.MAC.HMAC (HMAC, hmac)
+import Data.ByteArray (convert)
+import Data.ByteArray.Encoding (Base (Base16), convertToBase)
 import Data.Aeson
   ( FromJSON (parseJSON),
     ToJSON (toJSON),
+    Value,
+    decode,
+    encode,
     object,
     withObject,
     (.:),
+    (.:?),
+    (.!=),
     (.=),
   )
+import Data.Aeson.Types (Parser)
+import qualified Data.ByteString as ByteString
+import qualified Data.ByteString.Lazy as LBS
+import Data.Char (isAlphaNum, ord)
+import Data.List (sortOn)
 import qualified Data.Map.Strict as Map
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 import Data.Time (UTCTime, addUTCTime, getCurrentTime)
+import Data.Time.Format (defaultTimeLocale, formatTime)
 import qualified Data.UUID as UUID
 import qualified Data.UUID.V4 as UUID
+import GHC.Generics (Generic)
+import System.Directory (createDirectoryIfMissing, doesFileExist)
+import System.FilePath (takeDirectory)
 import StudioMCP.Auth.Types (TenantId (..))
 import StudioMCP.Storage.ContentAddressed (ContentAddress)
 import StudioMCP.Storage.Keys (BucketName (..), ObjectKey (..))
@@ -99,7 +127,15 @@ data TenantStorageConfig = TenantStorageConfig
     -- | Maximum artifact size in bytes
     tscMaxArtifactSize :: Integer,
     -- | Bucket prefix for platform-managed storage
-    tscBucketPrefix :: Text
+    tscBucketPrefix :: Text,
+    -- | Endpoint for platform-managed MinIO/S3 storage
+    tscPlatformEndpoint :: Text,
+    -- | AWS region used for SigV4 signing
+    tscPlatformRegion :: Text,
+    -- | Access key for platform-managed storage
+    tscPlatformAccessKeyId :: Text,
+    -- | Secret access key for platform-managed storage
+    tscPlatformSecretAccessKey :: Text
   }
   deriving (Eq, Show)
 
@@ -111,7 +147,11 @@ defaultTenantStorageConfig =
       tscUploadUrlTtl = 900, -- 15 minutes
       tscDownloadUrlTtl = 300, -- 5 minutes
       tscMaxArtifactSize = 10 * 1024 * 1024 * 1024, -- 10 GB
-      tscBucketPrefix = "studiomcp-tenant-"
+      tscBucketPrefix = "studiomcp-tenant-",
+      tscPlatformEndpoint = "http://localhost:9000",
+      tscPlatformRegion = "us-east-1",
+      tscPlatformAccessKeyId = "minioadmin",
+      tscPlatformSecretAccessKey = "minioadmin"
     }
 
 -- | Tenant artifact metadata
@@ -207,31 +247,95 @@ tenantStorageErrorCode (StorageQuotaExceeded _) = "storage-quota-exceeded"
 -- | Internal state for tenant storage service
 data TenantStorageState = TenantStorageState
   { tssArtifacts :: Map.Map Text TenantArtifact,
+    tssArtifactVersions :: Map.Map Text [TenantArtifact],
     tssTenantBackends :: Map.Map TenantId TenantStorageBackend,
     tssPresignedUrls :: Map.Map Text PresignedUrl
   }
 
+data TenantBackendAssignment = TenantBackendAssignment
+  { tbaTenantId :: TenantId,
+    tbaBackend :: TenantStorageBackend
+  }
+  deriving (Eq, Show, Generic)
+
+instance ToJSON TenantBackendAssignment where
+  toJSON TenantBackendAssignment {..} =
+    object
+      [ "tenantId" .= tbaTenantId,
+        "backend" .= tenantStorageBackendConfigValue tbaBackend
+      ]
+
+instance FromJSON TenantBackendAssignment where
+  parseJSON = withObject "TenantBackendAssignment" $ \obj ->
+    TenantBackendAssignment
+      <$> obj .: "tenantId"
+      <*> (obj .: "backend" >>= parseTenantStorageBackendConfigValue)
+
+data ArtifactVersionHistory = ArtifactVersionHistory
+  { avhArtifactId :: Text,
+    avhVersions :: [TenantArtifact]
+  }
+  deriving (Eq, Show, Generic)
+
+instance ToJSON ArtifactVersionHistory
+instance FromJSON ArtifactVersionHistory
+
+data TenantStorageSnapshot = TenantStorageSnapshot
+  { tssSnapshotArtifacts :: [TenantArtifact],
+    tssSnapshotVersions :: [ArtifactVersionHistory],
+    tssSnapshotTenantBackends :: [TenantBackendAssignment]
+  }
+  deriving (Eq, Show, Generic)
+
+instance ToJSON TenantStorageSnapshot
+instance FromJSON TenantStorageSnapshot
+
+data TenantBackendConfigFile = TenantBackendConfigFile
+  { tbcTenants :: Map.Map Text TenantStorageBackend
+  }
+  deriving (Eq, Show, Generic)
+
+instance FromJSON TenantBackendConfigFile where
+  parseJSON = withObject "TenantBackendConfigFile" $ \obj ->
+    TenantBackendConfigFile <$> obj .:? "tenants" .!= Map.empty
+
 -- | Tenant storage service
 data TenantStorageService = TenantStorageService
   { tssConfig :: TenantStorageConfig,
-    tssState :: TVar TenantStorageState
+    tssState :: TVar TenantStorageState,
+    tssPersistencePath :: Maybe FilePath
   }
 
 -- | Create a new tenant storage service
 newTenantStorageService :: TenantStorageConfig -> IO TenantStorageService
-newTenantStorageService config = do
-  stateVar <-
-    newTVarIO
-      TenantStorageState
-        { tssArtifacts = Map.empty,
-          tssTenantBackends = Map.empty,
-          tssPresignedUrls = Map.empty
-        }
+newTenantStorageService = newTenantStorageServiceInternal Nothing
+
+newTenantStorageServiceWithFile :: TenantStorageConfig -> FilePath -> IO TenantStorageService
+newTenantStorageServiceWithFile config persistencePath =
+  newTenantStorageServiceInternal (Just persistencePath) config
+
+newTenantStorageServiceInternal :: Maybe FilePath -> TenantStorageConfig -> IO TenantStorageService
+newTenantStorageServiceInternal maybePersistencePath config = do
+  initialState <-
+    case maybePersistencePath of
+      Just persistencePath -> loadTenantStorageState persistencePath
+      Nothing -> pure emptyTenantStorageState
+  stateVar <- newTVarIO initialState
   pure
     TenantStorageService
       { tssConfig = config,
-        tssState = stateVar
+        tssState = stateVar,
+        tssPersistencePath = maybePersistencePath
       }
+
+emptyTenantStorageState :: TenantStorageState
+emptyTenantStorageState =
+  TenantStorageState
+    { tssArtifacts = Map.empty,
+      tssArtifactVersions = Map.empty,
+      tssTenantBackends = Map.empty,
+      tssPresignedUrls = Map.empty
+    }
 
 -- | Get the bucket name for a tenant
 getTenantBucket :: TenantStorageService -> TenantId -> BucketName
@@ -280,8 +384,57 @@ createTenantArtifact service tenantId contentType fileName fileSize metadata = d
               }
       atomically $ do
         modifyTVar' (tssState service) $ \state ->
-          state {tssArtifacts = Map.insert artifactId artifact (tssArtifacts state)}
+          state
+            { tssArtifacts = Map.insert artifactId artifact (tssArtifacts state),
+              tssArtifactVersions = Map.insert artifactId [artifact] (tssArtifactVersions state)
+            }
+      persistTenantStorageState service
       pure $ Right artifact
+
+createTenantArtifactVersion ::
+  TenantStorageService ->
+  TenantId ->
+  Text ->
+  Text ->
+  Text ->
+  Integer ->
+  Map.Map Text Text ->
+  IO (Either TenantStorageError TenantArtifact)
+createTenantArtifactVersion service tenantId artifactId contentType fileName fileSize metadata = do
+  let config = tssConfig service
+  if fileSize > tscMaxArtifactSize config
+    then pure $ Left $ ArtifactTooLarge fileSize (tscMaxArtifactSize config)
+    else do
+      existingResult <- getTenantArtifact service tenantId artifactId
+      case existingResult of
+        Left err -> pure $ Left err
+        Right existingArtifact -> do
+          state <- readTVarIO (tssState service)
+          let existingVersions =
+                Map.findWithDefault [existingArtifact] artifactId (tssArtifactVersions state)
+          now <- getCurrentTime
+          let artifact =
+                existingArtifact
+                  { taContentAddress = Nothing,
+                    taContentType = contentType,
+                    taFileName = fileName,
+                    taFileSize = fileSize,
+                    taVersion = taVersion existingArtifact + 1,
+                    taCreatedAt = now,
+                    taMetadata = metadata
+                  }
+          atomically $ do
+            modifyTVar' (tssState service) $ \state ->
+              state
+                { tssArtifacts = Map.insert artifactId artifact (tssArtifacts state),
+                  tssArtifactVersions =
+                    Map.insert
+                      artifactId
+                      (sortArtifactsByVersion (existingVersions <> [artifact]))
+                      (tssArtifactVersions state)
+                }
+          persistTenantStorageState service
+          pure $ Right artifact
 
 -- | Get a tenant artifact by ID
 getTenantArtifact ::
@@ -308,6 +461,35 @@ listTenantArtifacts service tenantId = do
   state <- readTVarIO (tssState service)
   pure $ filter (\a -> taTenantId a == tenantId) $ Map.elems (tssArtifacts state)
 
+getTenantArtifactVersion ::
+  TenantStorageService ->
+  TenantId ->
+  Text ->
+  Int ->
+  IO (Either TenantStorageError TenantArtifact)
+getTenantArtifactVersion service tenantId artifactId version = do
+  state <- readTVarIO (tssState service)
+  case Map.lookup artifactId (tssArtifactVersions state) of
+    Nothing -> pure $ Left $ ArtifactNotFound artifactId
+    Just artifacts ->
+      case filter (\artifact -> taTenantId artifact == tenantId && taVersion artifact == version) artifacts of
+        [] -> pure $ Left $ ArtifactVersionNotFound artifactId version
+        artifact : _ -> pure $ Right artifact
+
+listArtifactVersions ::
+  TenantStorageService ->
+  TenantId ->
+  Text ->
+  IO (Either TenantStorageError [TenantArtifact])
+listArtifactVersions service tenantId artifactId = do
+  state <- readTVarIO (tssState service)
+  case Map.lookup artifactId (tssArtifactVersions state) of
+    Nothing -> pure $ Left $ ArtifactNotFound artifactId
+    Just artifacts ->
+      if all ((/= tenantId) . taTenantId) artifacts
+        then pure $ Left $ ArtifactNotFound artifactId
+        else pure $ Right $ sortArtifactsByVersion (filter ((== tenantId) . taTenantId) artifacts)
+
 -- | Generate a presigned URL for upload
 generateUploadUrl ::
   TenantStorageService ->
@@ -318,24 +500,31 @@ generateUploadUrl ::
 generateUploadUrl service tenantId artifactId contentType = do
   now <- getCurrentTime
   backend <- resolveTenantBackend service tenantId
+  latestArtifactResult <- getTenantArtifact service tenantId artifactId
   let config = tssConfig service
       bucket = getTenantBucket service tenantId
-      key = getTenantArtifactKey tenantId artifactId 1
-      expiresAt = addUTCTime (fromIntegral (tscUploadUrlTtl config)) now
-      presignedUrl =
-        buildPresignedUrl backend "PUT" bucket key expiresAt $
-          Map.fromList
-            [ ("Content-Type", contentType),
-              ("x-amz-meta-artifact-id", artifactId),
-              ("x-amz-meta-tenant-id", let TenantId t = tenantId in t)
-            ]
-  atomically $ do
-    modifyTVar' (tssState service) $ \state ->
-      state
-        { tssPresignedUrls =
-            Map.insert artifactId presignedUrl (tssPresignedUrls state)
-        }
-  pure $ Right presignedUrl
+      version =
+        case latestArtifactResult of
+          Right artifact -> taVersion artifact
+          Left _ -> 1
+      key = getTenantArtifactKey tenantId artifactId version
+      headers =
+        Map.fromList
+          [ ("Content-Type", contentType),
+            ("x-amz-meta-artifact-id", artifactId),
+            ("x-amz-meta-tenant-id", let TenantId t = tenantId in t),
+            ("x-amz-meta-version", T.pack (show version))
+          ]
+  case buildPresignedUrl config backend now (tscUploadUrlTtl config) "PUT" bucket key headers of
+    Left err -> pure (Left err)
+    Right presignedUrl -> do
+      atomically $ do
+        modifyTVar' (tssState service) $ \state ->
+          state
+            { tssPresignedUrls =
+                Map.insert artifactId presignedUrl (tssPresignedUrls state)
+            }
+      pure $ Right presignedUrl
 
 -- | Generate a presigned URL for download
 generateDownloadUrl ::
@@ -345,26 +534,47 @@ generateDownloadUrl ::
   Maybe Int ->
   IO (Either TenantStorageError PresignedUrl)
 generateDownloadUrl service tenantId artifactId maybeVersion = do
-  artifactResult <- getTenantArtifact service tenantId artifactId
+  artifactResult <-
+    case maybeVersion of
+      Nothing -> getTenantArtifact service tenantId artifactId
+      Just version -> getTenantArtifactVersion service tenantId artifactId version
   case artifactResult of
     Left err -> pure $ Left err
     Right artifact -> do
       now <- getCurrentTime
       backend <- resolveTenantBackend service tenantId
       let config = tssConfig service
-          version = maybe (taVersion artifact) id maybeVersion
           bucket = getTenantBucket service tenantId
-          key = getTenantArtifactKey tenantId artifactId version
-          expiresAt = addUTCTime (fromIntegral (tscDownloadUrlTtl config)) now
-          presignedUrl =
-            buildPresignedUrl backend "GET" bucket key expiresAt Map.empty
-      pure $ Right presignedUrl
+          key = getTenantArtifactKey tenantId artifactId (taVersion artifact)
+      pure $
+        buildPresignedUrl
+          config
+          backend
+          now
+          (tscDownloadUrlTtl config)
+          "GET"
+          bucket
+          key
+          Map.empty
 
 -- | Generate a unique artifact ID
 generateArtifactId :: IO Text
 generateArtifactId = do
   uuid <- UUID.nextRandom
   pure $ "artifact-" <> UUID.toText uuid
+
+configureTenantBackend :: TenantStorageService -> TenantId -> TenantStorageBackend -> IO ()
+configureTenantBackend service tenantId backend = do
+  atomically $ do
+    modifyTVar' (tssState service) $ \state ->
+      state
+        { tssTenantBackends =
+            Map.insert tenantId backend (tssTenantBackends state)
+        }
+  persistTenantStorageState service
+
+getTenantBackend :: TenantStorageService -> TenantId -> IO TenantStorageBackend
+getTenantBackend = resolveTenantBackend
 
 resolveTenantBackend :: TenantStorageService -> TenantId -> IO TenantStorageBackend
 resolveTenantBackend service tenantId = do
@@ -375,75 +585,336 @@ resolveTenantBackend service tenantId = do
       tenantId
       (tssTenantBackends state)
 
+loadTenantBackendConfigFile :: FilePath -> IO (Either Text (Map.Map TenantId TenantStorageBackend))
+loadTenantBackendConfigFile configPath = do
+  exists <- doesFileExist configPath
+  if not exists
+    then pure $ Left ("Tenant backend config file does not exist: " <> T.pack configPath)
+    else do
+      rawBytes <- LBS.readFile configPath
+      pure $
+        case decode rawBytes of
+          Just configFile ->
+            Right $
+              Map.fromList
+                [ (TenantId tenantIdText, backend)
+                | (tenantIdText, backend) <- Map.toList (tbcTenants configFile)
+                ]
+          Nothing ->
+            Left ("Tenant backend config file is not valid JSON: " <> T.pack configPath)
+
+sortArtifactsByVersion :: [TenantArtifact] -> [TenantArtifact]
+sortArtifactsByVersion = sortOn taVersion
+
+tenantStorageSnapshot :: TenantStorageState -> TenantStorageSnapshot
+tenantStorageSnapshot state =
+  TenantStorageSnapshot
+    { tssSnapshotArtifacts = Map.elems (tssArtifacts state),
+      tssSnapshotVersions =
+        [ ArtifactVersionHistory artifactId (sortArtifactsByVersion versions)
+        | (artifactId, versions) <- Map.toList (tssArtifactVersions state)
+        ],
+      tssSnapshotTenantBackends =
+        [ TenantBackendAssignment tenantId backend
+        | (tenantId, backend) <- Map.toList (tssTenantBackends state)
+        ]
+    }
+
+loadTenantStorageState :: FilePath -> IO TenantStorageState
+loadTenantStorageState persistencePath = do
+  exists <- doesFileExist persistencePath
+  if not exists
+    then pure emptyTenantStorageState
+    else do
+      rawBytes <- LBS.readFile persistencePath
+      pure $
+        case decode rawBytes of
+          Nothing -> emptyTenantStorageState
+          Just snapshot ->
+            let versionMap =
+                  Map.fromList
+                    [ (avhArtifactId history, sortArtifactsByVersion (avhVersions history))
+                    | history <- tssSnapshotVersions snapshot
+                    ]
+                artifactMap =
+                  Map.fromList
+                    [ (taArtifactId artifact, artifact)
+                    | artifact <- tssSnapshotArtifacts snapshot
+                    ]
+                    <> Map.fromList
+                      [ (artifactId, latestArtifact)
+                      | (artifactId, versions) <- Map.toList versionMap
+                      , latestArtifact <- case reverse versions of
+                          latest : _ -> [latest]
+                          [] -> []
+                      ]
+                backendMap =
+                  Map.fromList
+                    [ (tbaTenantId assignment, tbaBackend assignment)
+                    | assignment <- tssSnapshotTenantBackends snapshot
+                    ]
+             in TenantStorageState
+                  { tssArtifacts = artifactMap,
+                    tssArtifactVersions = versionMap,
+                    tssTenantBackends = backendMap,
+                    tssPresignedUrls = Map.empty
+                  }
+
+persistTenantStorageState :: TenantStorageService -> IO ()
+persistTenantStorageState service =
+  case tssPersistencePath service of
+    Nothing -> pure ()
+    Just persistencePath -> do
+      currentState <- readTVarIO (tssState service)
+      createDirectoryIfMissing True (takeDirectory persistencePath)
+      LBS.writeFile persistencePath (encode (tenantStorageSnapshot currentState))
+
+tenantStorageBackendConfigValue :: TenantStorageBackend -> Value
+tenantStorageBackendConfigValue backend =
+  case backend of
+    PlatformMinIO ->
+      object ["type" .= ("platform-minio" :: Text)]
+    TenantOwnedS3 {..} ->
+      object
+        [ "type" .= ("tenant-s3" :: Text),
+          "endpoint" .= tosEndpoint,
+          "region" .= tosRegion,
+          "accessKeyId" .= tosAccessKeyId,
+          "secretAccessKey" .= tosSecretAccessKey
+        ]
+
+parseTenantStorageBackendConfigValue :: Value -> Parser TenantStorageBackend
+parseTenantStorageBackendConfigValue =
+  withObject "TenantStorageBackendConfig" $ \obj -> do
+    backendType <- obj .: "type"
+    case (backendType :: Text) of
+      "platform-minio" -> pure PlatformMinIO
+      "tenant-s3" ->
+        TenantOwnedS3
+          <$> obj .: "endpoint"
+          <*> obj .: "region"
+          <*> obj .: "accessKeyId"
+          <*> obj .: "secretAccessKey"
+      other -> fail ("Unknown backend type: " <> T.unpack other)
+
 buildPresignedUrl ::
+  TenantStorageConfig ->
   TenantStorageBackend ->
+  UTCTime ->
+  Int ->
   Text ->
   BucketName ->
   ObjectKey ->
-  UTCTime ->
   Map.Map Text Text ->
-  PresignedUrl
-buildPresignedUrl backend method bucket key expiresAt headers =
-  PresignedUrl
-    { puUrl = presignedObjectUrl baseUrl bucket key method expiresAt signature,
-      puExpiresAt = expiresAt,
-      puMethod = method,
-      puHeaders = headers
-    }
+  Either TenantStorageError PresignedUrl
+buildPresignedUrl config backend signedAt ttlSeconds method bucket key headers = do
+  credentials <- presignCredentials config backend
+  let canonicalUri = objectCanonicalUri bucket key
+      signedHeadersMap = Map.insert "host" (pecHost credentials) (canonicalizeHeaders headers)
+      signedHeaders = T.intercalate ";" (Map.keys signedHeadersMap)
+      amzDate = formatAmzDate signedAt
+      credentialDate = formatCredentialDate signedAt
+      credentialScope =
+        credentialDate
+          <> "/"
+          <> pecRegion credentials
+          <> "/s3/aws4_request"
+      queryParams =
+        Map.fromList
+          [ ("X-Amz-Algorithm", "AWS4-HMAC-SHA256"),
+            ("X-Amz-Credential", pecAccessKeyId credentials <> "/" <> credentialScope),
+            ("X-Amz-Date", amzDate),
+            ("X-Amz-Expires", T.pack (show ttlSeconds)),
+            ("X-Amz-SignedHeaders", signedHeaders)
+          ]
+      canonicalQuery = renderCanonicalQuery queryParams
+      canonicalHeaders = renderCanonicalHeaders signedHeadersMap
+      canonicalRequest =
+        T.intercalate
+          "\n"
+          [ method,
+            canonicalUri,
+            canonicalQuery,
+            canonicalHeaders,
+            signedHeaders,
+            "UNSIGNED-PAYLOAD"
+          ]
+      stringToSign =
+        T.intercalate
+          "\n"
+          [ "AWS4-HMAC-SHA256",
+            amzDate,
+            credentialScope,
+            sha256Hex canonicalRequest
+          ]
+      signature =
+        hmacSha256Hex
+          ( signingKey
+              (pecSecretAccessKey credentials)
+              credentialDate
+              (pecRegion credentials)
+          )
+          stringToSign
+      finalQuery =
+        renderCanonicalQuery
+          (Map.insert "X-Amz-Signature" signature queryParams)
+      expiresAt = addUTCTime (fromIntegral ttlSeconds) signedAt
+  pure
+    PresignedUrl
+      { puUrl =
+          trimTrailingSlash (pecEndpoint credentials)
+            <> canonicalUri
+            <> "?"
+            <> finalQuery,
+        puExpiresAt = expiresAt,
+        puMethod = method,
+        puHeaders = headers
+      }
+
+data PresignCredentials = PresignCredentials
+  { pecEndpoint :: Text,
+    pecHost :: Text,
+    pecRegion :: Text,
+    pecAccessKeyId :: Text,
+    pecSecretAccessKey :: Text
+  }
+
+presignCredentials :: TenantStorageConfig -> TenantStorageBackend -> Either TenantStorageError PresignCredentials
+presignCredentials config backend =
+  case backend of
+    PlatformMinIO ->
+      buildCredentials
+        (tscPlatformEndpoint config)
+        (tscPlatformRegion config)
+        (tscPlatformAccessKeyId config)
+        (tscPlatformSecretAccessKey config)
+    TenantOwnedS3 {..} ->
+      buildCredentials
+        tosEndpoint
+        tosRegion
+        tosAccessKeyId
+        tosSecretAccessKey
   where
-    baseUrl = backendBaseUrl backend
-    signature = presignedSignature backend method bucket key expiresAt
+    buildCredentials endpoint region accessKeyId secretAccessKey
+      | T.null endpoint = Left (PresignedUrlGenerationFailed "Storage endpoint is empty")
+      | T.null region = Left (PresignedUrlGenerationFailed "Storage region is empty")
+      | T.null accessKeyId = Left (PresignedUrlGenerationFailed "Storage access key is empty")
+      | T.null secretAccessKey = Left (PresignedUrlGenerationFailed "Storage secret key is empty")
+      | otherwise =
+          Right
+            PresignCredentials
+              { pecEndpoint = trimTrailingSlash endpoint,
+                pecHost = endpointHost endpoint,
+                pecRegion = region,
+                pecAccessKeyId = accessKeyId,
+                pecSecretAccessKey = secretAccessKey
+              }
 
-backendBaseUrl :: TenantStorageBackend -> Text
-backendBaseUrl PlatformMinIO = "http://localhost:9000"
-backendBaseUrl TenantOwnedS3 {tosEndpoint = endpoint} = trimTrailingSlash endpoint
-
-presignedObjectUrl :: Text -> BucketName -> ObjectKey -> Text -> UTCTime -> Text -> Text
-presignedObjectUrl baseUrl bucket key method expiresAt signature =
-  trimTrailingSlash baseUrl
+objectCanonicalUri :: BucketName -> ObjectKey -> Text
+objectCanonicalUri bucket key =
+  "/"
+    <> encodePathSegment (unBucketName bucket)
     <> "/"
-    <> unBucketName bucket
-    <> "/"
-    <> unObjectKey key
-    <> "?method="
-    <> method
-    <> "&expires="
-    <> urlEncodeText (T.pack (show expiresAt))
-    <> "&signature="
-    <> signature
+    <> T.intercalate "/" (map encodePathSegment (T.splitOn "/" (unObjectKey key)))
 
-presignedSignature :: TenantStorageBackend -> Text -> BucketName -> ObjectKey -> UTCTime -> Text
-presignedSignature backend method bucket key expiresAt =
-  T.pack . show . abs . hashText $
-    method
-      <> "|"
-      <> backendSignatureSeed backend
-      <> "|"
-      <> unBucketName bucket
-      <> "|"
-      <> unObjectKey key
-      <> "|"
-      <> T.pack (show expiresAt)
+canonicalizeHeaders :: Map.Map Text Text -> Map.Map Text Text
+canonicalizeHeaders =
+  Map.fromList
+    . map (\(name, value) -> (T.toLower name, normalizeHeaderValue value))
+    . Map.toList
 
-backendSignatureSeed :: TenantStorageBackend -> Text
-backendSignatureSeed PlatformMinIO = "platform-minio-local"
-backendSignatureSeed TenantOwnedS3 {tosEndpoint = endpoint, tosRegion = region, tosAccessKeyId = accessKeyId} =
-  endpoint <> "|" <> region <> "|" <> accessKeyId
+renderCanonicalHeaders :: Map.Map Text Text -> Text
+renderCanonicalHeaders headers =
+  T.concat [name <> ":" <> value <> "\n" | (name, value) <- Map.toAscList headers]
+
+renderCanonicalQuery :: Map.Map Text Text -> Text
+renderCanonicalQuery queryParams =
+  T.intercalate
+    "&"
+    [ percentEncode name <> "=" <> percentEncode value
+    | (name, value) <- Map.toAscList queryParams
+    ]
+
+signingKey :: Text -> Text -> Text -> ByteString.ByteString
+signingKey secret credentialDate region =
+  hmacSha256Raw
+    ( hmacSha256Raw
+        (hmacSha256Raw (hmacSha256Raw ("AWS4" <> TE.encodeUtf8 secret) credentialDate) region)
+        "s3"
+    )
+    "aws4_request"
+
+hmacSha256Raw :: ByteString.ByteString -> Text -> ByteString.ByteString
+hmacSha256Raw key message =
+  convert (hmac key (TE.encodeUtf8 message) :: HMAC SHA256)
+
+hmacSha256Hex :: ByteString.ByteString -> Text -> Text
+hmacSha256Hex key message =
+  hexText (convert (hmac key (TE.encodeUtf8 message) :: HMAC SHA256))
+
+sha256Hex :: Text -> Text
+sha256Hex =
+  hexDigestText . (hash . TE.encodeUtf8 :: Text -> Digest SHA256)
+
+hexText :: ByteString.ByteString -> Text
+hexText =
+  TE.decodeUtf8 . convertToBase Base16
+
+hexDigestText :: Digest SHA256 -> Text
+hexDigestText =
+  TE.decodeUtf8 . convertToBase Base16
+
+formatAmzDate :: UTCTime -> Text
+formatAmzDate =
+  T.pack . formatTime defaultTimeLocale "%Y%m%dT%H%M%SZ"
+
+formatCredentialDate :: UTCTime -> Text
+formatCredentialDate =
+  T.pack . formatTime defaultTimeLocale "%Y%m%d"
+
+endpointHost :: Text -> Text
+endpointHost endpoint =
+  T.takeWhile (/= '/') $
+    fromMaybe strippedHttps (T.stripPrefix "http://" strippedHttps)
+  where
+    strippedHttps = fromMaybe endpoint (T.stripPrefix "https://" endpoint)
 
 trimTrailingSlash :: Text -> Text
 trimTrailingSlash = T.dropWhileEnd (== '/')
 
-urlEncodeText :: Text -> Text
-urlEncodeText =
+normalizeHeaderValue :: Text -> Text
+normalizeHeaderValue =
+  T.unwords . T.words
+
+percentEncode :: Text -> Text
+percentEncode =
   T.concatMap
     ( \c ->
-        case c of
-          ' ' -> "%20"
-          ':' -> "%3A"
-          '/' -> "%2F"
-          '+' -> "%2B"
-          _ -> T.singleton c
+        if isUnreserved c
+          then T.singleton c
+          else percentEncodeChar c
     )
 
-hashText :: Text -> Int
-hashText = T.foldl' (\acc c -> acc * 33 + fromEnum c) 5381
+encodePathSegment :: Text -> Text
+encodePathSegment =
+  T.concatMap
+    ( \c ->
+        if isUnreserved c
+          then T.singleton c
+          else percentEncodeChar c
+    )
+
+isUnreserved :: Char -> Bool
+isUnreserved c =
+  isAlphaNum c || c `elem` ("-_.~" :: String)
+
+percentEncodeChar :: Char -> Text
+percentEncodeChar c =
+  "%" <> hexNibble high <> hexNibble low
+  where
+    codePoint = ord c
+    (high, low) = codePoint `divMod` 16
+
+    hexNibble n
+      | n < 10 = T.singleton (toEnum (fromEnum '0' + n))
+      | otherwise = T.singleton (toEnum (fromEnum 'A' + (n - 10)))

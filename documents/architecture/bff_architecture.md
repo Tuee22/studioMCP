@@ -5,341 +5,145 @@
 **Supersedes**: N/A
 **Referenced by**: [overview.md](overview.md#canonical-follow-on-documents), [multi_tenant_saas_mcp_auth_architecture.md](multi_tenant_saas_mcp_auth_architecture.md#bff-role), [../reference/web_portal_surface.md](../reference/web_portal_surface.md#bff-responsibilities), [../../STUDIOMCP_DEVELOPMENT_PLAN.md](../../STUDIOMCP_DEVELOPMENT_PLAN.md#documentation-governance)
 
-> **Purpose**: Canonical architecture for the studioMCP Backend-for-Frontend (BFF) service, including technology choice, session management, MCP client integration, and deployment topology.
+> **Purpose**: Canonical architecture for the current `studioMCP` Backend-for-Frontend (BFF) service, including its implemented route surface, session model, and MCP integration shape.
 
 ## Summary
 
-The BFF (Backend-for-Frontend) is a Haskell service that mediates between browser clients and the MCP server. It provides browser-optimized APIs for upload, download, workflow management, and chat while enforcing authentication and authorization.
+The BFF is a Haskell service in the same repository and codebase as the MCP server. It exposes a same-origin browser shell plus browser-oriented HTTP routes for login, logout, profile, upload, download, chat, run submission/list/status/cancel, run-progress SSE, and artifact-governance actions.
 
-## Technology Decision
+Workflow and artifact-governance operations are mediated through a real HTTP MCP client path. Upload and download intent generation remain direct tenant-storage operations because the browser-facing contract is presigned-storage oriented.
 
-**Choice**: Haskell BFF in the same repository and binary as the MCP server.
+## Current Repo Note
 
-**Rationale**:
-- Single deployment artifact simplifies operations
-- Type safety across BFF and MCP boundaries
-- Code reuse for common types (tenant, auth context, artifacts)
-- Consistent error handling patterns
-- Unified observability stack
+Implemented today:
 
-## Architecture Overview
+- `studiomcp bff` in the main CLI
+- `studiomcp-bff` as a dedicated executable
+- WAI-based handlers in `src/StudioMCP/Web/BFF.hs` and `src/StudioMCP/Web/Handlers.hs`
+- built-in browser shell routes at `/` and `/app`
+- browser login, logout, profile, and cookie-backed session handling
+- Redis-backed browser-session persistence for multi-instance BFF deployment
+- upload and download presigning through tenant storage
+- chat responses through the advisory inference path
+- SSE-framed chat responses at `POST /api/v1/chat/stream`
+- run submission, list, status, and cancel through MCP
+- SSE-framed run progress windows at `GET /api/v1/runs/{runId}/events`
+- artifact hide and archive through MCP
+
+Still intentionally bounded:
+- advanced editing or timeline UI
+- collaborative multi-user browser editing
+- token-level model streaming from the advisory reference model
+
+## Runtime Shape
 
 ```mermaid
 flowchart TB
-    Browser[Browser Client] --> BFFService[BFF Service]
-    BFFService --> Keycloak[Keycloak]
-    BFFService --> MCP[MCP Server]
-    BFFService --> Storage[Object Storage]
-    BFFService --> Router[HTTP Router]
-    BFFService --> SessionMgr[Session Manager]
-    BFFService --> McpClient[MCP Client]
-    BFFService --> Presigner[Presigned URL Generator]
+  Browser[Browser Or Browser-Like Client] --> BFF[BFF Routes]
+  BFF --> Sessions[Redis-Backed Web Sessions]
+  BFF --> Storage[Tenant Storage Service]
+  BFF --> MCP[HTTP MCP Client]
+  MCP --> Runtime[Shared Runtime Services]
+  BFF --> Inference[Reference Model Host]
 ```
 
-## BFF Responsibilities
+## Code Ownership
 
-| Responsibility | Description |
-|---------------|-------------|
-| Browser Session Management | Cookie-based sessions for authenticated users |
-| Auth Flow Mediation | Keycloak redirect flows, token refresh |
-| MCP Client | Calls MCP tools on behalf of authenticated users |
-| Presigned URL Generation | Short-lived S3 URLs for upload/download |
-| API Composition | Browser-friendly JSON responses |
-| Rate Limiting | Per-user request throttling |
+The implemented BFF lives in these modules:
 
-## Module Structure
+- `app/BFFMain.hs`
+- `app/BFFMode.hs`
+- `src/StudioMCP/Web/BFF.hs`
+- `src/StudioMCP/Web/Handlers.hs`
+- `src/StudioMCP/Web/Types.hs`
 
-```
-src/StudioMCP/BFF/
-├── Server.hs           -- BFF HTTP server (Servant-based)
-├── Routes.hs           -- Route definitions
-├── Session.hs          -- Browser session management
-├── McpClient.hs        -- MCP client for tool invocation
-├── Auth.hs             -- Keycloak auth flow handling
-├── Presign.hs          -- Presigned URL generation
-├── Chat.hs             -- Chat endpoint with SSE streaming
-└── Types.hs            -- BFF-specific types
-```
+The BFF does not currently have a separate `src/StudioMCP/BFF/` module tree.
 
-## Session Management
+## Responsibilities
 
-### Browser Sessions vs MCP Sessions
+The current BFF is responsible for:
 
-| Aspect | Browser Session | MCP Session |
-|--------|----------------|-------------|
-| Purpose | User authentication state | Protocol state |
-| Storage | Server-side (Redis or memory) | Redis (externalized) |
-| Identifier | Session cookie | Mcp-Session-Id header |
-| Lifetime | 24 hours (configurable) | 30 minutes idle |
-| Refresh | Sliding window | Per-request touch |
+- maintaining shared browser-session state in Redis
+- serving the built-in browser control-room UI
+- authorizing upload and download requests using the current session tenant
+- returning tenant-scoped presigned URLs
+- shaping browser-facing JSON payloads
+- submitting, listing, inspecting, and canceling workflows through MCP
+- framing advisory chat and run-status updates as SSE windows for the browser
+- forwarding artifact hide and archive actions through MCP
+- returning advisory chat responses using the inference helper path
 
-### Browser Session Data
+The current BFF is not responsible for:
 
-```haskell
-data BrowserSession = BrowserSession
-  { bsSessionId :: SessionId
-  , bsUserId :: Text
-  , bsTenantId :: TenantId
-  , bsAccessToken :: Text           -- Keycloak access token
-  , bsRefreshToken :: Text          -- Keycloak refresh token
-  , bsTokenExpiresAt :: UTCTime
-  , bsCreatedAt :: UTCTime
-  , bsLastActiveAt :: UTCTime
-  }
-```
+- implementing a second execution semantics model
+- bypassing tenant scoping
+- deleting tenant media artifacts
+- acting as the source of truth for MCP session state
 
-### Session Cookie
+## Session Model
 
-```http
-Set-Cookie: session=<session_id>; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=86400
-```
+The current session model is cookie-backed at the browser edge and Redis-backed inside the BFF tier.
 
-## MCP Client Integration
+Session facts:
 
-The BFF maintains an MCP client connection to the MCP server:
+- session records, pending uploads, and cached MCP session ids are stored in Redis when the BFF is configured for shared state
+- the route layer primarily extracts a session id from the `studiomcp_session` cookie and accepts `Authorization: Bearer <web-session-id>` as a fallback
+- session records may contain access and refresh tokens plus a cached MCP session id, but those values are not serialized back to clients
+- cookie-based browser sessions are part of the implemented HTTP surface
 
-```haskell
-data McpClientConfig = McpClientConfig
-  { mccMcpUrl :: Text              -- e.g., "http://localhost:3000/mcp"
-  , mccServiceAccount :: Text      -- BFF's service account client_id
-  , mccServiceSecret :: Text       -- BFF's service account secret
-  , mccConnectionPool :: Int       -- Connection pool size
-  }
+This preserves a clear boundary between browser sessions and MCP sessions while allowing browser traffic to move across BFF replicas without affinity.
 
--- MCP client interface
-data McpClient = McpClient
-  { mcInitialize :: IO McpSession
-  , mcCallTool :: McpSession -> ToolName -> Value -> IO (Either McpError Value)
-  , mcReadResource :: McpSession -> ResourceUri -> IO (Either McpError Value)
-  , mcClose :: McpSession -> IO ()
-  }
-```
+## Runtime Integrations
 
-### On-Behalf-Of Flow
+### Tenant Storage
 
-When the BFF calls MCP tools for a user:
+Upload and download routes use the tenant storage service directly for:
 
-1. BFF authenticates with its own service account credentials
-2. BFF includes user context in tool parameters
-3. MCP server enforces tenant scoping based on user context
-4. Tool execution respects user's permissions
+- artifact creation
+- upload URL generation
+- download URL generation
+- artifact metadata lookup
 
-```haskell
--- Example: Submit DAG on behalf of user
-submitDagForUser :: McpClient -> BrowserSession -> DagSpec -> IO (Either Error RunId)
-submitDagForUser client session dag = do
-  let params = object
-        [ "dag" .= dag
-        , "onBehalfOf" .= object
-            [ "userId" .= bsUserId session
-            , "tenantId" .= bsTenantId session
-            ]
-        ]
-  mcCallTool client mcpSession "workflow.submit_dag" params
-```
+### MCP Runtime
 
-## Presigned URL Generation
+Workflow and artifact-governance routes use the MCP HTTP surface:
 
-### Direct Storage Access
+- `workflow.submit`
+- `workflow.list`
+- `workflow.status`
+- `workflow.cancel`
+- `artifact.hide`
+- `artifact.archive`
 
-For large file transfers, the BFF generates presigned URLs for direct browser-to-storage communication:
+The BFF initializes `/mcp`, caches the returned `Mcp-Session-Id` in the web session, reuses that MCP session across requests, and closes it when the browser session is refreshed or invalidated.
 
-```haskell
-data PresignConfig = PresignConfig
-  { pcStorageEndpoint :: Text
-  , pcAccessKey :: Text
-  , pcSecretKey :: Text
-  , pcDefaultBucket :: Text
-  , pcUploadTtl :: Int         -- seconds
-  , pcDownloadTtl :: Int       -- seconds
-  }
+### Inference
 
-generateUploadUrl :: PresignConfig -> TenantId -> UploadRequest -> IO PresignedUpload
-generateDownloadUrl :: PresignConfig -> TenantId -> ArtifactRef -> IO PresignedDownload
-```
+Chat uses the advisory reference-model path. Responses remain guardrailed and may not mutate workflow state directly. The BFF exposes both a one-shot JSON chat route and an SSE route that emits assistant-message chunks from the completed advisory response.
 
-### Security Constraints
+## Config Shape
 
-- Presigned URLs are tenant-scoped (key prefix)
-- URLs expire after configured TTL
-- No storage credentials exposed to browser
-- Audit log records presign requests
+The current BFF config includes:
 
-## Server Configuration
+- `bffMcpEndpoint`
+- session TTL
+- upload TTL
+- download TTL
+- max upload size
+- allowed content types
 
-### Entry Point
+`bffMcpEndpoint` is the active MCP endpoint used by the BFF HTTP client path.
 
-```haskell
--- app/Main.hs addition
-runBffMode :: AppConfig -> IO ()
-runBffMode config = do
-  sessionStore <- initSessionStore (configSessionStore config)
-  mcpClient <- initMcpClient (configMcpClient config)
-  let bffEnv = BffEnv
-        { bffSessionStore = sessionStore
-        , bffMcpClient = mcpClient
-        , bffPresignConfig = configPresign config
-        , bffKeycloakConfig = configKeycloak config
-        }
-  runBffServer (configBffPort config) bffEnv
-```
+## Known Bounds
 
-### CLI Command
-
-```bash
-studiomcp bff                    # Start BFF server
-studiomcp bff --port 3001        # Custom port
-studiomcp validate web-bff       # Validate BFF configuration
-```
-
-### Environment Variables
-
-```bash
-STUDIOMCP_BFF_PORT=3001
-STUDIOMCP_BFF_SESSION_TTL=86400
-STUDIOMCP_BFF_MCP_URL=http://localhost:3000/mcp
-STUDIOMCP_BFF_KEYCLOAK_URL=http://localhost:8080
-STUDIOMCP_BFF_KEYCLOAK_REALM=studiomcp
-STUDIOMCP_BFF_KEYCLOAK_CLIENT_ID=studiomcp-bff
-STUDIOMCP_BFF_KEYCLOAK_CLIENT_SECRET=***
-```
-
-## Deployment Topology
-
-### Single Binary Deployment
-
-The BFF runs as part of the same binary with a separate mode:
-
-```yaml
-# Kubernetes deployment
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: studiomcp-bff
-spec:
-  replicas: 2
-  template:
-    spec:
-      containers:
-      - name: bff
-        image: studiomcp:latest
-        command: ["studiomcp", "bff"]
-        ports:
-        - containerPort: 3001
-        env:
-        - name: STUDIOMCP_BFF_MCP_URL
-          value: "http://studiomcp-mcp:3000/mcp"
-```
-
-### Ingress Configuration
-
-```yaml
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: studiomcp-ingress
-spec:
-  rules:
-  - host: app.example.com
-    http:
-      paths:
-      - path: /api
-        pathType: Prefix
-        backend:
-          service:
-            name: studiomcp-bff
-            port:
-              number: 3001
-      - path: /mcp
-        pathType: Prefix
-        backend:
-          service:
-            name: studiomcp-mcp
-            port:
-              number: 3000
-```
-
-## Security Considerations
-
-### CORS Configuration
-
-```haskell
-corsPolicy :: CorsResourcePolicy
-corsPolicy = CorsResourcePolicy
-  { corsOrigins = Just (["https://app.example.com"], True)
-  , corsMethods = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
-  , corsRequestHeaders = ["Authorization", "Content-Type"]
-  , corsExposedHeaders = Nothing
-  , corsMaxAge = Just 86400
-  , corsVaryOrigin = True
-  , corsRequireOrigin = True
-  , corsIgnoreFailures = False
-  }
-```
-
-### CSRF Protection
-
-- SameSite=Strict cookies
-- CSRF token in forms (for non-API requests)
-- Origin header validation
-
-### Content Security Policy
-
-```http
-Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://storage.example.com
-```
-
-## Error Handling
-
-### BFF to Browser Errors
-
-```haskell
-data BffError
-  = BffAuthRequired
-  | BffAuthExpired
-  | BffForbidden Text
-  | BffNotFound Text
-  | BffMcpError McpError
-  | BffStorageError StorageError
-  | BffRateLimited
-  | BffInternalError Text
-
-toBffResponse :: BffError -> Response
-toBffResponse = \case
-  BffAuthRequired -> status401 "Authentication required"
-  BffAuthExpired -> status401 "Session expired"
-  BffForbidden msg -> status403 msg
-  BffNotFound msg -> status404 msg
-  BffMcpError err -> mapMcpError err
-  BffStorageError err -> status500 "Storage error"
-  BffRateLimited -> status429 "Rate limit exceeded"
-  BffInternalError msg -> status500 msg
-```
-
-## Observability
-
-### Metrics
-
-| Metric | Type | Description |
-|--------|------|-------------|
-| `bff_requests_total` | Counter | Total BFF requests by endpoint |
-| `bff_request_duration_seconds` | Histogram | Request latency |
-| `bff_sessions_active` | Gauge | Active browser sessions |
-| `bff_mcp_calls_total` | Counter | MCP calls by tool |
-| `bff_presign_requests_total` | Counter | Presigned URL requests |
-
-### Logging
-
-All BFF requests include:
-- Correlation ID
-- Session ID (if authenticated)
-- User ID and Tenant ID
-- Request path and method
-- Response status and duration
+- chat SSE is assistant-message chunking over a completed advisory response rather than token-level inference streaming
+- run progress SSE is derived from reconnectable status-polling windows rather than a per-node runtime event bus
+- the shipped browser UI is a control-room/workbench surface, not an advanced editor or collaborative timeline
+- multi-instance correctness depends on Redis being configured for the BFF deployment
 
 ## Cross-References
 
-- [Web Portal Surface](../reference/web_portal_surface.md)
-- [Multi-Tenant SaaS MCP Auth Architecture](multi_tenant_saas_mcp_auth_architecture.md)
-- [MCP Protocol Architecture](mcp_protocol_architecture.md)
-- [Security Model](../engineering/security_model.md)
+- [Architecture Overview](overview.md#architecture-overview)
+- [Multi-Tenant SaaS MCP Auth Architecture](multi_tenant_saas_mcp_auth_architecture.md#multi-tenant-saas-mcp-auth-architecture)
+- [Web Portal Surface](../reference/web_portal_surface.md#web-portal-surface)
+- [Security Model](../engineering/security_model.md#security-model)

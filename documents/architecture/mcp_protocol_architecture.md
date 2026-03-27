@@ -9,7 +9,7 @@
 
 ## Summary
 
-`studioMCP` must implement MCP as MCP.
+`studioMCP` implements MCP as MCP and must not regress from that contract.
 
 That means:
 
@@ -23,7 +23,7 @@ The public automation contract is not a collection of business REST routes such 
 
 ## Current Repo Note
 
-The current repository still exposes a custom DAG HTTP API for submission and summary retrieval. That surface exists as a legacy foundation only. It is not the target protocol contract and must not be treated as conformance.
+The current repository exposes the MCP-first protocol contract as its authoritative automation surface. MCP conformance must be evaluated against `/mcp`, not against any retired migration-era aliases.
 
 ## Protocol Responsibilities
 
@@ -49,7 +49,7 @@ The MCP layer is not responsible for:
 `studioMCP` targets two transports:
 
 - `stdio` for local development, local operators, and Inspector-driven debugging
-- Streamable HTTP for remote SaaS access and BFF mediation
+- Streamable HTTP for remote SaaS access and the BFF mediation path
 
 Remote MCP traffic must terminate at a single coherent Streamable HTTP MCP endpoint rather than a family of business-specific REST routes.
 
@@ -432,7 +432,7 @@ This design allows the same protocol logic to be tested via in-memory transports
 
 - the public MCP endpoint must be a single coherent MCP surface
 - admin routes such as `/healthz`, `/version`, and `/metrics` are operational endpoints, not substitutes for MCP
-- the legacy custom `/runs` surface may exist only during migration
+- legacy migration-era automation surfaces must not be reintroduced as the public contract
 - new feature work should target the MCP surface first unless a migration note explicitly says otherwise
 
 ## Cross-References

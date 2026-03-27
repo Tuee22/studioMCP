@@ -81,6 +81,14 @@ spec = do
         Right tenant -> tenantId tenant `shouldBe` TenantId "tenant-xyz"
         Left _ -> expectationFailure "Expected Right"
 
+    it "resolves tenant from azp-style fallback claims" $ do
+      let rawPayload = Object $ KM.fromList [("azp_tenant", String "tenant-azp")]
+          payload = emptyPayload {jpRaw = rawPayload}
+          result = resolveTenant AuthorizedPartyTenant payload
+      case result of
+        Right tenant -> tenantId tenant `shouldBe` TenantId "tenant-azp"
+        Left _ -> expectationFailure "Expected Right"
+
   describe "extractSubject" $ do
     it "extracts subject from claims" $ do
       let claims = testClaims

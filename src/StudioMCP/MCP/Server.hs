@@ -2,6 +2,8 @@
 
 module StudioMCP.MCP.Server
   ( runServer,
+    runStdioServer,
+    application,
   )
 where
 
@@ -58,6 +60,7 @@ import StudioMCP.MCP.Core
     defaultServerConfig,
     handleMessageWithAuth,
     newMcpServerWithCatalogs,
+    runMcpServer,
   )
 import StudioMCP.MCP.Handlers
   ( ServerEnv (..),
@@ -67,8 +70,11 @@ import StudioMCP.MCP.Handlers
   )
 import StudioMCP.MCP.Prompts (newPromptCatalog)
 import StudioMCP.MCP.Protocol.StateMachine (ProtocolState (ShuttingDown))
-import StudioMCP.MCP.Session.Types (Session (sessionId), SessionId (..))
+import StudioMCP.MCP.Session.Store (storeDeleteSession)
+import StudioMCP.MCP.Session.Types (Session (sessionId), SessionData (..), SessionId (..))
+import StudioMCP.MCP.Session.RedisStore (readSessionData, writeSessionData)
 import StudioMCP.MCP.Transport.Http (getMcpSessionId)
+import StudioMCP.MCP.Transport.Stdio (createStdioTransport, defaultStdioConfig, runStdioTransport)
 import qualified StudioMCP.Observability.McpMetrics as McpMetrics
 import StudioMCP.Util.Logging (configureProcessLogging)
 import System.Environment (lookupEnv)
@@ -76,14 +82,18 @@ import System.Environment (lookupEnv)
 runServer :: IO ()
 runServer = do
   configureProcessLogging
-  appConfig <- loadAppConfig
-  serverEnv <- createServerEnv appConfig
+  (serverEnv, mcpServer, authConfig, authService) <- buildServerRuntime
+  port <- resolveServerPort
+  putStrLn ("studioMCP server listening on 0.0.0.0:" <> show port)
+  putStrLn ("Auth enabled: " <> show (acEnabled authConfig))
+  runSettings
+    (setHost "0.0.0.0" (setPort port (setTimeout 0 defaultSettings)))
+    (application serverEnv mcpServer authConfig authService)
 
-  -- Initialize auth service
-  authConfig <- loadAuthConfigFromEnv
-  httpManager <- newManager defaultManagerSettings
-  authService <- newAuthService authConfig httpManager
-
+runStdioServer :: IO ()
+runStdioServer = do
+  configureProcessLogging
+  (serverEnv, _, _, _) <- buildServerRuntime
   promptCatalog <- newPromptCatalog
   mcpServer <-
     newMcpServerWithCatalogs
@@ -93,18 +103,32 @@ runServer = do
       promptCatalog
       (Just (serverRateLimiter serverEnv))
       (Just (serverMcpMetrics serverEnv))
-  port <- resolveServerPort
-  putStrLn ("studioMCP server listening on 0.0.0.0:" <> show port)
-  putStrLn ("Auth enabled: " <> show (acEnabled authConfig))
-  runSettings
-    (setHost "0.0.0.0" (setPort port (setTimeout 0 defaultSettings)))
-    (application serverEnv mcpServer authConfig authService)
+  stdioTransport <- createStdioTransport defaultStdioConfig
+  runMcpServer mcpServer (runStdioTransport stdioTransport)
+
+buildServerRuntime :: IO (ServerEnv, McpServer, AuthConfig, AuthService)
+buildServerRuntime = do
+  appConfig <- loadAppConfig
+  serverEnv <- createServerEnv appConfig
+  authConfig <- loadAuthConfigFromEnv
+  httpManager <- newManager defaultManagerSettings
+  authService <- newAuthService authConfig httpManager
+  promptCatalog <- newPromptCatalog
+  mcpServer <-
+    newMcpServerWithCatalogs
+      defaultServerConfig
+      (serverToolCatalog serverEnv)
+      (serverResourceCatalog serverEnv)
+      promptCatalog
+      (Just (serverRateLimiter serverEnv))
+      (Just (serverMcpMetrics serverEnv))
+  pure (serverEnv, mcpServer, authConfig, authService)
 
 application :: ServerEnv -> McpServer -> AuthConfig -> AuthService -> Application
 application serverEnv mcpServer authConfig authService request respond =
   case pathInfo request of
     -- MCP JSON-RPC endpoint (new in Phase 13) - requires auth in production
-    ["mcp"] -> handleMcpEndpoint mcpServer authConfig authService request respond
+    ["mcp"] -> handleMcpEndpoint serverEnv mcpServer authConfig authService request respond
     -- Admin endpoints (no auth required for health/metrics)
     ["healthz"] | requestMethod request == methodGet ->
       handleHealth serverEnv respond
@@ -124,8 +148,8 @@ application serverEnv mcpServer authConfig authService request respond =
         )
 
 -- | Handle MCP JSON-RPC endpoint with authentication
-handleMcpEndpoint :: McpServer -> AuthConfig -> AuthService -> Application
-handleMcpEndpoint mcpServer authConfig authService request respond = do
+handleMcpEndpoint :: ServerEnv -> McpServer -> AuthConfig -> AuthService -> Application
+handleMcpEndpoint serverEnv mcpServer authConfig authService request respond = do
   -- Authenticate the request (or use dev bypass if auth disabled)
   authResult <- authenticateMcpRequest authConfig authService request
   case authResult of
@@ -143,7 +167,7 @@ handleMcpEndpoint mcpServer authConfig authService request respond = do
               ])
         )
     Right authContext ->
-      handleAuthenticatedMcpRequest mcpServer authContext request respond
+      handleAuthenticatedMcpRequest serverEnv mcpServer authContext request respond
 
 -- | Authenticate MCP request or return dev bypass
 authenticateMcpRequest ::
@@ -160,56 +184,75 @@ authenticateMcpRequest authConfig authService request =
     devAuthContext = devBypassAuth "dev-user" "dev-tenant"
 
 -- | Handle authenticated MCP request
-handleAuthenticatedMcpRequest :: McpServer -> AuthContext -> Application
-handleAuthenticatedMcpRequest mcpServer authContext request respond =
+handleAuthenticatedMcpRequest :: ServerEnv -> McpServer -> AuthContext -> Application
+handleAuthenticatedMcpRequest serverEnv mcpServer authContext request respond =
   case requestMethod request of
     method | method == methodPost -> do
-      -- Standard MCP request/response
-      requestBody <- strictRequestBody request
-      case decode requestBody of
-        Nothing ->
-          respond
-            ( jsonResponse
-                status400
-                (object
-                  [ "jsonrpc" .= ("2.0" :: Text)
-                  , "error" .= object
-                      [ "code" .= (-32700 :: Int)
-                      , "message" .= ("Parse error" :: Text)
-                      ]
-                  , "id" .= (Nothing :: Maybe ())
-                  ])
-            )
-        Just jsonValue -> do
-          -- Pass auth context to message handler for tenant isolation and authorization
-          maybeResponse <- handleMessageWithAuth mcpServer (Just authContext) jsonValue
-          sessionId <- resolveResponseSessionId mcpServer request
-          case maybeResponse of
-            Just respValue ->
-              respond (jsonResponseWithSession status200 respValue sessionId)
+      scopedServer <- newRequestScopedServer mcpServer
+      hydrateResult <- hydrateRequestSession serverEnv scopedServer request
+      case hydrateResult of
+        Left errText ->
+          respond (jsonResponse status400 (object ["error" .= errText]))
+        Right () -> do
+          -- Standard MCP request/response
+          requestBody <- strictRequestBody request
+          case decode requestBody of
             Nothing ->
-              -- Notification processed, no response body
-              respond (responseLBS status200 [(hContentType, "application/json")] "")
+              respond
+                ( jsonResponse
+                    status400
+                    (object
+                      [ "jsonrpc" .= ("2.0" :: Text)
+                      , "error" .= object
+                          [ "code" .= (-32700 :: Int)
+                          , "message" .= ("Parse error" :: Text)
+                          ]
+                      , "id" .= (Nothing :: Maybe ())
+                      ])
+                )
+            Just jsonValue -> do
+              maybeResponse <- handleMessageWithAuth scopedServer (Just authContext) jsonValue
+              persistResult <- persistRequestSession serverEnv scopedServer
+              case persistResult of
+                Left errText ->
+                  respond (jsonResponse status400 (object ["error" .= errText]))
+                Right maybeSessionId ->
+                  case maybeResponse of
+                    Just respValue ->
+                      respond (jsonResponseWithSession status200 respValue maybeSessionId)
+                    Nothing ->
+                      respond
+                        ( responseLBS
+                            status200
+                            ([(hContentType, "application/json")] <> maybe [] (\sid -> [("Mcp-Session-Id", Text.encodeUtf8 sid)]) maybeSessionId)
+                            ""
+                        )
     method | method == methodGet -> do
-      sessionId <- resolveResponseSessionId mcpServer request
-      let bootstrap =
-            object
-              [ "tenantId" .= tenantId (acTenant authContext)
-              , "subjectId" .= subjectId (acSubject authContext)
-              , "sessionId" .= sessionId
-              , "status" .= ("ready" :: Text)
-              ]
-      respond
-        ( responseLBS
-            status200
-            ( [ (hContentType, "text/event-stream")
-            , ("Cache-Control", "no-cache")
-            , ("Connection", "keep-alive")
-            ]
-                <> maybe [] (\sid -> [("Mcp-Session-Id", Text.encodeUtf8 sid)]) sessionId
+      scopedServer <- newRequestScopedServer mcpServer
+      hydrateResult <- hydrateRequestSession serverEnv scopedServer request
+      case hydrateResult of
+        Left errText ->
+          respond (jsonResponse status400 (object ["error" .= errText]))
+        Right () -> do
+          sessionId <- resolveResponseSessionId scopedServer request
+          let bootstrap =
+                object
+                  [ "tenantId" .= tenantId (acTenant authContext)
+                  , "subjectId" .= subjectId (acSubject authContext)
+                  , "sessionId" .= sessionId
+                  , "status" .= ("ready" :: Text)
+                  ]
+          respond
+            ( responseLBS
+                status200
+                ( [ (hContentType, "text/event-stream")
+                , ("Cache-Control", "no-cache")
+                , ("Connection", "keep-alive")
+                ]
+                    <> maybe [] (\sid -> [("Mcp-Session-Id", Text.encodeUtf8 sid)]) sessionId
+                )
+                (LBS.concat ["event: ready\ndata: ", encode bootstrap, "\n\n"])
             )
-            (LBS.concat ["event: ready\ndata: ", encode bootstrap, "\n\n"])
-        )
     method | method == methodDelete -> do
       -- Session termination
       let sessionId = getMcpSessionId request
@@ -221,13 +264,7 @@ handleAuthenticatedMcpRequest mcpServer authContext request respond =
                 (object ["error" .= ("Missing Mcp-Session-Id header" :: Text)])
             )
         Just sid -> do
-          currentSession <- readTVarIO (msSession mcpServer)
-          case currentSession of
-            Just session | currentSessionIdText session == sid ->
-              atomically $ do
-                writeTVar (msSession mcpServer) Nothing
-                writeTVar (msProtocolState mcpServer) ShuttingDown
-            _ -> pure ()
+          _ <- storeDeleteSession (serverSessionStore serverEnv) (SessionId sid)
           respond
             ( jsonResponse
                 status200
@@ -308,6 +345,52 @@ currentSessionIdText :: Session -> Text
 currentSessionIdText session =
   case sessionId session of
     SessionId sid -> sid
+
+newRequestScopedServer :: McpServer -> IO McpServer
+newRequestScopedServer mcpServer =
+  newMcpServerWithCatalogs
+    (msConfig mcpServer)
+    (msToolCatalog mcpServer)
+    (msResourceCatalog mcpServer)
+    (msPromptCatalog mcpServer)
+    (msRateLimiter mcpServer)
+    (msMetrics mcpServer)
+
+hydrateRequestSession :: ServerEnv -> McpServer -> Request -> IO (Either Text ())
+hydrateRequestSession serverEnv scopedServer request =
+  case getMcpSessionId request of
+    Nothing -> pure (Right ())
+    Just sidText -> do
+      sessionDataResult <- readSessionData (serverSessionStore serverEnv) (SessionId sidText)
+      case sessionDataResult of
+        Left _ -> pure (Left "Unknown or expired MCP session")
+        Right sessionData ->
+          persistScopedState scopedServer (sdSession sessionData) (sdProtocolState sessionData)
+
+persistRequestSession :: ServerEnv -> McpServer -> IO (Either Text (Maybe Text))
+persistRequestSession serverEnv scopedServer = do
+  currentSession <- readTVarIO (msSession scopedServer)
+  currentProtocolState <- readTVarIO (msProtocolState scopedServer)
+  case currentSession of
+    Nothing -> pure (Right Nothing)
+    Just sessionValue -> do
+      let sessionData =
+            SessionData
+              { sdSession = sessionValue,
+                sdProtocolState = currentProtocolState
+              }
+      writeResult <- writeSessionData (serverSessionStore serverEnv) sessionData
+      pure $
+        case writeResult of
+          Left _ -> Left "Failed to persist MCP session state"
+          Right () -> Right (Just (currentSessionIdText sessionValue))
+
+persistScopedState :: McpServer -> Session -> ProtocolState -> IO (Either Text ())
+persistScopedState scopedServer sessionValue protocolState = do
+  atomically $ do
+    writeTVar (msSession scopedServer) (Just sessionValue)
+    writeTVar (msProtocolState scopedServer) protocolState
+  pure (Right ())
 
 resolveServerPort :: IO Int
 resolveServerPort = do

@@ -3,8 +3,9 @@
 module Web.TypesSpec (spec) where
 
 import Data.Aeson (decode, encode)
-import Data.Time (UTCTime, getCurrentTime)
+import Data.Time (getCurrentTime)
 import StudioMCP.DAG.Summary (RunId (..))
+import StudioMCP.DAG.Types (DagSpec (..))
 import StudioMCP.Web.Types
 import Test.Hspec
 
@@ -68,7 +69,8 @@ spec = do
     it "round-trips through JSON" $ do
       let req =
             UploadRequest
-              { urFileName = "video.mp4",
+              { urArtifactId = Nothing,
+                urFileName = "video.mp4",
                 urContentType = "video/mp4",
                 urFileSize = 1024000,
                 urMetadata = Just [("key", "value")]
@@ -81,7 +83,8 @@ spec = do
     it "handles missing metadata" $ do
       let req =
             UploadRequest
-              { urFileName = "audio.wav",
+              { urArtifactId = Nothing,
+                urFileName = "audio.wav",
                 urContentType = "audio/wav",
                 urFileSize = 500000,
                 urMetadata = Nothing
@@ -118,13 +121,16 @@ spec = do
       fmap crContext decoded `shouldBe` Just (Just "media-workflow")
 
   describe "RunSubmitRequest" $ do
-    it "includes input artifacts" $ do
+    it "round-trips through JSON with input artifacts" $ do
       let req =
             RunSubmitRequest
-              { rsrDagSpec = undefined, -- Would need a real DagSpec
+              { rsrDagSpec = sampleDagSpec,
                 rsrInputArtifacts = [("input1", "artifact-a"), ("input2", "artifact-b")]
               }
-      length (rsrInputArtifacts req) `shouldBe` 2
+          encoded = encode req
+          decoded = decode encoded :: Maybe RunSubmitRequest
+      fmap rsrDagSpec decoded `shouldBe` Just sampleDagSpec
+      fmap rsrInputArtifacts decoded `shouldBe` Just [("input1", "artifact-a"), ("input2", "artifact-b")]
 
   describe "RunStatusResponse" $ do
     it "round-trips through JSON" $ do
@@ -164,7 +170,7 @@ spec = do
       now <- getCurrentTime
       let url =
             PresignedUploadUrl
-              { puuUrl = "https://storage.example.com/upload/123",
+              { puuUrl = "https://minio.local/upload/123?X-Amz-Signature=test",
                 puuMethod = "PUT",
                 puuHeaders = [("Content-Type", "video/mp4")],
                 puuExpiresAt = now,
@@ -180,7 +186,7 @@ spec = do
       now <- getCurrentTime
       let url =
             PresignedDownloadUrl
-              { pduUrl = "https://storage.example.com/download/123",
+              { pduUrl = "https://minio.local/download/123?X-Amz-Signature=test",
                 pduExpiresAt = now,
                 pduContentType = "video/mp4",
                 pduFileSize = 1024000
@@ -189,3 +195,57 @@ spec = do
           decoded = decode encoded :: Maybe PresignedDownloadUrl
       fmap pduContentType decoded `shouldBe` Just "video/mp4"
       fmap pduFileSize decoded `shouldBe` Just 1024000
+
+  describe "LoginResponse" $ do
+    it "round-trips through JSON" $ do
+      now <- getCurrentTime
+      let response =
+            LoginResponse
+              { lrpProfile =
+                  ProfileResponse
+                    { prSubjectId = "user-123"
+                    , prTenantId = "tenant-456"
+                    , prExpiresAt = now
+                    , prCreatedAt = now
+                    , prLastActiveAt = now
+                    }
+              }
+          decoded = decode (encode response) :: Maybe LoginResponse
+      fmap (prSubjectId . lrpProfile) decoded `shouldBe` Just "user-123"
+
+  describe "RunListResponse" $ do
+    it "round-trips through JSON" $ do
+      now <- getCurrentTime
+      let response =
+            RunListResponse
+              { rlrRuns =
+                  [ RunStatusResponse
+                      { rsrRunId = RunId "run-list-123"
+                      , rsrStatus = "running"
+                      , rsrProgress = Just 25
+                      , rsrStartedAt = Just now
+                      , rsrCompletedAt = Nothing
+                      }
+                  ]
+              }
+          decoded = decode (encode response) :: Maybe RunListResponse
+      fmap (length . rlrRuns) decoded `shouldBe` Just 1
+
+  describe "ArtifactGovernanceResponse" $ do
+    it "round-trips through JSON" $ do
+      let response =
+            ArtifactGovernanceResponse
+              { agrArtifactId = "artifact-123"
+              , agrAction = "archive"
+              , agrStatus = "archived"
+              }
+          decoded = decode (encode response) :: Maybe ArtifactGovernanceResponse
+      fmap agrStatus decoded `shouldBe` Just "archived"
+
+sampleDagSpec :: DagSpec
+sampleDagSpec =
+  DagSpec
+    { dagName = "web-types-dag"
+    , dagDescription = Just "Minimal DAG used for JSON coverage"
+    , dagNodes = []
+    }

@@ -1413,7 +1413,7 @@ Use AWS P5/P5e/P5en when:
 
 This is often the strongest mainstream scale-out path that does not require a true InfiniBand-first strategy.
 
-### 9.5 GCP: strong for scale-out, especially where GPUDirect-TCPXO/TCPX matters
+### 9.5 GCP GPUs: strong for scale-out, especially where GPUDirect-TCPXO/TCPX matters
 
 Use GCP A3/A3 Ultra when:
 
@@ -1421,7 +1421,59 @@ Use GCP A3/A3 Ultra when:
 - you are comfortable with GCP cluster tooling
 - you do not specifically require true InfiniBand
 
-### 9.6 Azure: strong for true clustered workloads
+### 9.6 Google Cloud TPUs: a distinct alternative to GPU clusters
+
+Cloud TPUs are not just another accelerator SKU. They are a separate execution path with their own software stack, topology, and economic profile.
+
+For the right workload, a TPU deployment can be a better comparison point than an InfiniBand-backed GPU cluster. TPU Pods already include a high-bandwidth inter-chip interconnect, so the question is not "Should I add InfiniBand?" but rather "Should this workload move onto a TPU-native stack?"
+
+Use TPUs when:
+
+- you are willing to use `JAX` / `XLA`, `MaxText`, or `PyTorch/XLA`
+- you want a tightly integrated scale-out path on Google Cloud rather than assembling a GPU cluster around separate networking choices
+- you are doing sustained training, post-training, or well-supported inference rather than broad ad hoc experimentation
+- your target model family is already well supported on TPU-oriented stacks
+
+Avoid TPUs when:
+
+- you rely on CUDA-specific kernels, CUDA-first inference engines, or NVIDIA-specific optimization work
+- you need the broadest possible compatibility with arbitrary Hugging Face repos and community inference scripts
+- you want the simplest multi-cloud portability
+- you expect every GPU-oriented open-source runtime to behave the same way on TPUs
+
+Current TPU reference points:
+
+| TPU path | Best use | Current official starting price | Important caveat |
+|---|---|---|---|
+| `v5e` | Cost-sensitive fine-tuning and moderate-scale inference | **$1.20 per chip-hour** | Memory per chip is modest, so model fit still matters |
+| `v6e` / `Trillium` | Strong current TPU path for LLM inference and post-training | **$2.70 per chip-hour** | Better fit for serious serving, but direct GPU-node price comparison is imperfect |
+| `v5p` | Large-scale training and post-training | **$4.20 per chip-hour** | Powerful, but expensive and usually unnecessary for routine inference |
+
+Those TPU prices are not directly comparable to GPU node rental prices because Google bills TPUs per chip-hour rather than per 8-GPU server hour.
+
+The most important operational distinction is this:
+
+- for current single-host TPU LLM serving, `vLLM` is a credible path on `v5e` and `v6e`
+- for more TPU-native or multi-host serving workflows, `JetStream` and `MaxText` are the more natural fit
+- for training and post-training, `MaxText` and `PyTorch/XLA` are the main paths to evaluate
+
+#### Which open-weight models fit TPUs best
+
+| Model family or workload | TPU fit | Why |
+|---|---|---|
+| `Gemma` family | **Very high** | This is the most natural TPU path today because Google documents and supports it directly across the TPU ecosystem |
+| `Llama`, `Qwen`, `DeepSeek`, `Mistral`, `Mixtral`, `GPT-OSS` through `MaxText` | **High** | MaxText currently supports these families for training and post-training on TPU-oriented stacks |
+| Single-host LLM serving where `vLLM TPU` support is explicit | **Medium to high** | Good option when the model fits current TPU serving support and you want GKE or TPU VM deployment |
+| Diffusion and video models through `MaxDiffusion` such as `Flux`, `SDXL`, `LTX-Video`, or `Wan` | **Medium to high** | Strong fit if you are intentionally adopting a `JAX` / `XLA` generative stack |
+| One-off community model repos with CUDA-centric custom kernels | **Low** | This is where GPUs remain much simpler operationally |
+
+In practical terms:
+
+- if you want the most straightforward TPU path for open-weight work, start with `Gemma`
+- if you want TPU-based post-training or large-scale training across a broader model set, evaluate `MaxText` support first
+- if your main goal is generic open-source inference with minimal engineering friction, GPUs are usually still the simpler default
+
+### 9.7 Azure: strong for true clustered workloads
 
 Azure `ND_H100_v5` is a real candidate when:
 
@@ -1429,7 +1481,7 @@ Azure `ND_H100_v5` is a real candidate when:
 - you want InfiniBand-backed enterprise deployment
 - procurement and regional availability work in your favor
 
-### 9.7 CoreWeave: easiest cloud InfiniBand answer
+### 9.8 CoreWeave: easiest cloud InfiniBand answer
 
 Use CoreWeave HGX IB nodes when:
 
@@ -1437,7 +1489,7 @@ Use CoreWeave HGX IB nodes when:
 - you do not want to build around long minimum commitments
 - you know the workload is tightly coupled enough to benefit
 
-### 9.8 Lambda 1-Click Clusters: suited to sustained workloads, less suitable for short engagements
+### 9.9 Lambda 1-Click Clusters: suited to sustained workloads, less suitable for short engagements
 
 Use Lambda 1CC when:
 
@@ -1453,7 +1505,7 @@ Avoid it for:
 
 ---
 
-## 10. Portable Toolchain
+## 10. Toolchain and Portability
 
 ### LLM serving
 
@@ -1472,6 +1524,16 @@ Avoid it for:
 | **Diffusers** | Programmatic diffusion workflows |
 | **ComfyUI** | Fast iteration and workflow composition |
 
+### TPU-oriented stack
+
+| Tool | Best use |
+|---|---|
+| **MaxText** | Large-scale `JAX` / `XLA` training and post-training for supported open-weight LLM families on TPUs |
+| **PyTorch/XLA** | TPU training or fine-tuning when your team wants to stay closer to PyTorch |
+| **vLLM TPU** | Single-host TPU serving where current support is explicit and model fit is clear |
+| **JetStream** | TPU-native inference, especially when you want a more production-oriented TPU serving path |
+| **MaxDiffusion** | `JAX` / `XLA` diffusion and video training or inference on TPUs |
+
 ### Portability guidance
 
 - **Keep raw weights in SafeTensors**
@@ -1484,7 +1546,7 @@ Avoid it for:
 
 1. Store weights in object storage
 2. Pull weights on node startup
-3. Serve via SGLang or vLLM
+3. Serve via SGLang, vLLM, or a TPU-native serving stack where appropriate
 4. Save outputs/checkpoints frequently
 5. Tear down immediately when the batch finishes
 
@@ -1501,6 +1563,7 @@ For each new release, classify it into one of these buckets:
 - **Single-node default**
 - **Ethernet/EFA-friendly cluster**
 - **InfiniBand-first**
+- **TPU-first**
 
 That classification matters more than whether the exact model name changes.
 
@@ -1510,6 +1573,7 @@ That classification matters more than whether the exact model name changes.
 - a major FP8 or quantized release changes deployment size
 - H200, MI350X, B200, or future memory-dense rentals become common
 - SGLang, vLLM, or xDiT adds materially better support
+- `MaxText`, `PyTorch/XLA`, `JetStream`, or TPU serving support changes materially
 - provider pricing changes enough to move the decision boundary
 - a model that used to need scale-out now fits on one box
 
@@ -1522,6 +1586,7 @@ When updating, capture:
 | Architecture: dense vs MoE vs hybrid | Determines network sensitivity |
 | Best known single-node fit | Usually the most important practical fact |
 | Best multi-node runtime | Tells you whether scale-out is realistic |
+| Best TPU path | Important whenever a model has strong `JAX` / `XLA` support |
 | Precision path: BF16 / FP8 / quantized | Often changes everything |
 | License | Can remove models from practical consideration |
 | Default network recommendation | Keeps the doc decision-oriented |
@@ -1608,6 +1673,28 @@ These are the main official pages worth revisiting when this document is refresh
 - TRL / SFTTrainer:
   - <https://huggingface.co/docs/trl/main/en/sft_trainer>
 
+### Google Cloud TPUs and TPU-oriented tooling
+
+- Cloud TPU overview and pricing:
+  - <https://cloud.google.com/tpu/>
+  - <https://cloud.google.com/tpu/pricing>
+- TPU architecture and versions:
+  - <https://cloud.google.com/tpu/docs/system-architecture-tpu-vm>
+  - <https://cloud.google.com/tpu/docs/v5e>
+  - <https://cloud.google.com/tpu/docs/v6e>
+  - <https://cloud.google.com/tpu/docs/v5p>
+  - <https://cloud.google.com/tpu/docs/v5e-inference>
+- TPU serving on GKE:
+  - <https://cloud.google.com/kubernetes-engine/docs/tutorials/serve-vllm-tpu>
+  - <https://cloud.google.com/kubernetes-engine/docs/tutorials/serve-gemma-tpu-jetstream>
+  - <https://cloud.google.com/kubernetes-engine/docs/tutorials/serve-llm-tpu-jetstream-pytorch>
+- TPU software stack:
+  - <https://docs.pytorch.org/xla/release/r2.6/index.html>
+  - <https://docs.vllm.ai/projects/tpu/en/stable/getting_started/quickstart.html>
+  - <https://github.com/AI-Hypercomputer/maxtext>
+  - <https://maxtext.readthedocs.io/en/latest/reference/models/supported_models_and_architectures.html>
+  - <https://github.com/AI-Hypercomputer/maxdiffusion>
+
 ### Providers and pricing
 
 - Hosted inference and routing:
@@ -1650,6 +1737,7 @@ If you want the practical answer, not the taxonomy:
 - **Cheapest serious path:** `gpt-oss-120b` or `Step-3.5-Flash` on a single node
 - **Best frontier single-node path:** `Qwen3-235B-A22B`, `GLM-5-FP8`, or `DeepSeek-V3.2` on H200/MI300X-class hardware
 - **Best Ethernet-scale-out path:** MoE LLMs with SGLang or vLLM, especially DeepSeek / GLM / Kimi families
+- **Best TPU-first path:** `Gemma` or another `MaxText`-supported model family on `v5e` or `Trillium` when training or post-training dominates and you are willing to adopt the TPU software stack
 - **Best true InfiniBand candidate among current open LLMs:** very large H100-only deployments of `Kimi-K2.5`, `DeepSeek-V3.2`, or future dense frontier releases
 - **Best video path for most users:** `HunyuanVideo 1.5`, `Wan 2.2`, or `LTX-Video` on a single node
 - **Best video case for InfiniBand:** `Step-Video-T2V` or multi-node fine-tuning/training of large video models
@@ -1659,3 +1747,4 @@ When in doubt:
 1. Buy more memory before you pay for a higher-performance interconnect.
 2. Choose MoE before you choose dense.
 3. Use InfiniBand only when profiling shows that network performance is the limiting factor.
+4. Choose TPUs only when your model and runtime are clearly supported and you are willing to use the TPU-native stack.

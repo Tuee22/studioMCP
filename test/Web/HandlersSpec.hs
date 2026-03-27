@@ -2,12 +2,38 @@
 
 module Web.HandlersSpec (spec) where
 
-import Network.Wai (defaultRequest, Request(..))
+import Control.Concurrent (forkIO, killThread, threadDelay)
+import Control.Exception (bracket)
+import Data.Aeson (decode, encode)
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as BS8
+import qualified Data.ByteString.Lazy.Char8 as LBS
+import qualified Data.CaseInsensitive as CI
+import qualified Data.Text as T
+import Network.HTTP.Client
+  ( Manager,
+    Request (method, requestBody, requestHeaders),
+    RequestBody (RequestBodyLBS),
+    Response,
+    defaultManagerSettings,
+    httpLbs,
+    newManager,
+    parseRequest,
+    responseBody,
+    responseHeaders,
+    responseStatus,
+  )
+import Network.HTTP.Types (Header)
+import Network.HTTP.Types.Status (statusCode)
+import Network.Wai.Handler.Warp (defaultSettings, runSettings, setHost, setPort, setTimeout)
+import StudioMCP.DAG.Summary (RunId (..))
 import StudioMCP.DAG.Types (DagSpec (..))
 import StudioMCP.Web.BFF (createWebSession, defaultBFFConfig)
 import StudioMCP.Web.Handlers
 import StudioMCP.Web.Types
-  ( ChatMessage (..),
+  ( LoginRequest (..),
+    LoginResponse (..),
+    ChatMessage (..),
     ChatRequest (..),
     ChatRole (..),
     ChatResponse (..),
@@ -17,7 +43,6 @@ import StudioMCP.Web.Types
     UploadRequest (..),
     UploadResponse (..),
     WebSession (..),
-    WebSessionId(..),
   )
 import Test.Hspec
 
@@ -26,27 +51,83 @@ spec = do
   describe "BFFContext" $ do
     it "can be created from config" $ do
       ctx <- newBFFContext defaultBFFConfig
-      -- Should create without error
       bffCtxConfig ctx `shouldBe` defaultBFFConfig
 
   describe "bffApplication" $ do
-    it "returns 404 for unknown routes" $ do
-      ctx <- newBFFContext defaultBFFConfig
-      let app = bffApplication ctx
-          req = defaultRequest { pathInfo = ["unknown", "route"] }
-      -- The app should handle unknown routes
-      -- Just verify we can create the application
-      pure ()
+    it "serves the browser control-room HTML at the root route" $
+      withBffServer 38131 $ do
+        manager <- newManager defaultManagerSettings
+        response <- httpRequest manager 38131 "GET" "/" [] Nothing
+        statusCode (responseStatus response) `shouldBe` 200
+        lookupHeader "Content-Type" response `shouldSatisfy` maybe False ("text/html" `BS.isPrefixOf`)
+        LBS.toStrict (responseBody response) `shouldSatisfy` BS.isInfixOf "studioMCP Control Room"
 
-    it "handles healthz endpoint" $ do
-      ctx <- newBFFContext defaultBFFConfig
-      let app = bffApplication ctx
-          req = defaultRequest
-            { requestMethod = "GET"
-            , pathInfo = ["healthz"]
-            }
-      -- Should return healthy status
-      pure ()
+    it "streams chat replies over the SSE route" $
+      withBffServer 38132 $ do
+        manager <- newManager defaultManagerSettings
+        cookieHeader <- loginCookie manager 38132
+        response <-
+          httpRequest
+            manager
+            38132
+            "POST"
+            "/api/v1/chat/stream"
+            [cookieHeader]
+            ( Just
+                ( encode
+                    ChatRequest
+                      { crMessages = [ChatMessage ChatUser "Stream a response" Nothing]
+                      , crContext = Just "handler test"
+                      }
+                )
+            )
+        statusCode (responseStatus response) `shouldBe` 200
+        lookupHeader "Content-Type" response `shouldSatisfy` maybe False ("text/event-stream" `BS.isPrefixOf`)
+        LBS.toStrict (responseBody response) `shouldSatisfy` BS.isInfixOf "event: conversation.started"
+        LBS.toStrict (responseBody response) `shouldSatisfy` BS.isInfixOf "event: message.completed"
+
+    it "streams run snapshots over the SSE route" $
+      withBffServer 38133 $ do
+        manager <- newManager defaultManagerSettings
+        cookieHeader <- loginCookie manager 38133
+        submitResponse <-
+          httpRequest
+            manager
+            38133
+            "POST"
+            "/api/v1/runs"
+            [cookieHeader]
+            ( Just
+                ( encode
+                    RunSubmitRequest
+                      { rsrDagSpec =
+                          DagSpec
+                            { dagName = "browser-events"
+                            , dagDescription = Nothing
+                            , dagNodes = []
+                            }
+                      , rsrInputArtifacts = []
+                      }
+                )
+            )
+        statusCode (responseStatus submitResponse) `shouldBe` 200
+        let maybeSubmittedRun = decode (responseBody submitResponse) :: Maybe RunStatusResponse
+        runIdText <-
+          case maybeSubmittedRun of
+            Just submittedRun -> pure (T.unpack (unRunId (rsrRunId submittedRun)))
+            Nothing -> expectationFailure "Expected run submission to return JSON" >> pure ""
+        eventsResponse <-
+          httpRequest
+            manager
+            38133
+            "GET"
+            ("/api/v1/runs/" <> runIdText <> "/events")
+            [cookieHeader]
+            Nothing
+        statusCode (responseStatus eventsResponse) `shouldBe` 200
+        lookupHeader "Content-Type" eventsResponse `shouldSatisfy` maybe False ("text/event-stream" `BS.isPrefixOf`)
+        LBS.toStrict (responseBody eventsResponse) `shouldSatisfy` BS.isInfixOf "event: run.snapshot"
+        LBS.toStrict (responseBody eventsResponse) `shouldSatisfy` BS.isInfixOf "event: run.window.closed"
 
   describe "handleUploadRequest" $ do
     it "creates an upload response when given a parsed upload body" $ do
@@ -58,7 +139,8 @@ spec = do
           service
           (wsSessionId session)
           UploadRequest
-            { urFileName = "clip.mp4"
+            { urArtifactId = Nothing
+            , urFileName = "clip.mp4"
             , urContentType = "video/mp4"
             , urFileSize = 1024
             , urMetadata = Nothing
@@ -123,3 +205,72 @@ spec = do
       case result of
         Right response -> rsrStatus response `shouldBe` "submitted"
         Left err -> expectationFailure $ "Expected run status response, got: " ++ show err
+
+withBffServer :: Int -> IO a -> IO a
+withBffServer port action = do
+  ctx <- newBFFContext defaultBFFConfig
+  bracket
+    (forkIO (runSettings (setHost "127.0.0.1" (setPort port (setTimeout 0 defaultSettings))) (bffApplication ctx)))
+    killThread
+    (\_ -> threadDelay 100000 >> action)
+
+httpRequest ::
+  Manager ->
+  Int ->
+  String ->
+  String ->
+  [Header] ->
+  Maybe LBS.ByteString ->
+  IO (Response LBS.ByteString)
+httpRequest manager port methodValue path extraHeaders maybeBody = do
+  request <- parseRequest ("http://127.0.0.1:" <> show port <> path)
+  httpLbs
+    request
+      { method = BS8.pack methodValue
+      , requestHeaders =
+          case maybeBody of
+            Just _ -> (CI.mk "Content-Type", "application/json") : extraHeaders
+            Nothing -> extraHeaders
+      , requestBody =
+          case maybeBody of
+            Just body -> RequestBodyLBS body
+            Nothing -> requestBody request
+      }
+    manager
+
+lookupHeader ::
+  BS.ByteString ->
+  Response body ->
+  Maybe BS.ByteString
+lookupHeader name response =
+  lookup (CI.mk name) (responseHeaders response)
+
+loginCookie :: Manager -> Int -> IO Header
+loginCookie manager port = do
+  response <-
+    httpRequest
+      manager
+      port
+      "POST"
+      "/api/v1/auth/login"
+      []
+      ( Just
+          ( encode
+              LoginRequest
+                { lrAccessToken = "browser-token"
+                , lrRefreshToken = Nothing
+                , lrSubjectId = Just "user-1"
+                , lrTenantId = Just "tenant-1"
+                }
+          )
+      )
+  statusCode (responseStatus response) `shouldBe` 200
+  let maybeLogin = decode (responseBody response) :: Maybe LoginResponse
+  case maybeLogin of
+    Just _ -> pure ()
+    Nothing -> expectationFailure "Expected login response JSON"
+  case lookupHeader "Set-Cookie" response of
+    Just setCookieValue ->
+      pure ("Cookie", BS8.takeWhile (/= ';') setCookieValue)
+    Nothing ->
+      expectationFailure "Expected login response to set a browser cookie" >> pure ("Cookie", "")

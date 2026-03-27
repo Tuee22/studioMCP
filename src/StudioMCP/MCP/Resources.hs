@@ -31,10 +31,9 @@ module StudioMCP.MCP.Resources
   )
 where
 
-import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO, readTVarIO)
+import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO)
 import Data.Aeson
-  ( ToJSON (toJSON),
-    object,
+  ( object,
     (.=),
   )
 import qualified Data.Aeson as Aeson
@@ -76,8 +75,8 @@ import StudioMCP.Storage.TenantStorage
     TenantStorageBackend (..),
     TenantStorageService,
     defaultTenantStorageConfig,
+    getTenantBackend,
     getTenantArtifact,
-    tscDefaultBackend,
     tscMaxArtifactSize,
     tssConfig,
   )
@@ -142,7 +141,7 @@ data ResourceCatalog = ResourceCatalog
     rcQuotaService :: Maybe QuotaService
   }
 
--- | Create a new resource catalog (without storage - returns mock data)
+-- | Create a new resource catalog without runtime storage/executor backends.
 newResourceCatalog :: IO ResourceCatalog
 newResourceCatalog = do
   stateVar <-
@@ -461,16 +460,19 @@ readManifestResource catalog (TenantId tenantIdText) (Just runIdText) = do
 -- | Read tenant metadata resource
 readTenantMetadataResource :: ResourceCatalog -> TenantId -> IO (Either ResourceError ReadResourceResult)
 readTenantMetadataResource catalog (TenantId tenantIdText) = do
-  let (storageBackend, maxArtifactSize) =
-        case rcTenantStorage catalog of
-          Just tenantStorage ->
-            ( showBackend (tscDefaultBackend (tssConfig tenantStorage)),
-              tscMaxArtifactSize (tssConfig tenantStorage)
-            )
-          Nothing ->
-            ( "platform-minio",
-              tscMaxArtifactSize defaultTenantStorageConfig
-            )
+  (storageBackend, maxArtifactSize) <-
+    case rcTenantStorage catalog of
+      Just tenantStorage -> do
+        backend <- getTenantBackend tenantStorage (TenantId tenantIdText)
+        pure
+          ( showBackend backend,
+            tscMaxArtifactSize (tssConfig tenantStorage)
+          )
+      Nothing ->
+        pure
+          ( "platform-minio",
+            tscMaxArtifactSize defaultTenantStorageConfig
+          )
   let content =
         Aeson.encode $
           object

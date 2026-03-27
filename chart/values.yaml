@@ -91,7 +91,7 @@ bff:
   enabled: true
   replicas: 2
   image:
-    repository: studiomcp-bff
+    repository: studiomcp
     tag: latest
   service:
     type: ClusterIP
@@ -103,6 +103,11 @@ bff:
     limits:
       cpu: 500m
       memory: 512Mi
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 70
   health:
     enabled: true
     livenessProbe:
@@ -208,6 +213,7 @@ minio:
 # HA: 3+ per component
 pulsar:
   enabled: true
+  initialize: true
   components:
     zookeeper: true
     bookkeeper: true
@@ -235,7 +241,22 @@ postgresql-ha:
     database: keycloak
     username: keycloak
     password: keycloak123
+    postgresPassword: postgres123
     repmgrPassword: repmgr123
+    initdbScripts:
+      00-create-repmgr.sh: |
+        #!/bin/bash
+        set -euo pipefail
+        psql -v ON_ERROR_STOP=1 --username postgres --dbname postgres <<'SQL'
+        SELECT 'CREATE DATABASE repmgr OWNER repmgr'
+        WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'repmgr')\gexec
+        \connect repmgr
+        CREATE EXTENSION IF NOT EXISTS repmgr;
+        ALTER DATABASE repmgr OWNER TO repmgr;
+        SQL
+    image:
+      registry: docker.io
+      repository: bitnamilegacy/postgresql-repmgr
   persistence:
     enabled: true
     storageClass: "studiomcp-manual"
@@ -243,24 +264,46 @@ postgresql-ha:
   pgpool:
     replicaCount: 2
     adminPassword: pgpool123
+    image:
+      registry: docker.io
+      repository: bitnamilegacy/pgpool
 
 # Redis session store (bitnami/redis chart)
 # HA: Sentinel mode
+# Bitnami's legacy semver tags are published under bitnamilegacy/*
 redis:
   enabled: true
   architecture: replication
+  rbac:
+    create: true
+  serviceAccount:
+    automountServiceAccountToken: true
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/redis
   auth:
     enabled: true
     password: redis123
   sentinel:
     enabled: true
+    masterService:
+      enabled: true
+    image:
+      registry: docker.io
+      repository: bitnamilegacy/redis-sentinel
+  kubectl:
+    image:
+      registry: docker.io
+      repository: bitnamilegacy/kubectl
   master:
+    automountServiceAccountToken: true
     persistence:
       enabled: true
       storageClass: "studiomcp-manual"
       size: 5Gi
   replica:
     replicaCount: 3
+    automountServiceAccountToken: true
     persistence:
       enabled: true
       storageClass: "studiomcp-manual"
@@ -271,6 +314,9 @@ redis:
 keycloak:
   enabled: true
   replicaCount: 2
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/keycloak
   auth:
     adminUser: admin
     adminPassword: admin123

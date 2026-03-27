@@ -2,9 +2,16 @@
 
 module MCP.ResourcesSpec (spec) where
 
+import qualified Data.Text as Text
 import StudioMCP.Auth.Types (TenantId (..))
-import StudioMCP.MCP.Protocol.Types (ReadResourceParams (..))
+import StudioMCP.MCP.Protocol.Types (ReadResourceParams (..), ReadResourceResult (..), ResourceContent (..))
 import StudioMCP.MCP.Resources
+import StudioMCP.Storage.TenantStorage
+  ( TenantStorageBackend (TenantOwnedS3),
+    configureTenantBackend,
+    defaultTenantStorageConfig,
+    newTenantStorageService,
+  )
 import Test.Hspec
 
 spec :: Spec
@@ -77,6 +84,26 @@ spec = do
       case result of
         Right _ -> pure ()
         Left err -> expectationFailure $ "Expected success but got: " ++ show err
+
+    it "reads tenant metadata with the configured storage backend" $ do
+      catalog <- newResourceCatalog
+      tenantStorage <- newTenantStorageService defaultTenantStorageConfig
+      configureTenantBackend
+        tenantStorage
+        (TenantId "tenant-1")
+        (TenantOwnedS3 "https://s3.example.com" "us-east-1" "access" "secret")
+      let params = ReadResourceParams "studiomcp://metadata/tenant/tenant-1"
+      result <- readResource (catalog {rcTenantStorage = Just tenantStorage}) (TenantId "tenant-1") params
+      case result of
+        Left err -> expectationFailure $ "Expected success but got: " ++ show err
+        Right payload ->
+          case rrrContents payload of
+            content : _ ->
+              maybe
+                (expectationFailure "Expected JSON text payload")
+                (`shouldSatisfy` Text.isInfixOf "\"storage_backend\":\"tenant-s3\"")
+                (rcText content)
+            [] -> expectationFailure "Expected tenant metadata content"
 
     it "returns error for invalid URI" $ do
       catalog <- newResourceCatalog

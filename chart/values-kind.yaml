@@ -47,12 +47,18 @@ pulsar:
   enabled: true
   zookeeper:
     replicaCount: 3
+    affinity:
+      anti_affinity: true
+      type: preferredDuringSchedulingIgnoredDuringExecution
     volumes:
       data:
         size: 5Gi
         storageClassName: "studiomcp-manual"
   bookkeeper:
     replicaCount: 3
+    affinity:
+      anti_affinity: true
+      type: preferredDuringSchedulingIgnoredDuringExecution
     volumes:
       journal:
         size: 10Gi
@@ -64,6 +70,9 @@ pulsar:
     replicaCount: 3
   proxy:
     replicaCount: 2
+    affinity:
+      anti_affinity: true
+      type: preferredDuringSchedulingIgnoredDuringExecution
 
 # PostgreSQL-HA with persistence
 # 3 replicas

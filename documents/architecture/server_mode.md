@@ -15,21 +15,20 @@ The runtime must support horizontal listener scaling without sticky sessions. Ex
 
 ## Current Repo Note
 
-The current `studiomcp server` binary already exposes a Haskell HTTP runtime, but its public API is still a custom DAG control surface.
+The current `studiomcp server` binary exposes the runtime-backed MCP HTTP surface.
 
 **Current Implementation Status:**
 
 | Feature | Status |
 |---------|--------|
 | HTTP server runtime | ✅ Implemented |
-| Legacy `/runs` surface | ✅ Implemented (primary surface) |
-| MCP `/mcp` endpoint | ✅ Partially implemented |
-| stdio transport | 📋 Planned (Phase 13) |
-| Auth middleware (Keycloak) | ⚠️ Code exists, not wired to routes |
-| Session externalization (Redis) | ⚠️ Code exists, not integrated |
-| BFF command | 📋 Planned (Phase 16) |
+| MCP `/mcp` endpoint | ✅ Implemented |
+| SSE bootstrap | ✅ Implemented |
+| Auth middleware (Keycloak/JWKS) | ✅ Implemented |
+| Session externalization (Redis) | ✅ Implemented |
+| `studiomcp bff` CLI mode | ✅ Implemented |
 
-The legacy `/runs` surface remains the primary automation interface until Phase 21 completes. This document defines the target server mode once the MCP protocol migration lands.
+This document describes the authoritative server mode as implemented today.
 
 ## Responsibilities
 
@@ -109,9 +108,20 @@ Operational endpoints remain out of band from MCP:
 
 These routes exist for operators, load balancers, and observability systems. They are not part of the MCP business contract.
 
+## Startup Configuration Failure Handling
+
+Listener startup must follow the canonical [CLI startup failure semantics](cli_architecture.md#startup-failure-semantics).
+
+In practice:
+
+- invalid Redis, auth, storage, or tenant-backend configuration must fail before the listener accepts traffic
+- startup failure must be graceful, redacted, and actionable
+- raw exception output is not an acceptable operational contract
+
 ## Cross-References
 
 - [Architecture Overview](overview.md#architecture-overview)
+- [CLI Architecture](cli_architecture.md#cli-architecture)
 - [MCP Protocol Architecture](mcp_protocol_architecture.md#mcp-protocol-architecture)
 - [Multi-Tenant SaaS MCP Auth Architecture](multi_tenant_saas_mcp_auth_architecture.md#multi-tenant-saas-mcp-auth-architecture)
 - [Artifact Storage Architecture](artifact_storage_architecture.md#artifact-storage-architecture)

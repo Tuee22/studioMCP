@@ -53,10 +53,15 @@ spec =
       output <- runOuterCliExpectSuccess ["validate", "minio"]
       output `shouldContain` "MinIO validation passed."
 
-    it "exercises the MCP transport through the outer-container CLI" $ do
+    it "exercises MCP conformance through the outer-container CLI" $ do
       ensureOuterEnvironment
-      output <- runOuterCliExpectSuccess ["validate", "mcp"]
-      output `shouldContain` "MCP validation passed."
+      output <- runOuterCliExpectSuccess ["validate", "mcp-conformance"]
+      output `shouldContain` "validate mcp-conformance: PASS"
+
+    it "exercises the BFF browser surface through the outer-container CLI" $ do
+      ensureOuterEnvironment
+      output <- runOuterCliExpectSuccess ["validate", "web-bff"]
+      output `shouldContain` "validate web-bff: PASS"
 
     it "runs the inference advisory mode validation through the outer-container CLI" $ do
       ensureOuterContainer

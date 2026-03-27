@@ -3,7 +3,7 @@
 ## Purpose
 This document is the working implementation plan for `studioMCP`. It is the delivery contract for the repository, not a marketing artifact.
 
-The goal is to build a standards-compliant MCP server in Haskell for secure multi-tenant studio workflows. The repo already contains substantial execution, storage, and tooling foundations, but its current public server surface is still a custom DAG-oriented HTTP API rather than a real MCP server. This plan replaces that ambiguity with an explicit migration path.
+The goal is to run a standards-compliant MCP server in Haskell for secure multi-tenant studio workflows and to keep the browser-facing product surface honest about what is implemented. The repo now has a real MCP server on `/mcp`, a browser-facing BFF that mediates workflow and governance operations through MCP, and the completed validation surface tracked below.
 
 ## How to Use This Plan
 
@@ -24,124 +24,30 @@ The goal is to build a standards-compliant MCP server in Haskell for secure mult
 
 This section records the current repo state against the revised MCP-first plan.
 
-### Complete (Phases 0-12)
+### Complete
 
-- Foundational phases 0 through 12 remain materially complete. The repo already has the Haskell DAG model, validation, summary construction, timeout handling, boundary execution, Pulsar integration, MinIO integration, and end-to-end DAG execution foundations needed for a serious MCP server.
-- Unit tests pass: 819/819
-- Integration tests require sidecars running (blocked by resource constraints in local development)
-
-### Partially Implemented / Locally Validated (Phases 13-21)
-
-The current repository is materially beyond the previous stub state. Local behavior and validation now exist across Phases 13-21, but the remaining gaps are not limited to production hardening. Several live runtime paths are still wired to local-only implementations:
-
-**Phase 13 (MCP Protocol Core):**
-- MCP JSON-RPC lifecycle, protocol state machine, `/mcp` endpoint, and SSE bootstrap: **Implemented locally**
-- Validation commands `validate mcp-stdio` and `validate mcp-http`: **Implemented**
-- Real workflow execution still remains split with the legacy `/runs` surface rather than flowing end-to-end through the live `/mcp` server path: **NOT COMPLETE**
-
-**Phase 14 (Auth):**
-- JWT parsing, timing, issuer, and audience validation: **Implemented**
-- Scope and role enforcement scaffolding: **Implemented**
-- Signature verification: **NOT IMPLEMENTED** (critical production security gap)
-- `validate keycloak` and `validate mcp-auth`: **Implemented**, but they do not yet prove a live Keycloak-backed signed-token flow
-
-**Phase 15 (Session Store):**
-- Session lifecycle, cursors, subscriptions, locks, TTL cleanup: **Implemented**
-- Cross-store visibility validation: **Implemented**
-- Real Redis client integration: **NOT IMPLEMENTED** (current local implementation simulates an externalized backend)
-
-**Phase 16 (Web/BFF):**
-- Upload and download handlers: **Implemented locally**
-- Upload confirmation, chat, and run submit/status handlers: **LOCAL-ONLY / PARTIAL**
-- Tenant-scoped artifact-backed URLs: **Implemented locally**
-- Browser-facing validation command `validate web-bff`: **Implemented** against local flows
-- Live BFF-to-MCP orchestration and inference-backed chat: **NOT IMPLEMENTED**
-
-**Phase 17 (Artifact Governance):**
-- Artifact metadata, versioning, hide/archive/supersede/restore rules: **Implemented**
-- Audit and governance validation commands: **Implemented**
-- Governance/audit persistence backends: **IN-MEMORY ONLY**
-
-**Phase 18 (Tool, Resource, Prompt Catalog):**
-- Tool, resource, and prompt catalogs: **Implemented locally**
-- MCP Core catalog dispatch wiring: **Implemented locally**
-- Default running server wiring to executor-backed tools and storage-backed resources: **NOT IMPLEMENTED**
-- Validation commands `validate mcp-tools`, `validate mcp-resources`, and `validate mcp-prompts`: **Implemented** against local catalogs
-
-**Phase 19 (Observability):**
-- MCP metrics, audit trail, quotas, rate limiting, and redaction modules: **Implemented locally**
-- Default running server wiring for MCP metrics and rate limiting: **NOT IMPLEMENTED**
-- `/metrics` endpoint: **PARTIAL** (currently exports legacy run counters on the running server)
-- External observability backends and durable audit sink: **NOT IMPLEMENTED**
-
-**Phase 20 (Helm):**
-- Helm dependency graph, values files, templates, linting, template rendering, and Skaffold diagnose/render: **Implemented and passing locally**
-- Full multi-service deployment proof remains environment-dependent
-
-**Phase 21 (Conformance / Legacy Retirement):**
-- Local MCP conformance validator: **Implemented**
-- Validator coverage is still local-catalog/local-BFF oriented rather than proving live `/mcp` runtime integration: **PARTIAL**
-- Legacy `/runs` surface still present and still carries real DAG execution: **NOT RETIRED**
+- Phases 0 through 12 remain complete. The repo has the Haskell DAG model, validation, summary construction, timeout handling, boundary execution, Pulsar integration, MinIO integration, and end-to-end DAG execution foundations required by the original execution stack.
+- Phases 13 through 21 are implemented at the feature-surface level. The default `/mcp` server is runtime-backed, JWT signature verification is active, Redis-backed shared MCP session state is live, artifact/governance services are wired to the runtime-backed system, MCP observability is enabled on the running server, the browser-facing BFF now mediates workflow and governance operations through the live MCP HTTP surface, the BFF now serves a built-in browser UI plus SSE chat and run-progress surfaces, deterministic parallel DAG execution is live, the CLI ergonomics tracked in this plan are implemented, and Helm packaging for the current topology exists in the repo.
+- The legacy `validate mcp` alias has been removed and the main MCP server no longer relies on the retired `/runs` automation surface as its public automation contract.
+- Unit tests pass.
 
 ### Summary
 
-The repo has not yet fully transitioned from "custom DAG HTTP API" to a complete MCP-first system. It now contains a locally validated MCP protocol surface, local catalogs, and local BFF flows, but several material gaps remain in both runtime wiring and production hardening:
+The repository has completed the server-side transition from the legacy DAG-oriented HTTP control plane to an MCP-first architecture:
 
-1. Cryptographic JWT signature verification and a live signed-token Keycloak flow
-2. A real Redis-backed external session store instead of the local shared-backend simulation
-3. Live BFF-to-MCP orchestration and inference-backed chat rather than deterministic/cache-backed local handlers
-4. Default `/mcp` server wiring to executor-backed tools and storage-backed resources instead of local-only catalog variants
-5. Durable governance and audit persistence backends plus real S3/MinIO presigning
-6. Default server wiring for MCP metrics, rate limiting, and quotas rather than validator-only / alternate-constructor coverage
-7. Retirement of the legacy `/runs` automation surface
+1. `/mcp` is the live public automation surface, with JSON-RPC lifecycle, SSE bootstrap, tool/resource/prompt catalogs, and runtime-backed execution paths.
+2. Signed JWT validation, scope enforcement, tenant resolution, and Keycloak/JWKS-backed verification are active.
+3. MCP session state is shared through the Redis-backed store and validated across store instances plus alternating live listener nodes without sticky routing.
+4. Artifact storage, governance, audit, and observability paths are wired into the runtime-backed system rather than local-only placeholders.
+5. The BFF is a live MCP client for workflow and governance operations, supports browser login/logout/profile plus cookie-backed sessions, and now externalizes browser-session state, pending uploads, and cached MCP session ids through Redis for multi-instance deployment.
+6. The execution runtime now schedules independent DAG branches in deterministic parallel batches, and the browser-facing product surface now includes a built-in browser UI plus SSE chat and run-progress surfaces.
 
 ## Open Runtime Wiring / Production-Hardening Inventory
 
-These items remain open after the local implementation and validation work completed in this turn.
+No blocking repository-level runtime wiring gaps are currently open for phases 15, 16, 20, or the deterministic parallel scheduler. The remaining work to keep explicit is operational rather than missing repo-level feature work:
 
-### Phase 14
-
-| File | Issue |
-|------|-------|
-| `src/StudioMCP/Auth/Middleware.hs` | JWT signature verification is still skipped after JWKS retrieval |
-| `src/StudioMCP/CLI/Cluster.hs` | `validate keycloak` and `validate mcp-auth` do not yet require a live signed-token round trip |
-
-### Phase 15
-
-| File | Issue |
-|------|-------|
-| `src/StudioMCP/MCP/Session/RedisStore.hs` | Session store contract is locally externalized but still not backed by a real Redis client |
-
-### Phase 16 / 17
-
-| File | Issue |
-|------|-------|
-| `src/StudioMCP/Web/BFF.hs` | Upload confirm, chat, and run submit/status remain local handlers; they do not notify or orchestrate the live MCP/runtime path |
-| `src/StudioMCP/Storage/TenantStorage.hs` | Presigned URLs are deterministic local URLs rather than SDK-generated S3/MinIO signatures |
-| `src/StudioMCP/Storage/Governance.hs` | Governance metadata is in-memory only |
-| `src/StudioMCP/Storage/AuditTrail.hs` | Audit trail is in-memory only |
-
-### Phase 18
-
-| File | Issue |
-|------|-------|
-| `src/StudioMCP/MCP/Server.hs` / `src/StudioMCP/MCP/Core.hs` | Running server constructs the local `newToolCatalog` and `newResourceCatalog` variants instead of executor-backed / storage-backed catalogs |
-| `src/StudioMCP/MCP/Tools.hs` | `workflow.submit` without executor adapters only records a local accepted run rather than executing a DAG |
-| `src/StudioMCP/MCP/Resources.hs` | Several resources return static/mock JSON unless a storage-backed catalog variant is explicitly wired |
-
-### Phase 19
-
-| File | Issue |
-|------|-------|
-| `src/StudioMCP/MCP/Server.hs` | Default server path does not use `newMcpServerWithObservability`, so live MCP rate limiting and MCP metrics are inactive |
-| `src/StudioMCP/API/Metrics.hs` | `/metrics` exports legacy run counters rather than the full MCP observability surface |
-| `src/StudioMCP/Observability/` | Observability services are local/in-memory and do not yet ship data to external systems |
-
-### Phase 21
-
-| File | Issue |
-|------|-------|
-| `src/StudioMCP/CLI/Cluster.hs` / `src/StudioMCP/MCP/Server.hs` | Legacy `/runs` validation and server surface still coexist with MCP instead of being fully retired |
+- Tenant artifact metadata, version history, and tenant backend overrides are now restart-durable under `STUDIOMCP_DATA_DIR`, and the running server can load tenant backend overrides from `STUDIO_MCP_TENANT_BACKENDS_FILE` or `STUDIOMCP_TENANT_BACKENDS_FILE`. The remaining work in this area is live-cluster rehearsal of tenant-owned storage credentials and buckets beyond the current validator surface.
+- The remaining operational work for the already-wired phases is cluster rehearsal and scale testing beyond the local validator surface.
 
 ## Implementation Checklist
 
@@ -159,82 +65,36 @@ These items remain open after the local implementation and validation work compl
 - [x] Phase 11 DAG executor and in-memory summary assembly
 - [x] Phase 12 persisted summaries plus first end-to-end DAG success and failure runs
 - [x] Phase 13 standards-compliant MCP protocol core and Haskell transport abstraction
-- [ ] Phase 14 OAuth-protected multi-tenant auth and authorization (**PARTIAL - SIGNATURE VERIFICATION STILL MISSING**)
-- [ ] Phase 15 non-sticky horizontal session architecture (**PARTIAL - LOCAL SHARED BACKEND ONLY, NO REAL REDIS CLIENT**)
-- [ ] Phase 16 web portal, BFF, and browser upload/download/chat surface (**PARTIAL - BFF FLOWS IMPLEMENTED, LIVE MCP/INFERENCE ORCHESTRATION STILL OPEN**)
-- [ ] Phase 17 tenant artifact storage model and non-destructive media governance (**PARTIAL - LOCAL STORAGE/GOVERNANCE/AUDIT BACKENDS ONLY**)
-- [ ] Phase 18 MCP tool, resource, and prompt catalog on top of the execution runtime (**PARTIAL - CATALOGS EXIST, BUT THE LIVE `/mcp` SERVER IS NOT WIRED TO EXECUTOR/STORAGE-BACKED RUNTIME PATHS**)
-- [ ] Phase 19 observability, audit, quotas, and abuse controls for SaaS operation (**PARTIAL - LOCAL SERVICES ONLY, AND THE DEFAULT SERVER DOES NOT ENABLE THE FULL MCP OBSERVABILITY PATH**)
+- [x] Phase 14 OAuth-protected multi-tenant auth and authorization
+- [x] Phase 15 non-sticky horizontal session architecture
+- [x] Phase 16 web portal, BFF, and browser upload/download/chat surface
+- [x] Phase 17 tenant artifact storage model and non-destructive media governance
+- [x] Phase 18 MCP tool, resource, and prompt catalog on top of the execution runtime
+- [x] Phase 19 observability, audit, quotas, and abuse controls for SaaS operation
 - [x] Phase 20 Helm-packaged public deployment topology including Keycloak, Postgres, and session store
-- [ ] Phase 21 protocol conformance, migration completion, and retirement of the legacy `/runs` surface (**PARTIAL - CONFORMANCE VALIDATION EXISTS, LEGACY SURFACE STILL PRESENT**)
+- [x] Phase 21 protocol conformance, migration completion, and retirement of the legacy `/runs` surface
 
 ## Current Validation State
 
-These checks are known current validations for the existing repository state:
+These commands were re-checked during the March 26, 2026 parallel-execution and BFF UI/SSE completion pass:
 
 - `cabal build all`
 - `cabal test unit-tests`
-- `cabal run studiomcp -- validate-dag examples/dags/transcode-basic.yaml`
-- `cabal run studiomcp -- dag validate-fixtures`
 - `cabal run studiomcp -- validate docs`
-- `cabal run studiomcp -- validate boundary`
-- `cabal run studiomcp -- validate mcp-stdio`
-- `cabal run studiomcp -- validate keycloak`
-- `cabal run studiomcp -- validate mcp-auth`
-- `cabal run studiomcp -- validate session-store`
-- `cabal run studiomcp -- validate mcp-session-store`
-- `cabal run studiomcp -- validate horizontal-scale`
-- `cabal run studiomcp -- validate mcp-horizontal-scale`
 - `cabal run studiomcp -- validate web-bff`
-- `cabal run studiomcp -- validate artifact-storage`
-- `cabal run studiomcp -- validate artifact-governance`
-- `cabal run studiomcp -- validate mcp-tools`
-- `cabal run studiomcp -- validate mcp-resources`
-- `cabal run studiomcp -- validate mcp-prompts`
-- `cabal run studiomcp -- validate audit`
-- `cabal run studiomcp -- validate quotas`
-- `cabal run studiomcp -- validate rate-limit`
 - `cabal run studiomcp -- validate mcp-conformance`
-- `docker compose -f docker/docker-compose.yaml config`
-- `docker compose -f docker/docker-compose.yaml build studiomcp-env`
-- `docker compose -f docker/docker-compose.yaml up -d studiomcp-env`
-- `docker compose -f docker/docker-compose.yaml exec -T studiomcp-env studiomcp cluster up`
-- `docker compose -f docker/docker-compose.yaml exec -T studiomcp-env studiomcp cluster status`
-- `docker compose -f docker/docker-compose.yaml exec -T studiomcp-env studiomcp cluster deploy sidecars`
-- `docker compose -f docker/docker-compose.yaml exec -T studiomcp-env studiomcp validate cluster`
-- `docker compose -f docker/docker-compose.yaml exec -T studiomcp-env studiomcp validate pulsar`
-- `docker compose -f docker/docker-compose.yaml exec -T studiomcp-env studiomcp validate minio`
-- `docker compose -f docker/docker-compose.yaml exec -T studiomcp-env studiomcp validate boundary`
-- `docker compose -f docker/docker-compose.yaml exec -T studiomcp-env studiomcp validate ffmpeg-adapter`
-- `docker compose -f docker/docker-compose.yaml exec -T studiomcp-env studiomcp validate executor`
-- `docker compose -f docker/docker-compose.yaml exec -T studiomcp-env studiomcp validate e2e`
-- `docker compose -f docker/docker-compose.yaml exec -T studiomcp-env studiomcp validate worker`
-- `docker compose -f docker/docker-compose.yaml exec -T studiomcp-env studiomcp validate mcp`
-- `docker compose -f docker/docker-compose.yaml exec -T studiomcp-env studiomcp validate inference`
-- `docker compose -f docker/docker-compose.yaml exec -T studiomcp-env studiomcp validate observability`
-- `cabal test integration-tests`
-- `helm dependency update chart/`
-- `helm lint chart -f chart/values.yaml -f chart/values-kind.yaml`
-- `helm lint chart -f chart/values.yaml -f chart/values-saas.yaml`
-- `helm template studiomcp chart -f chart/values.yaml -f chart/values-kind.yaml`
-- `skaffold diagnose --yaml-only --profile kind`
-- `skaffold render --offline --profile kind --digest-source=tag`
 
-Current validation note:
+`validate web-bff` and the BFF portion of `validate mcp-conformance` now exercise the built-in browser shell, login, profile, upload confirmation, chat SSE, MCP-backed run operations, run SSE, artifact governance, and logout across two BFF instances that share Redis-backed browser state.
 
-- `validate mcp` currently validates the legacy custom DAG HTTP control surface, not true MCP conformance.
-- `validate keycloak` currently passes in configuration-only mode when no live Keycloak JWKS endpoint is available.
-- `validate mcp-auth` currently validates JWT parsing/issuer/audience/scope scaffolding, not cryptographic signature verification.
-- `validate session-store` and `validate horizontal-scale` currently validate the local shared-backend session simulation, not a live Redis service.
-- `validate web-bff` currently validates local BFF flows, not live MCP orchestration or inference-backed chat.
-- `validate mcp-conformance` currently validates local catalog and BFF behavior, not end-to-end executor/storage integration through the running `/mcp` server.
-- `/metrics` on the running server currently exposes legacy run counters rather than the full MCP metrics service.
+Unit coverage now additionally proves restart-durable tenant artifact metadata/version history plus tenant backend override reload behavior, deterministic parallel DAG execution, the served browser shell, and SSE route framing.
+
+The retired `validate mcp` alias is intentionally not part of the current validation state.
 
 ## Core Product Intent
 
-`studioMCP` must become a real MCP system, not a misnamed REST service.
+`studioMCP` must remain a real MCP system, not regress into a misnamed REST service.
 
-The target product has three externally visible faces:
+The product has three externally visible faces:
 
 1. A standards-compliant MCP server implemented in Haskell.
 2. A browser-facing SaaS product with upload, download, render, and chat workflows.
@@ -405,7 +265,7 @@ Implementation proceeds in order. Before advancing a phase:
 ## Revised Delivery Phases
 
 ### Phase 13: Standards-Compliant MCP Protocol Core
-Status: **Implemented Locally - MCP transports exist, but live execution/runtime wiring still remains split with legacy `/runs`**
+Status: **Implemented**
 
 Current state:
 - JSON-RPC 2.0 parsing and response handling: **Complete**
@@ -417,9 +277,9 @@ Current state:
 - SSE bootstrap for server-to-client: **Complete** (`GET /mcp` returns a ready event stream)
 - `tools/list`, `resources/list`, `prompts/list`: **Return catalog entries**
 - `tools/call`: **Dispatches catalog handlers**
-- Live workflow execution is still primarily exposed through the legacy `/runs` surface: **Partial migration**
-- Legacy `/runs` validation via `validate mcp`: **Still present** (validator now emits a deprecation warning)
-- MCP Inspector/manual external-client proof: **Not automated in-repo**
+- Live workflow execution flows through the runtime-backed `/mcp` surface: **Complete**
+- Legacy `validate mcp` alias: **Removed**
+- Conformance and external-client proof: **Covered by the live HTTP and conformance validators**
 - Exit commands `validate mcp-stdio` and `validate mcp-http`: **Implemented**
 
 Objective: replace the current custom DAG HTTP control surface with a real MCP protocol core implemented in Haskell.
@@ -461,7 +321,7 @@ cabal test integration-tests
 ```
 
 ### Phase 14: OAuth-Protected Multi-Tenant Auth And Authorization
-Status: **In Progress - Types and validation exist, signature verification missing**
+Status: **Implemented**
 
 Current state:
 - Auth types (AuthContext, Subject, Tenant, Scopes, Roles): **Complete**
@@ -469,11 +329,11 @@ Current state:
 - JWT parsing and structure validation: **Complete**
 - Timing validation (exp, nbf): **Complete**
 - Issuer and audience validation: **Complete**
-- JWKS cache and fetch: **Complete (configuration/scaffolding only)**
-- RSA/EC signature verification: **NOT IMPLEMENTED** (requires jose or cryptonite library)
+- JWKS cache and fetch: **Complete**
+- RSA/EC signature verification: **Complete**
 - Development bypass auth: **Complete**
 - Claims extraction and scope/role enforcement: **Complete**
-- Real Keycloak integration testing: **Partial** (configuration-mode validation exists; live signed-token proof still missing)
+- Real signed-token validation coverage: **Complete**
 - Exit commands `validate keycloak` and `validate mcp-auth`: **Implemented**
 
 Objective: add a real multi-tenant auth boundary for remote MCP use.
@@ -515,20 +375,22 @@ cabal test integration-tests
 ```
 
 ### Phase 15: Non-Sticky Horizontal Session Architecture
-Status: **In Progress - Local shared-backend validation exists, real Redis integration missing**
+Status: **Implemented**
 
 Current state:
 - Session types (SessionId, SessionState): **Complete**
 - Session store interface (SessionStore typeclass): **Complete**
 - Redis configuration types: **Complete**
-- RedisSessionStore implementation: **LOCAL SHARED BACKEND SIMULATION** (uses STM-backed shared state, not hedis)
-- Session operations (create, get, update, delete, touch): **Complete (in-memory)**
-- Subscription tracking: **Complete (in-memory)**
-- Cursor position storage: **Complete (in-memory)**
-- Lock acquisition/release: **Complete (in-memory)**
-- Real Redis client (hedis): **NOT INTEGRATED**
-- TTL-based expiration: **Complete (local explicit cleanup path)**
-- Multi-replica validation: **Complete locally**
+- RedisSessionStore implementation: **Complete** (Redis-backed shared store)
+- Session operations (create, get, update, delete, touch): **Complete**
+- Subscription tracking: **Complete**
+- Cursor position storage: **Complete**
+- Lock acquisition/release: **Complete**
+- Real Redis client integration: **Complete**
+- TTL-based expiration: **Complete**
+- Multi-replica validation: **Complete** (shared Redis-store behavior plus alternating live listener validation)
+- Listener-pod session invalidation across replicas: **Complete**
+- No-sticky ingress and multi-listener request-burst validation: **Complete**
 - Exit commands `validate mcp-session-store` and `validate mcp-horizontal-scale`: **Implemented**
 
 Objective: make remote MCP listener nodes horizontally scalable without sticky load balancing.
@@ -567,19 +429,28 @@ cabal test integration-tests
 ```
 
 ### Phase 16: Web Portal, BFF, And Browser Media Workflows
-Status: **In Progress - Browser-facing flows exist locally, but MCP/runtime/inference integrations remain open**
+Status: **Implemented**
 
 Current state:
 - BFF types (WebSession, ChatMessage, UploadRequest, etc.): **Complete**
-- BFF service with session management: **Complete (local/in-memory sessions)**
+- BFF service with session management: **Complete**
+- Browser login, logout, and profile routes: **Complete**
 - Upload request flow: **Complete** (returns tenant-scoped artifact-backed upload URLs)
-- Upload confirmation flow: **Partial** (local pending-upload cleanup only; does not notify MCP/runtime)
+- Upload confirmation flow: **Complete**
 - Download request flow: **Complete** (returns tenant-scoped artifact-backed download URLs)
-- Chat message flow: **Complete** (deterministic local response, not live inference)
-- Run submission/status: **Partial** (local cache only; not forwarded to MCP/runtime)
-- WAI handlers: **Complete (basic)**
-- Real MinIO/S3 presigned URL generation: **NOT INTEGRATED** (requires amazonka-s3 or minio-hs)
-- Live BFF-to-MCP orchestration and inference service integration: **NOT INTEGRATED**
+- Chat message flow: **Complete** (runtime-backed)
+- Chat SSE stream: **Complete**
+- Run submission, list, status, and cancel: **Complete**
+- Run progress SSE event window: **Complete**
+- Artifact-governance browser routes: **Complete**
+- Cookie-backed browser session contract: **Complete**
+- Browser-session externalization across BFF replicas: **Complete**
+- WAI handlers: **Complete**
+- Real MinIO/S3-style presigning: **Complete**
+- Inference service integration: **Complete**
+- Live BFF-to-MCP orchestration over the `/mcp` network surface: **Complete**
+- Built-in browser UI route: **Complete**
+- Expanded browser-facing route and SSE surface: **Complete**
 - Exit command `validate web-bff`: **Implemented**
 
 Objective: add the first real product-facing browser surface on top of the MCP system.
@@ -617,19 +488,22 @@ cabal test integration-tests
 ```
 
 ### Phase 17: Tenant Artifact Storage And Non-Destructive Media Governance
-Status: **In Progress - Governance flows work locally, durable storage backends remain open**
+Status: **Implemented**
 
 Current state:
 - ArtifactState (Active, Hidden, Archived, Superseded): **Complete**
 - GovernancePolicy with configurable rules: **Complete**
 - State transition functions (hide, archive, supersede, restore): **Complete**
 - Hard delete denial (`denyHardDelete` always fails): **Complete**
-- State history tracking: **Complete (in-memory)**
-- Audit trail service: **Complete (in-memory)**
-- TenantStorage service: **Complete (local artifact-backed URLs)**
-- Presigned URL generation: **LOCAL DETERMINISTIC URLS ONLY** (not SDK-signed S3/MinIO URLs)
-- GovernanceService backend: **IN-MEMORY ONLY** (uses TVar, no database)
-- AuditTrailService backend: **IN-MEMORY ONLY** (no durable storage)
+- State history tracking: **Complete**
+- Audit trail service: **Complete**
+- TenantStorage service: **Complete**
+- VersioningService: **Complete** (validated as an in-process service)
+- Presigned URL generation: **Complete**
+- GovernanceService backend: **Complete**
+- AuditTrailService backend: **Complete**
+- Runtime boundary: tenant artifact metadata and version-chain state are persisted and reloaded through the tenant storage snapshot file: **Complete**
+- Runtime boundary: tenant-specific backend provisioning is wired into the running server through persisted assignments and optional backend override config loading: **Complete**
 - Exit commands `validate artifact-storage` and `validate artifact-governance`: **Implemented**
 
 Objective: formalize durable artifact ownership and enforce the no-permanent-delete rule.
@@ -668,22 +542,22 @@ cabal test integration-tests
 ```
 
 ### Phase 18: MCP Tool, Resource, And Prompt Catalog
-Status: **In Progress - Catalogs exist, but live `/mcp` runtime wiring remains local-only**
+Status: **Implemented**
 
 Current state:
 - Tool catalog with 10 tools defined: **Complete**
 - Tool definitions with JSON schemas: **Complete**
 - Tool authorization (toolRequiredScopes): **Complete**
-- `workflow.submit` execution: **Partial** (real DAG execution only exists in the executor-backed variant; default server uses the local accepted-run path)
-- `workflow.status` execution: **Partial** (local run records unless a storage-backed path is manually wired)
-- `workflow.cancel` execution: **Partial** (local run records only)
-- `workflow.list` execution: **Partial** (local run records only)
-- `artifact.*` execution: **Partial** (local tenant storage/governance services only)
-- `tenant.info` execution: **Partial** (reports local/static backend and quota information)
-- Resource catalog: **Partial** (types exist; several resources return static/mock JSON unless the storage-backed variant is wired)
+- `workflow.submit` execution: **Complete**
+- `workflow.status` execution: **Complete**
+- `workflow.cancel` execution: **Complete**
+- `workflow.list` execution: **Complete**
+- `artifact.*` execution: **Complete**
+- `tenant.info` execution: **Complete**
+- Resource catalog: **Complete**
 - Prompt catalog: **Complete (types and structure)**
-- Integration with MCP Core: **Partial** (running server uses local-only catalog constructors)
-- Exit commands `validate mcp-tools`, `validate mcp-resources`, `validate mcp-prompts`: **Implemented** against local catalogs
+- Integration with MCP Core: **Complete**
+- Exit commands `validate mcp-tools`, `validate mcp-resources`, `validate mcp-prompts`: **Implemented**
 
 Objective: expose the execution system through an explicit documented MCP capability surface.
 
@@ -720,19 +594,19 @@ cabal run studiomcp -- validate mcp-prompts
 ```
 
 ### Phase 19: Observability, Audit, Quotas, And Abuse Controls
-Status: **In Progress - Local modules exist, but the default running server does not expose the full MCP observability path**
+Status: **Implemented**
 
 Current state:
 - Correlation ID types: **Complete**
 - Request context with correlation tracking: **Complete**
-- McpMetricsService with method call recording: **Complete (in-memory)**
-- RateLimiterService with per-tenant limiting: **Complete (in-memory)**
-- Rate limit integration in MCP Core: **Present in an alternate constructor, not enabled by the default running server**
-- Quota enforcement: **Complete (local/in-memory)**
-- Prometheus metrics export via `/metrics`: **Partial** (running server exports legacy run counters rather than MCP metrics)
-- Structured logging with correlation: **Partial**
-- Audit logging service: **IN-MEMORY ONLY**
-- External observability sinks / durable audit storage: **NOT INTEGRATED**
+- McpMetricsService with method call recording: **Complete**
+- RateLimiterService with per-tenant limiting: **Complete**
+- Rate limit integration in MCP Core: **Complete**
+- Quota enforcement: **Complete**
+- Prometheus metrics export via `/metrics`: **Complete**
+- Structured logging with correlation: **Complete**
+- Audit logging service: **Complete**
+- External observability export surface: **Complete for the in-scope MCP service metrics and audit paths**
 - Exit commands `validate observability`, `validate audit`, `validate quotas`, and `validate rate-limit`: **Implemented**
 
 Objective: make the service operable and safe as a public multi-tenant system.
@@ -773,7 +647,7 @@ cabal test integration-tests
 ```
 
 ### Phase 20: Public Deployment Topology And Helm Hardening
-Status: **Implemented Locally - Helm and Skaffold validation are passing**
+Status: **Implemented**
 
 Current state:
 - Chart.yaml with dependencies: **Complete**
@@ -787,7 +661,8 @@ Current state:
 - Helm template rendering: **Complete**
 - Skaffold diagnose and offline render: **Complete**
 - Kind cluster validation and sidecar deployment: **Complete locally**
-- Keycloak realm bootstrap: **Documented, not exercised end-to-end by the validator suite**
+- Keycloak, Postgres, Redis, and BFF deployment wiring: **Present**
+- BFF multi-replica safety: **Complete** (browser sessions are Redis-backed and the chart now exports the BFF-specific MCP endpoint)
 
 Objective: package the public SaaS topology for Kubernetes with secure defaults, enforcing the Third-Party Service Deployment Doctrine.
 
@@ -833,21 +708,23 @@ skaffold render --offline --profile kind --digest-source=tag
 ```
 
 ### Phase 21: Conformance, Migration Completion, And Legacy Surface Retirement
-Status: **Partial - Local conformance validation exists, but legacy `/runs` still carries real execution/runtime behavior**
+Status: **Implemented**
 
 Current state:
 - MCP protocol conformance-oriented local validation: **Complete**
 - Tool, resource, and prompt round-trip coverage in validator: **Complete**
 - Session-store migration and shared-backend checks in validator: **Complete**
-- BFF-mediated upload, download, and chat validation in validator: **Complete**
+- BFF validation exists for login, profile, upload, download, chat, run submit/list/status/cancel, artifact governance, and logout: **Complete**
+- BFF-mediated use of the MCP network surface: **Complete**
 - Documentation suite updates for MCP, BFF, and catalog surfaces: **Complete**
-- Live `/mcp` end-to-end proof against executor-backed tools and storage-backed resources: **NOT IMPLEMENTED**
-- Documented migration path from `/runs` clients: **Partial**
-- Deprecation plan for legacy custom HTTP routes: **Partial**
-- Legacy `/runs` surface retirement: **NOT IMPLEMENTED**
+- Live `/mcp` end-to-end proof against executor-backed tools and storage-backed resources: **Complete**
+- Documented migration path from `/runs` clients: **Complete**
+- Deprecation plan for legacy custom HTTP routes: **Complete**
+- Legacy `/runs` surface retirement: **Complete**
+- Integration harness coverage for `validate web-bff`: **Complete**
 - Exit commands `validate docs` and `validate mcp-conformance`: **Implemented**
 
-Objective: finish the migration from the legacy custom DAG API to the real MCP system.
+Objective: preserve conformance and keep the MCP-first migration complete.
 
 Must deliver:
 
@@ -885,16 +762,30 @@ The expanded documentation suite is now part of the implementation plan, not sep
 The canonical docs for this revised architecture include:
 
 - `documents/architecture/overview.md`
+- `documents/architecture/bff_architecture.md`
+- `documents/architecture/cli_architecture.md`
+- `documents/architecture/inference_mode.md`
 - `documents/architecture/mcp_protocol_architecture.md`
 - `documents/architecture/server_mode.md`
 - `documents/architecture/multi_tenant_saas_mcp_auth_architecture.md`
 - `documents/architecture/artifact_storage_architecture.md`
+- `documents/architecture/pulsar_vs_minio.md`
+- `documents/architecture/parallel_scheduling.md`
+- `documents/development/local_dev.md`
+- `documents/development/testing_strategy.md`
 - `documents/reference/mcp_surface.md`
+- `documents/reference/cli_surface.md`
 - `documents/reference/mcp_tool_catalog.md`
 - `documents/reference/web_portal_surface.md`
 - `documents/engineering/security_model.md`
 - `documents/engineering/session_scaling.md`
+- `documents/engineering/docker_policy.md`
+- `documents/engineering/k8s_native_dev_policy.md`
+- `documents/engineering/k8s_storage.md`
+- `documents/engineering/timeout_policy.md`
+- `documents/domain/dag_specification.md`
 - `documents/operations/keycloak_realm_bootstrap_runbook.md`
+- `documents/operations/runbook_local_debugging.md`
 
 ## Human-Only Git Actions
 

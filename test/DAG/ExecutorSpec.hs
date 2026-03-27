@@ -5,13 +5,16 @@ module DAG.ExecutorSpec
   )
 where
 
+import Control.Concurrent (threadDelay)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
+import qualified Data.IORef as IORef
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
 import Data.Time (UTCTime (UTCTime), fromGregorian, secondsToDiffTime)
 import StudioMCP.DAG.Executor
   ( ExecutionReport (..),
     ExecutorAdapters (..),
+    executeParallel,
     executeSequential,
   )
 import StudioMCP.DAG.Summary
@@ -39,7 +42,7 @@ import StudioMCP.Result.Failure
 import Test.Hspec (Spec, describe, expectationFailure, it, shouldBe)
 
 spec :: Spec
-spec =
+spec = do
   describe "executeSequential" $ do
     it "runs a simple DAG in topological order and assembles a successful summary" $ do
       observedOutcomesRef <- newIORef []
@@ -75,6 +78,27 @@ spec =
           observedOutcomes <- readIORef observedOutcomesRef
           map outcomeStatus observedOutcomes `shouldBe` [NodeSucceeded, NodeFailed, NodeFailed]
 
+  describe "executeParallel" $ do
+    it "runs independent nodes concurrently while preserving deterministic report order" $ do
+      observedOutcomesRef <- newIORef []
+      observedSummaryRef <- newIORef Nothing
+      runningCountRef <- newIORef (0 :: Int)
+      maxConcurrencyRef <- newIORef (0 :: Int)
+      result <-
+        executeParallel
+          (parallelAdapters observedOutcomesRef observedSummaryRef runningCountRef maxConcurrencyRef)
+          (RunId "run-parallel")
+          fixedTime
+          parallelExecutorDag
+      case result of
+        Left failureDetail ->
+          expectationFailure ("expected success but got failure: " <> show failureDetail)
+        Right executionReport -> do
+          reportOrder executionReport `shouldBe` [NodeId "a", NodeId "b", NodeId "summary"]
+          summaryStatus (reportSummary executionReport) `shouldBe` RunSucceeded
+          maxConcurrency <- readIORef maxConcurrencyRef
+          maxConcurrency `shouldBe` 2
+
 successAdapters :: IORef [NodeOutcome] -> IORef (Maybe Summary) -> ExecutorAdapters
 successAdapters observedOutcomesRef observedSummaryRef =
   ExecutorAdapters
@@ -104,6 +128,24 @@ failureAdapters observedOutcomesRef observedSummaryRef =
       observeSummary = writeIORef observedSummaryRef . Just
     }
 
+parallelAdapters :: IORef [NodeOutcome] -> IORef (Maybe Summary) -> IORef Int -> IORef Int -> ExecutorAdapters
+parallelAdapters observedOutcomesRef observedSummaryRef runningCountRef maxConcurrencyRef =
+  ExecutorAdapters
+    { executePureNode = \nodeSpec _ -> withConcurrentSlot (pure (Right ("pure://" <> unNodeId (nodeId nodeSpec)))),
+      executeBoundaryNode = \nodeSpec inputReferences ->
+        withConcurrentSlot (pure (Right ("boundary://" <> unNodeId (nodeId nodeSpec) <> "/" <> joinInputs inputReferences))),
+      observeNodeOutcome = \nodeOutcome -> modifyIORef' observedOutcomesRef (<> [nodeOutcome]),
+      observeSummary = writeIORef observedSummaryRef . Just
+    }
+  where
+    withConcurrentSlot action = do
+      concurrentCount <- IORef.atomicModifyIORef' runningCountRef (\current -> let next = current + 1 in (next, next))
+      modifyIORef' maxConcurrencyRef (max concurrentCount)
+      threadDelay 50000
+      result <- action
+      IORef.atomicModifyIORef' runningCountRef (\current -> (current - 1, ()))
+      pure result
+
 executorDag :: DagSpec
 executorDag =
   DagSpec
@@ -113,6 +155,18 @@ executorDag =
         [ mkNode "ingest" PureNode [] "text/plain",
           mkNode "transcode" BoundaryNode [NodeId "ingest"] "audio/wav",
           mkNode "summary" SummaryNode [NodeId "transcode"] "summary/run"
+        ]
+    }
+
+parallelExecutorDag :: DagSpec
+parallelExecutorDag =
+  DagSpec
+    { dagName = "executor-unit-parallel",
+      dagDescription = Just "Deterministic executor unit-test DAG with parallel branches.",
+      dagNodes =
+        [ mkNode "b" PureNode [] "text/plain",
+          mkNode "summary" SummaryNode [NodeId "a", NodeId "b"] "summary/run",
+          mkNode "a" PureNode [] "text/plain"
         ]
     }
 

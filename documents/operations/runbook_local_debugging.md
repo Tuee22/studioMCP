@@ -14,7 +14,7 @@ This runbook covers the repo as it exists today:
 - Haskell build and test validation
 - DAG validation
 - Docker and kind access validation
-- live legacy MCP-surface, inference, and observability validation
+- live MCP-surface, inference, and observability validation
 - Helm and Skaffold render validation
 - documentation validation
 
@@ -32,16 +32,13 @@ Run these in roughly this order when debugging repo state:
 6. `docker compose -f docker/docker-compose.yaml up -d studiomcp-env`
 7. `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp validate cluster`
 8. `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp validate worker`
-9. `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp validate mcp`
-10. `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp validate inference`
-11. `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp validate observability`
-12. `helm lint chart -f chart/values.yaml -f chart/values-kind.yaml`
-13. `skaffold diagnose --yaml-only --profile kind`
-14. `skaffold render --offline --profile kind --digest-source=tag`
-
-Current note:
-
-- `validate mcp` currently validates the legacy custom DAG HTTP surface rather than a standards-compliant MCP surface.
+9. `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp validate mcp-http`
+10. `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp validate mcp-conformance`
+11. `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp validate inference`
+12. `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp validate observability`
+13. `helm lint chart -f chart/values.yaml -f chart/values-kind.yaml`
+14. `skaffold diagnose --yaml-only --profile kind`
+15. `skaffold render --offline --profile kind --digest-source=tag`
 
 ## Current Outer-Container Workflow
 
@@ -58,10 +55,11 @@ The repo now includes the intended outer-container entrypoint and the validated 
 9. `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp validate pulsar`
 10. `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp validate minio`
 11. `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp validate ffmpeg-adapter`
-12. `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp validate mcp`
-13. `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp validate inference`
-14. `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp validate observability`
-15. `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp validate docs`
+12. `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp validate mcp-http`
+13. `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp validate mcp-conformance`
+14. `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp validate inference`
+15. `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp validate observability`
+16. `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp validate docs`
 
 The outer container should talk to the mounted daemon socket at `/var/run/docker.sock`.
 The CLI derives the host-visible `./.data/` path for kind from the outer container bind mount by default. Set `STUDIOMCP_KIND_HOST_DATA_PATH` only to override that discovery for a non-standard Docker context.

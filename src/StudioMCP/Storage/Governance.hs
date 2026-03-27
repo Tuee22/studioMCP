@@ -15,6 +15,7 @@ module StudioMCP.Storage.Governance
     -- * Governance Service
     GovernanceService (..),
     newGovernanceService,
+    newGovernanceServiceWithFile,
 
     -- * State Transitions
     hideArtifact,
@@ -37,21 +38,29 @@ module StudioMCP.Storage.Governance
   )
 where
 
+import Control.Applicative ((<|>))
 import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO, readTVarIO)
 import Data.Aeson
   ( FromJSON (parseJSON),
     ToJSON (toJSON),
+    decode,
+    encode,
     object,
     withObject,
     withText,
     (.:),
     (.:?),
+    (.!=),
     (.=),
   )
+import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Map.Strict as Map
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time (UTCTime, getCurrentTime)
+import System.Directory (createDirectoryIfMissing, doesFileExist)
+import System.FilePath (takeDirectory)
 import StudioMCP.Auth.Types (SubjectId (..), TenantId (..))
 
 -- | State of an artifact in the governance system
@@ -73,12 +82,20 @@ instance ToJSON ArtifactState where
   toJSON (Superseded newId) = object ["superseded_by" .= newId]
 
 instance FromJSON ArtifactState where
-  parseJSON = withText "ArtifactState" $ \t ->
-    case t of
-      "active" -> pure Active
-      "hidden" -> pure Hidden
-      "archived" -> pure Archived
-      _ -> fail $ "Unknown artifact state: " <> T.unpack t
+  parseJSON value =
+    parseTextState value <> parseSupersededState value
+    where
+      parseTextState =
+        withText "ArtifactState" $ \t ->
+          case t of
+            "active" -> pure Active
+            "hidden" -> pure Hidden
+            "archived" -> pure Archived
+            _ -> fail $ "Unknown artifact state: " <> T.unpack t
+
+      parseSupersededState =
+        withObject "ArtifactState" $ \obj ->
+          Superseded <$> obj .: "superseded_by"
 
 -- | Represents a state transition
 data ArtifactStateTransition
@@ -93,6 +110,22 @@ instance ToJSON ArtifactStateTransition where
   toJSON TransitionToArchived = "to_archived"
   toJSON (TransitionToSuperseded newId) = object ["to_superseded" .= newId]
   toJSON TransitionToActive = "to_active"
+
+instance FromJSON ArtifactStateTransition where
+  parseJSON value =
+    parseTextTransition value <> parseSupersededTransition value
+    where
+      parseTextTransition =
+        withText "ArtifactStateTransition" $ \t ->
+          case t of
+            "to_hidden" -> pure TransitionToHidden
+            "to_archived" -> pure TransitionToArchived
+            "to_active" -> pure TransitionToActive
+            _ -> fail $ "Unknown artifact transition: " <> T.unpack t
+
+      parseSupersededTransition =
+        withObject "ArtifactStateTransition" $ \obj ->
+          TransitionToSuperseded <$> obj .: "to_superseded"
 
 -- | Check if an artifact is accessible for reads
 isArtifactAccessible :: ArtifactState -> Bool
@@ -232,31 +265,60 @@ instance ToJSON ArtifactStateRecord where
         "metadata" .= asrMetadata
       ]
 
+instance FromJSON ArtifactStateRecord where
+  parseJSON = withObject "ArtifactStateRecord" $ \obj ->
+    ArtifactStateRecord
+      <$> obj .: "artifactId"
+      <*> obj .: "state"
+      <*> obj .:? "transition"
+      <*> obj .: "metadata"
+
 -- | Internal state for governance service
 data GovernanceState = GovernanceState
   { gsArtifactStates :: Map.Map Text ArtifactState,
     gsStateHistory :: Map.Map Text [ArtifactStateRecord]
   }
 
+instance ToJSON GovernanceState where
+  toJSON GovernanceState {..} =
+    object
+      [ "artifactStates" .= gsArtifactStates,
+        "stateHistory" .= gsStateHistory
+      ]
+
+instance FromJSON GovernanceState where
+  parseJSON = withObject "GovernanceState" $ \obj ->
+    GovernanceState
+      <$> obj .:? "artifactStates" .!= Map.empty
+      <*> obj .:? "stateHistory" .!= Map.empty
+
 -- | Governance service
 data GovernanceService = GovernanceService
   { gsPolicy :: GovernancePolicy,
-    gsState :: TVar GovernanceState
+    gsState :: TVar GovernanceState,
+    gsPersistencePath :: Maybe FilePath
   }
 
 -- | Create a new governance service
 newGovernanceService :: GovernancePolicy -> IO GovernanceService
-newGovernanceService policy = do
-  stateVar <-
-    newTVarIO
-      GovernanceState
-        { gsArtifactStates = Map.empty,
-          gsStateHistory = Map.empty
-        }
+newGovernanceService = newGovernanceServiceInternal Nothing
+
+newGovernanceServiceWithFile :: GovernancePolicy -> FilePath -> IO GovernanceService
+newGovernanceServiceWithFile policy persistencePath =
+  newGovernanceServiceInternal (Just persistencePath) policy
+
+newGovernanceServiceInternal :: Maybe FilePath -> GovernancePolicy -> IO GovernanceService
+newGovernanceServiceInternal maybePersistencePath policy = do
+  initialState <-
+    case maybePersistencePath of
+      Just persistencePath -> loadGovernanceState persistencePath
+      Nothing -> pure emptyGovernanceState
+  stateVar <- newTVarIO initialState
   pure
     GovernanceService
       { gsPolicy = policy,
-        gsState = stateVar
+        gsState = stateVar,
+        gsPersistencePath = maybePersistencePath
       }
 
 -- | Hide an artifact
@@ -287,6 +349,7 @@ hideArtifact service artifactId metadata = do
             gsStateHistory =
               Map.insertWith (++) artifactId [record] (gsStateHistory s)
           }
+      persistGovernanceState service
       pure $ Right record
 
 -- | Archive an artifact
@@ -315,6 +378,7 @@ archiveArtifact service artifactId metadata = do
             gsStateHistory =
               Map.insertWith (++) artifactId [record] (gsStateHistory s)
           }
+      persistGovernanceState service
       pure $ Right record
 
 -- | Supersede an artifact with a new one
@@ -347,6 +411,7 @@ supersedeArtifact service artifactId newArtifactId metadata = do
             gsStateHistory =
               Map.insertWith (++) artifactId [record] (gsStateHistory s)
           }
+      persistGovernanceState service
       pure $ Right record
 
 -- | Restore an artifact to active state
@@ -385,6 +450,7 @@ restoreArtifact service artifactId metadata = do
             gsStateHistory =
               Map.insertWith (++) artifactId [record] (gsStateHistory s)
           }
+      persistGovernanceState service
       pure $ Right record
 
 -- | Deny hard deletion (always fails)
@@ -415,3 +481,28 @@ getArtifactHistory ::
 getArtifactHistory service artifactId = do
   state <- readTVarIO (gsState service)
   pure $ Map.findWithDefault [] artifactId (gsStateHistory state)
+
+emptyGovernanceState :: GovernanceState
+emptyGovernanceState =
+  GovernanceState
+    { gsArtifactStates = Map.empty,
+      gsStateHistory = Map.empty
+    }
+
+loadGovernanceState :: FilePath -> IO GovernanceState
+loadGovernanceState persistencePath = do
+  exists <- doesFileExist persistencePath
+  if not exists
+    then pure emptyGovernanceState
+    else do
+      rawBytes <- LBS.readFile persistencePath
+      pure (fromMaybe emptyGovernanceState (decode rawBytes))
+
+persistGovernanceState :: GovernanceService -> IO ()
+persistGovernanceState service =
+  case gsPersistencePath service of
+    Nothing -> pure ()
+    Just persistencePath -> do
+      currentState <- readTVarIO (gsState service)
+      createDirectoryIfMissing True (takeDirectory persistencePath)
+      LBS.writeFile persistencePath (encode currentState)

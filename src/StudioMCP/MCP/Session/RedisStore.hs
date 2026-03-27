@@ -1,6 +1,8 @@
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module StudioMCP.MCP.Session.RedisStore
   ( -- * Redis Session Store
@@ -12,23 +14,49 @@ module StudioMCP.MCP.Session.RedisStore
     withRedisConnection,
     testConnection,
 
+    -- * Session Data Persistence
+    readSessionData,
+    writeSessionData,
+
     -- * Health Check
     RedisHealth (..),
     checkRedisHealth,
   )
 where
 
-import Control.Concurrent (MVar, newMVar, putMVar, takeMVar)
+import Control.Concurrent.MVar (MVar, newMVar, putMVar, takeMVar)
 import Control.Concurrent.STM (TVar, atomically, newTVarIO, readTVarIO, writeTVar)
-import Control.Exception (SomeException, try)
-import Data.Aeson (decode, encode)
+import Control.Exception (SomeException, bracket_, throwIO, try)
+import Control.Monad (forM, forM_, unless)
+import Data.Aeson (FromJSON, ToJSON, decode, encode)
+import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
-import Data.Map.Strict (Map)
-import qualified Data.Map.Strict as Map
-import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
+import Data.Text (Text)
 import Data.Time (UTCTime, addUTCTime, getCurrentTime)
+import Database.Redis
+  ( Connection,
+    checkedConnect,
+    connectAuth,
+    connectDatabase,
+    connectMaxConnections,
+    connectTimeout,
+    del,
+    disconnect,
+    exists,
+    parseConnectInfo,
+    expire,
+    get,
+    keys,
+    ping,
+    runRedis,
+    setex,
+    setnx,
+  )
+import qualified Database.Redis as Redis
 import GHC.Generics (Generic)
+import StudioMCP.MCP.Protocol.StateMachine (ProtocolState (Uninitialized))
 import StudioMCP.MCP.Session.RedisConfig
 import StudioMCP.MCP.Session.Store
   ( CursorPosition (..),
@@ -38,63 +66,57 @@ import StudioMCP.MCP.Session.Store
     SubscriptionRecord (..),
   )
 import StudioMCP.MCP.Session.Types
-import System.IO.Unsafe (unsafePerformIO)
+  ( Session,
+    SessionData (..),
+    SessionId (..),
+    sessionId,
+    sessionLastActiveAt,
+    toSessionData,
+  )
+import StudioMCP.Util.Startup (startupFailure)
 
-data RedisBackend = RedisBackend
-  { rbSessions :: TVar (Map Text LBS.ByteString),
-    rbSubscriptions :: TVar (Map Text [SubscriptionRecord]),
-    rbCursors :: TVar (Map Text CursorPosition),
-    rbLocks :: TVar (Map Text SessionLock)
-  }
-
--- | Redis session store
 data RedisSessionStore = RedisSessionStore
   { rssConfig :: RedisConfig,
-    -- | Shared backend that simulates externalized Redis storage for validation.
-    rssSessions :: TVar (Map Text LBS.ByteString),
-    -- | Subscriptions cache
-    rssSubscriptions :: TVar (Map Text [SubscriptionRecord]),
-    -- | Cursors cache
-    rssCursors :: TVar (Map Text CursorPosition),
-    -- | Locks cache
-    rssLocks :: TVar (Map Text SessionLock),
-    -- | Connection status
+    rssConnection :: Connection,
     rssConnected :: TVar Bool,
-    -- | Write lock for atomic operations
     rssWriteLock :: MVar ()
   }
 
-{-# NOINLINE redisBackendRegistry #-}
-redisBackendRegistry :: MVar (Map Text RedisBackend)
-redisBackendRegistry = unsafePerformIO (newMVar Map.empty)
+data RedisHealth = RedisHealth
+  { rhConnected :: Bool,
+    rhSessionCount :: Int,
+    rhSubscriptionCount :: Int,
+    rhLastChecked :: UTCTime
+  }
+  deriving (Eq, Show, Generic)
 
--- | Create a new Redis session store
 newRedisSessionStore :: RedisConfig -> IO RedisSessionStore
 newRedisSessionStore config = do
-  backend <-
-    if shouldShareBackend config
-      then getOrCreateBackend config
-      else newBackend
-  connectedVar <- newTVarIO True -- Assume connected for in-memory mode
+  connectInfo <- either throwIO pure (buildConnectInfo config)
+  connectionResult <- try (checkedConnect connectInfo) :: IO (Either SomeException Connection)
+  connection <-
+    case connectionResult of
+      Right establishedConnection -> pure establishedConnection
+      Left _ ->
+        throwIO $
+          startupFailure
+            "Unable to establish the initial Redis connection"
+            (Just "Verify the Redis host, port, credentials, and network reachability before restarting.")
+  connectedVar <- newTVarIO True
   writeLock <- newMVar ()
-
   pure
     RedisSessionStore
       { rssConfig = config,
-        rssSessions = rbSessions backend,
-        rssSubscriptions = rbSubscriptions backend,
-        rssCursors = rbCursors backend,
-        rssLocks = rbLocks backend,
+        rssConnection = connection,
         rssConnected = connectedVar,
         rssWriteLock = writeLock
       }
 
--- | Close the Redis session store
 closeRedisSessionStore :: RedisSessionStore -> IO ()
 closeRedisSessionStore store = do
   atomically $ writeTVar (rssConnected store) False
+  disconnect (rssConnection store)
 
--- | Execute action with Redis connection
 withRedisConnection :: RedisSessionStore -> IO a -> IO (Either SessionStoreError a)
 withRedisConnection store action = do
   connected <- readTVarIO (rssConnected store)
@@ -105,292 +127,341 @@ withRedisConnection store action = do
       case result of
         Left (e :: SomeException) ->
           pure $ Left $ StoreConnectionError $ T.pack (show e)
-        Right a -> pure (Right a)
+        Right value ->
+          pure (Right value)
 
--- | Test Redis connection
 testConnection :: RedisSessionStore -> IO (Either SessionStoreError ())
 testConnection store = do
-  connected <- readTVarIO (rssConnected store)
-  if connected
-    then pure (Right ())
-    else pure $ Left $ StoreUnavailable "Redis connection is closed"
+  pingResult <- execRedis store ping
+  pure (pingResult >> Right ())
 
--- | Redis health status
-data RedisHealth = RedisHealth
-  { rhConnected :: Bool,
-    rhSessionCount :: Int,
-    rhSubscriptionCount :: Int,
-    rhLastChecked :: UTCTime
-  }
-  deriving (Eq, Show, Generic)
+readSessionData :: RedisSessionStore -> SessionId -> IO (Either SessionStoreError SessionData)
+readSessionData store sid = do
+  valueResult <- execRedis store (get (keyBytes (sessionKey (rssConfig store) sid)))
+  case valueResult of
+    Left err -> pure (Left err)
+    Right Nothing -> pure $ Left $ SessionNotFound sid
+    Right (Just payload) ->
+      pure $
+        case decodeStrictJson payload of
+          Nothing -> Left $ SessionDeserializationError "Invalid session JSON"
+          Just sessionData -> Right sessionData
 
--- | Check Redis health
+writeSessionData :: RedisSessionStore -> SessionData -> IO (Either SessionStoreError ())
+writeSessionData store sessionData =
+  execRedis store $
+    do
+      result <-
+        setex
+          (keyBytes (sessionKey (rssConfig store) (sessionId (sdSession sessionData))))
+          (fromIntegral (rcSessionTtl (rssConfig store)))
+          (encodeStrictJson sessionData)
+      pure (() <$ result)
+
 checkRedisHealth :: RedisSessionStore -> IO RedisHealth
 checkRedisHealth store = do
   connected <- readTVarIO (rssConnected store)
-  sessions <- readTVarIO (rssSessions store)
-  subs <- readTVarIO (rssSubscriptions store)
+  sessionKeys <- execRedis store (keys (keyBytes (sessionKeyPrefix (rssConfig store) <> "*")))
+  subscriptionKeys <- execRedis store (keys (keyBytes (subscriptionKeyPrefix (rssConfig store) <> "*")))
   now <- getCurrentTime
-
   pure
     RedisHealth
       { rhConnected = connected,
-        rhSessionCount = Map.size sessions,
-        rhSubscriptionCount = Map.size subs,
+        rhSessionCount = either (const 0) length sessionKeys,
+        rhSubscriptionCount = either (const 0) length subscriptionKeys,
         rhLastChecked = now
       }
 
--- | SessionStore implementation for RedisSessionStore
 instance SessionStore RedisSessionStore where
-  storeCreateSession store session = do
-    let key = sessionKey (rssConfig store) (sessionId session)
-        value = encode session
-
+  storeCreateSession store session =
     withWriteLock store $ do
-      sessions <- readTVarIO (rssSessions store)
-      if Map.member key sessions
-        then pure $ Left $ SessionAlreadyExists (sessionId session)
-        else do
-          atomically $ writeTVar (rssSessions store) (Map.insert key value sessions)
-          pure (Right ())
+      let sid = sessionId session
+          sessionPayload = encodeStrictJson (toSessionData session Uninitialized)
+          sessionKeyBytes = keyBytes (sessionKey (rssConfig store) sid)
+          ttlSeconds = fromIntegral (rcSessionTtl (rssConfig store))
+      created <- execRedis store (setnx sessionKeyBytes sessionPayload)
+      case created of
+        Left err -> pure (Left err)
+        Right False -> pure $ Left $ SessionAlreadyExists sid
+        Right True -> do
+          expireResult <- execRedis store (expire sessionKeyBytes ttlSeconds)
+          case expireResult of
+            Left err -> pure (Left err)
+            Right _ -> pure (Right ())
 
   storeGetSession store sid = do
-    let key = sessionKey (rssConfig store) sid
+    sessionDataResult <- readSessionData store sid
+    pure (fmap sdSession sessionDataResult)
 
-    sessions <- readTVarIO (rssSessions store)
-    case Map.lookup key sessions of
-      Nothing -> pure $ Left $ SessionNotFound sid
-      Just value ->
-        case decode value of
-          Nothing -> pure $ Left $ SessionDeserializationError "Invalid session JSON"
-          Just session -> pure (Right session)
-
-  storeUpdateSession store sid updateFn = do
-    let key = sessionKey (rssConfig store) sid
-
+  storeUpdateSession store sid updateFn =
     withWriteLock store $ do
-      sessions <- readTVarIO (rssSessions store)
-      case Map.lookup key sessions of
-        Nothing -> pure $ Left $ SessionNotFound sid
-        Just value ->
-          case decode value of
-            Nothing -> pure $ Left $ SessionDeserializationError "Invalid session JSON"
-            Just session -> do
-              let updated = updateFn session
-                  newValue = encode updated
-              atomically $ writeTVar (rssSessions store) (Map.insert key newValue sessions)
-              pure (Right updated)
+      sessionDataResult <- readSessionData store sid
+      case sessionDataResult of
+        Left err -> pure (Left err)
+        Right sessionData -> do
+          let updatedSession = updateFn (sdSession sessionData)
+              updatedData = sessionData {sdSession = updatedSession}
+          writeResult <- writeSessionData store updatedData
+          case writeResult of
+            Left err -> pure (Left err)
+            Right () -> do
+              _ <- refreshAssociatedStateTtl store sid
+              pure (Right updatedSession)
 
-  storeDeleteSession store sid = do
-    let key = sessionKey (rssConfig store) sid
-
+  storeDeleteSession store sid =
     withWriteLock store $ do
-      sessions <- readTVarIO (rssSessions store)
-      if Map.member key sessions
-        then do
-          atomically $ writeTVar (rssSessions store) (Map.delete key sessions)
+      existing <- execRedis store (exists (keyBytes (sessionKey (rssConfig store) sid)))
+      case existing of
+        Left err -> pure (Left err)
+        Right False -> pure $ Left $ SessionNotFound sid
+        Right True -> do
+          deleteSessionFamily store sid
           pure (Right ())
-        else pure $ Left $ SessionNotFound sid
 
-  storeTouchSession store sid = do
-    let key = sessionKey (rssConfig store) sid
-
-    now <- getCurrentTime
+  storeTouchSession store sid =
     withWriteLock store $ do
-      sessions <- readTVarIO (rssSessions store)
-      case Map.lookup key sessions of
-        Nothing -> pure $ Left $ SessionNotFound sid
-        Just value ->
-          case decode value of
-            Nothing -> pure $ Left $ SessionDeserializationError "Invalid session JSON"
-            Just session -> do
-              let touched = session {sessionLastActiveAt = now}
-              atomically $
-                writeTVar
-                  (rssSessions store)
-                  (Map.insert key (encode touched) sessions)
+      sessionDataResult <- readSessionData store sid
+      case sessionDataResult of
+        Left err -> pure (Left err)
+        Right sessionData -> do
+          now <- getCurrentTime
+          let touchedData =
+                sessionData
+                  { sdSession = (sdSession sessionData) {sessionLastActiveAt = now}
+                  }
+          writeResult <- writeSessionData store touchedData
+          case writeResult of
+            Left err -> pure (Left err)
+            Right () -> do
+              _ <- refreshAssociatedStateTtl store sid
               pure (Right ())
 
-  storeAddSubscription store sid resourceUri sub = do
-    let key = subscriptionKey (rssConfig store) sid resourceUri
+  storeAddSubscription store sid resourceUri sub =
+    withWriteLock store $
+      execRedis store
+        ( do
+            result <-
+              setex
+                (keyBytes (subscriptionKey (rssConfig store) sid resourceUri))
+                (fromIntegral (rcSessionTtl (rssConfig store)))
+                (encodeStrictJson [sub])
+            pure (() <$ result)
+        )
 
-    withWriteLock store $ do
-      subs <- readTVarIO (rssSubscriptions store)
-      let existing = Map.findWithDefault [] key subs
-          updated = sub : existing
-      atomically $ writeTVar (rssSubscriptions store) (Map.insert key updated subs)
-      pure (Right ())
-
-  storeRemoveSubscription store sid resourceUri = do
-    let key = subscriptionKey (rssConfig store) sid resourceUri
-
-    withWriteLock store $ do
-      subs <- readTVarIO (rssSubscriptions store)
-      atomically $ writeTVar (rssSubscriptions store) (Map.delete key subs)
-      pure (Right ())
+  storeRemoveSubscription store sid resourceUri =
+    withWriteLock store $
+      execRedis store
+        ( do
+            result <- del [keyBytes (subscriptionKey (rssConfig store) sid resourceUri)]
+            pure (() <$ result)
+        )
 
   storeGetSubscriptions store sid = do
-    let keyPrefix = subscriptionKeyPrefix (rssConfig store) <> unSessionId sid <> ":"
-        unSessionId (SessionId s) = s
+    subscriptionKeys <- matchingKeys store (subscriptionKeyPrefix (rssConfig store) <> sessionIdText sid <> ":*")
+    decodedLists <-
+      forM
+        subscriptionKeys
+        (\subscriptionKeyBytes -> do
+            valueResult <- execRedis store (get subscriptionKeyBytes)
+            pure $
+              case valueResult of
+                Left err -> Left err
+                Right Nothing -> Right []
+                Right (Just payload) ->
+                  maybe
+                    (Left (SessionDeserializationError "Invalid subscription JSON"))
+                    Right
+                    (decodeStrictJson payload)
+        )
+    pure (concat <$> sequence decodedLists)
 
-    subs <- readTVarIO (rssSubscriptions store)
-    let matching = Map.filterWithKey (\k _ -> T.isPrefixOf keyPrefix k) subs
-        allSubs = concat $ Map.elems matching
-    pure (Right allSubs)
-
-  storeSetCursor store sid cursor = do
-    let key = cursorKey (rssConfig store) sid (cpStreamName cursor)
-
-    withWriteLock store $ do
-      cursors <- readTVarIO (rssCursors store)
-      atomically $ writeTVar (rssCursors store) (Map.insert key cursor cursors)
-      pure (Right ())
+  storeSetCursor store sid cursor =
+    withWriteLock store $
+      execRedis store
+        ( do
+            result <-
+              setex
+                (keyBytes (cursorKey (rssConfig store) sid (cpStreamName cursor)))
+                (fromIntegral (rcSessionTtl (rssConfig store)))
+                (encodeStrictJson cursor)
+            pure (() <$ result)
+        )
 
   storeGetCursor store sid streamName = do
-    let key = cursorKey (rssConfig store) sid streamName
+    cursorResult <- execRedis store (get (keyBytes (cursorKey (rssConfig store) sid streamName)))
+    pure $
+      case cursorResult of
+        Left err -> Left err
+        Right Nothing -> Right Nothing
+        Right (Just payload) ->
+          maybe
+            (Left (SessionDeserializationError "Invalid cursor JSON"))
+            (Right . Just)
+            (decodeStrictJson payload)
 
-    cursors <- readTVarIO (rssCursors store)
-    pure $ Right $ Map.lookup key cursors
-
-  storeAcquireLock store sid podId ttlSeconds = do
-    let key = lockKey (rssConfig store) sid
-
-    now <- getCurrentTime
-    let expiresAt = addUTCTime (fromIntegral ttlSeconds) now
-        newLock =
-          SessionLock
-            { slSessionId = sid,
-              slHolderPodId = podId,
-              slAcquiredAt = now,
-              slExpiresAt = expiresAt
-            }
-
+  storeAcquireLock store sid podId ttlSeconds =
     withWriteLock store $ do
-      locks <- readTVarIO (rssLocks store)
-      case Map.lookup key locks of
-        Just existing
-          | slExpiresAt existing > now && slHolderPodId existing /= podId ->
-              pure $ Left $ LockAcquisitionFailed sid
-        _ -> do
-          atomically $ writeTVar (rssLocks store) (Map.insert key newLock locks)
-          pure (Right newLock)
+      now <- getCurrentTime
+      let lockKeyBytes = keyBytes (lockKey (rssConfig store) sid)
+      existingLockResult <- execRedis store (get lockKeyBytes)
+      case existingLockResult of
+        Left err -> pure (Left err)
+        Right maybePayload ->
+          case maybePayload >>= decodeStrictJson of
+            Just existingLock
+              | slExpiresAt existingLock > now && slHolderPodId existingLock /= podId ->
+                  pure $ Left $ LockAcquisitionFailed sid
+            _ -> do
+              let expiresAt = addUTCTime (fromIntegral ttlSeconds) now
+                  newLock =
+                    SessionLock
+                      { slSessionId = sid,
+                        slHolderPodId = podId,
+                        slAcquiredAt = now,
+                        slExpiresAt = expiresAt
+                      }
+              setResult <-
+                execRedis store $
+                  do
+                    result <-
+                      setex
+                        lockKeyBytes
+                        (fromIntegral ttlSeconds)
+                        (encodeStrictJson newLock)
+                    pure (() <$ result)
+              pure (setResult >> Right newLock)
 
-  storeReleaseLock store sid podId = do
-    let key = lockKey (rssConfig store) sid
-
+  storeReleaseLock store sid podId =
     withWriteLock store $ do
-      locks <- readTVarIO (rssLocks store)
-      case Map.lookup key locks of
-        Nothing -> pure (Right ()) -- Already released
-        Just existing
-          | slHolderPodId existing /= podId ->
-              pure $ Left $ LockNotHeld sid
-          | otherwise -> do
-              atomically $ writeTVar (rssLocks store) (Map.delete key locks)
-              pure (Right ())
+      let lockKeyBytes = keyBytes (lockKey (rssConfig store) sid)
+      existingLockResult <- execRedis store (get lockKeyBytes)
+      case existingLockResult of
+        Left err -> pure (Left err)
+        Right Nothing -> pure (Right ())
+        Right (Just payload) ->
+          case decodeStrictJson payload of
+            Nothing -> pure $ Left $ SessionDeserializationError "Invalid lock JSON"
+            Just existingLock
+              | slHolderPodId existingLock /= podId ->
+                  pure $ Left $ LockNotHeld sid
+              | otherwise -> do
+                  _ <- execRedis store (del [lockKeyBytes])
+                  pure (Right ())
 
   storeListSessions store = do
-    sessions <- readTVarIO (rssSessions store)
-    let prefix = sessionKeyPrefix (rssConfig store)
-        keys = Map.keys sessions
-        sessionIds =
-          map (SessionId . T.drop (T.length prefix)) $
-            filter (T.isPrefixOf prefix) keys
-    pure (Right sessionIds)
+    keyNames <- matchingKeys store (sessionKeyPrefix (rssConfig store) <> "*")
+    pure $
+      Right
+        [ SessionId stripped
+        | keyName <- keyNames
+        , let stripped = T.drop (T.length (sessionKeyPrefix (rssConfig store))) (decodeKey keyName)
+        ]
 
-  storeExpireSessions store = do
-    now <- getCurrentTime
-    let ttlSeconds = fromIntegral (rcSessionTtl (rssConfig store))
+  storeExpireSessions store =
     withWriteLock store $ do
-      sessions <- readTVarIO (rssSessions store)
-      subscriptions <- readTVarIO (rssSubscriptions store)
-      cursors <- readTVarIO (rssCursors store)
-      locks <- readTVarIO (rssLocks store)
-      let expiredSessionIds =
-            [ sid
-            | (key, value) <- Map.toList sessions
-            , Just sid <- [sessionIdFromKey (rssConfig store) key]
-            , Just session <- [decode value]
-            , addUTCTime ttlSeconds (sessionLastActiveAt session) <= now
-            ]
-          expiredKeys = map (sessionKey (rssConfig store)) expiredSessionIds
-          isExpiredSubscription key =
-            any
-              (\sid -> T.isPrefixOf (subscriptionKeyPrefix (rssConfig store) <> sessionIdText sid <> ":") key)
-              expiredSessionIds
-          isExpiredCursor key =
-            any
-              (\sid -> T.isPrefixOf (cursorKeyPrefix (rssConfig store) <> sessionIdText sid <> ":") key)
-              expiredSessionIds
-          isExpiredLock key = any (\sid -> lockKey (rssConfig store) sid == key) expiredSessionIds
-      atomically $ do
-        writeTVar (rssSessions store) (foldr Map.delete sessions expiredKeys)
-        writeTVar (rssSubscriptions store) (Map.filterWithKey (\key _ -> not (isExpiredSubscription key)) subscriptions)
-        writeTVar (rssCursors store) (Map.filterWithKey (\key _ -> not (isExpiredCursor key)) cursors)
-        writeTVar (rssLocks store) (Map.filterWithKey (\key _ -> not (isExpiredLock key)) locks)
+      now <- getCurrentTime
+      sessionKeys <- matchingKeys store (sessionKeyPrefix (rssConfig store) <> "*")
+      expiredSessionIds <-
+        fmap concat $
+          forM sessionKeys $ \sessionKeyBytes -> do
+            valueResult <- execRedis store (get sessionKeyBytes)
+            pure $
+              case valueResult of
+                Right (Just payload)
+                  | Just sessionData <- decodeStrictJson payload,
+                    addUTCTime (fromIntegral (rcSessionTtl (rssConfig store))) (sessionLastActiveAt (sdSession sessionData)) <= now ->
+                      [sessionId (sdSession sessionData)]
+                _ -> []
+      forM_ expiredSessionIds (deleteSessionFamily store)
       pure (Right (length expiredSessionIds))
 
--- | Execute action with write lock
-withWriteLock :: RedisSessionStore -> IO a -> IO a
-withWriteLock store action = do
-  () <- takeMVar (rssWriteLock store)
-  result <- action
-  putMVar (rssWriteLock store) ()
-  pure result
+execRedis :: RedisSessionStore -> Redis.Redis (Either Redis.Reply a) -> IO (Either SessionStoreError a)
+execRedis store action = do
+  result <- withRedisConnection store (runRedis (rssConnection store) action)
+  pure $
+    case result of
+      Left err -> Left err
+      Right (Left reply) -> Left $ StoreConnectionError (T.pack (show reply))
+      Right (Right value) -> Right value
 
-getOrCreateBackend :: RedisConfig -> IO RedisBackend
-getOrCreateBackend config = do
-  registry <- takeMVar redisBackendRegistry
-  case Map.lookup key registry of
-    Just backend -> do
-      putMVar redisBackendRegistry registry
-      pure backend
-    Nothing -> do
-      backend <- do
-        sessionsVar <- newTVarIO Map.empty
-        subsVar <- newTVarIO Map.empty
-        cursorsVar <- newTVarIO Map.empty
-        locksVar <- newTVarIO Map.empty
-        pure
-          RedisBackend
-            { rbSessions = sessionsVar,
-              rbSubscriptions = subsVar,
-              rbCursors = cursorsVar,
-              rbLocks = locksVar
-            }
-      putMVar redisBackendRegistry (Map.insert key backend registry)
-      pure backend
-  where
-    key =
-      T.intercalate
-        ":"
-        [ rcHost config,
-          T.pack (show (rcPort config)),
-          T.pack (show (rcDatabase config)),
-          rcKeyPrefix config
+matchingKeys :: RedisSessionStore -> Text -> IO [BS.ByteString]
+matchingKeys store patternText = do
+  keyResult <- execRedis store (keys (keyBytes patternText))
+  pure (either (const []) id keyResult)
+
+deleteSessionFamily :: RedisSessionStore -> SessionId -> IO ()
+deleteSessionFamily store sid = do
+  let keyFamilies =
+        [ keyBytes (sessionKey (rssConfig store) sid)
         ]
+  subscriptionKeys <- matchingKeys store (subscriptionKeyPrefix (rssConfig store) <> sessionIdText sid <> ":*")
+  cursorKeys <- matchingKeys store (cursorKeyPrefix (rssConfig store) <> sessionIdText sid <> ":*")
+  let allKeys = keyFamilies <> subscriptionKeys <> cursorKeys <> [keyBytes (lockKey (rssConfig store) sid)]
+  unless (null allKeys) $ do
+    _ <- execRedis store (del allKeys)
+    pure ()
+
+refreshAssociatedStateTtl :: RedisSessionStore -> SessionId -> IO (Either SessionStoreError ())
+refreshAssociatedStateTtl store sid = do
+  let ttlSeconds = fromIntegral (rcSessionTtl (rssConfig store))
+  subscriptionKeys <- matchingKeys store (subscriptionKeyPrefix (rssConfig store) <> sessionIdText sid <> ":*")
+  cursorKeys <- matchingKeys store (cursorKeyPrefix (rssConfig store) <> sessionIdText sid <> ":*")
+  touchResults <-
+    sequence
+      [ execRedis store (expire key ttlSeconds) | key <- subscriptionKeys <> cursorKeys ]
+  pure (voidEithers touchResults)
+
+buildConnectInfo :: RedisConfig -> Either StartupFailure Redis.ConnectInfo
+buildConnectInfo config =
+  case parseConnectInfo redisUrl of
+    Left err ->
+      Left $
+        startupFailure
+          ("Invalid Redis connection configuration: " <> T.pack err)
+          (Just "Fix the Redis host, port, database, or STUDIO_MCP_REDIS_URL setting and retry.")
+    Right connectInfo ->
+      Right
+        connectInfo
+          { connectAuth = TE.encodeUtf8 <$> rcPassword config,
+            connectDatabase = fromIntegral (rcDatabase config),
+            connectMaxConnections = rcPoolSize config,
+            connectTimeout = Just (fromIntegral (rcConnectionTimeout config))
+          }
+  where
+    scheme
+      | rcUseTls config = "rediss://"
+      | otherwise = "redis://"
+    redisUrl =
+      scheme
+        <> maybe "" (\password -> ":" <> T.unpack password <> "@") (rcPassword config)
+        <> T.unpack (rcHost config)
+        <> ":"
+        <> show (rcPort config)
+        <> "/"
+        <> show (rcDatabase config)
+
+withWriteLock :: RedisSessionStore -> IO a -> IO a
+withWriteLock store =
+  bracket_
+    (takeMVar (rssWriteLock store))
+    (putMVar (rssWriteLock store) ())
+
+encodeStrictJson :: ToJSON a => a -> BS.ByteString
+encodeStrictJson = LBS.toStrict . encode
+
+decodeStrictJson :: FromJSON a => BS.ByteString -> Maybe a
+decodeStrictJson = decode . LBS.fromStrict
+
+keyBytes :: Text -> BS.ByteString
+keyBytes = TE.encodeUtf8
+
+decodeKey :: BS.ByteString -> Text
+decodeKey = TE.decodeUtf8
 
 sessionIdText :: SessionId -> Text
 sessionIdText (SessionId sid) = sid
 
-sessionIdFromKey :: RedisConfig -> Text -> Maybe SessionId
-sessionIdFromKey config key = do
-  stripped <- T.stripPrefix (sessionKeyPrefix config) key
-  pure (SessionId stripped)
-
-newBackend :: IO RedisBackend
-newBackend = do
-  sessionsVar <- newTVarIO Map.empty
-  subsVar <- newTVarIO Map.empty
-  cursorsVar <- newTVarIO Map.empty
-  locksVar <- newTVarIO Map.empty
-  pure
-    RedisBackend
-      { rbSessions = sessionsVar,
-        rbSubscriptions = subsVar,
-        rbCursors = cursorsVar,
-        rbLocks = locksVar
-      }
-
-shouldShareBackend :: RedisConfig -> Bool
-shouldShareBackend config = "shared:" `T.isPrefixOf` rcKeyPrefix config
+voidEithers :: [Either e a] -> Either e ()
+voidEithers [] = Right ()
+voidEithers (Left err : _) = Left err
+voidEithers (Right _ : remaining) = voidEithers remaining

@@ -69,7 +69,7 @@ Required integration categories:
 - session-store-backed reconnect behavior
 - real MCP transport behavior over `stdio`
 - real MCP transport behavior over Streamable HTTP
-- browser and BFF flows once implemented
+- browser and BFF flows through the live BFF-to-MCP path
 
 ## Protocol Validation
 
@@ -106,18 +106,23 @@ Security validation must cover:
 
 ## Browser And BFF Validation
 
-Once the BFF and browser surface exist, end-to-end tests must cover:
+The BFF and browser-facing validation surface must cover:
 
 - login
+- profile lookup
 - upload
 - run submission
+- run listing and status observation
+- run cancellation
+- artifact governance actions
 - progress observation
 - artifact download
 - chat-assisted workflow operations
+- logout and session invalidation
 
 ## Current Repo Note
 
-The current repo already has strong foundational unit and integration coverage for execution and sidecar behavior. Its current `validate mcp` coverage, however, validates the legacy custom DAG HTTP surface rather than a true MCP protocol surface.
+The current repo already has strong foundational unit and integration coverage for execution and sidecar behavior. Its MCP transport and conformance coverage now runs through `validate mcp-stdio`, `validate mcp-http`, and `validate mcp-conformance`, and the browser-facing BFF surface is exercised through `validate web-bff` plus the outer integration harness, including the served browser shell and the chat/run SSE routes.
 
 ## Cross-References
 

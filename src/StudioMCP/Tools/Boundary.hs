@@ -9,9 +9,9 @@ module StudioMCP.Tools.Boundary
 where
 
 import Control.Concurrent (forkIO, threadDelay)
-import Control.Concurrent.Async (waitEither, withAsync)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
-import Control.Exception (IOException, evaluate, try)
+import Control.Exception (IOException, SomeException, evaluate, try)
+import Control.Monad (void)
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -24,13 +24,16 @@ import StudioMCP.Result.Failure
 import System.Exit (ExitCode (..))
 import System.IO (Handle, hClose, hGetContents)
 import System.Process
-  ( CreateProcess (std_err, std_in, std_out),
+  ( CreateProcess (create_group, std_err, std_in, std_out),
+    ProcessHandle,
     StdStream (CreatePipe),
+    getPid,
+    getProcessExitCode,
     proc,
     terminateProcess,
-    waitForProcess,
     withCreateProcess,
   )
+import System.Posix.Signals (sigKILL, sigTERM, signalProcessGroup)
 
 data BoundaryCommand = BoundaryCommand
   { boundaryExecutable :: FilePath,
@@ -171,7 +174,8 @@ runBoundaryCommandUnchecked :: BoundaryCommand -> IO (Either FailureDetail Bound
 runBoundaryCommandUnchecked command =
   withCreateProcess
     (proc (boundaryExecutable command) (boundaryArguments command))
-      { std_in = CreatePipe,
+      { create_group = True,
+        std_in = CreatePipe,
         std_out = CreatePipe,
         std_err = CreatePipe
       }
@@ -184,20 +188,18 @@ runBoundaryCommandUnchecked command =
             _ <- forkIO (readFully stdoutHandle >>= putMVar stdoutMVar)
             _ <- forkIO (readFully stderrHandle >>= putMVar stderrMVar)
             let timeoutMicroseconds = boundaryTimeoutSeconds command * 1000000
-            withAsync (threadDelay timeoutMicroseconds) $ \delayAsync ->
-              withAsync (waitForProcess processHandle) $ \processAsync -> do
-                raceResult <- waitEither delayAsync processAsync
-                case raceResult of
-                  Right exitCodeValue -> do
-                    stdoutText <- takeMVar stdoutMVar
-                    stderrText <- takeMVar stderrMVar
-                    pure (projectBoundaryExit command stdoutText stderrText exitCodeValue)
-                  Left () -> do
-                    terminateProcess processHandle
-                    _ <- waitForProcess processHandle
-                    stdoutText <- takeMVar stdoutMVar
-                    stderrText <- takeMVar stderrMVar
-                    pure (Left (projectBoundaryTimeout command stdoutText stderrText))
+            exitCodeOrTimeout <- awaitProcessExit processHandle timeoutMicroseconds
+            case exitCodeOrTimeout of
+              Just exitCodeValue -> do
+                stdoutText <- takeMVar stdoutMVar
+                stderrText <- takeMVar stderrMVar
+                pure (projectBoundaryExit command stdoutText stderrText exitCodeValue)
+              Nothing -> do
+                terminateBoundaryProcess processHandle
+                _ <- awaitProcessExit processHandle 1000000
+                stdoutText <- takeMVar stdoutMVar
+                stderrText <- takeMVar stderrMVar
+                pure (Left (projectBoundaryTimeout command stdoutText stderrText))
           _ ->
             pure
               ( Left
@@ -220,6 +222,38 @@ runBoundaryCommandUnchecked command =
         then pure ()
         else TextIO.hPutStr stdinHandle (boundaryStdin command)
       hClose stdinHandle
+
+terminateBoundaryProcess :: ProcessHandle -> IO ()
+terminateBoundaryProcess processHandle = do
+  maybePid <- getPid processHandle
+  case maybePid of
+    Just pid -> do
+      void (try (signalProcessGroup sigTERM pid) :: IO (Either SomeException ()))
+      threadDelay 100000
+      exitCode <- getProcessExitCode processHandle
+      case exitCode of
+        Just _ -> pure ()
+        Nothing -> void (try (signalProcessGroup sigKILL pid) :: IO (Either SomeException ()))
+    Nothing ->
+      void (try (terminateProcess processHandle) :: IO (Either SomeException ()))
+
+awaitProcessExit :: ProcessHandle -> Int -> IO (Maybe ExitCode)
+awaitProcessExit processHandle timeoutMicroseconds =
+  go timeoutMicroseconds
+  where
+    pollIntervalMicroseconds = 100000
+
+    go remainingMicroseconds = do
+      exitCode <- getProcessExitCode processHandle
+      case exitCode of
+        Just exitCodeValue -> pure (Just exitCodeValue)
+        Nothing
+          | remainingMicroseconds <= 0 ->
+              pure Nothing
+          | otherwise -> do
+              let sleepMicroseconds = min pollIntervalMicroseconds remainingMicroseconds
+              threadDelay sleepMicroseconds
+              go (remainingMicroseconds - sleepMicroseconds)
 
 readFully :: Handle -> IO Text
 readFully handle = do

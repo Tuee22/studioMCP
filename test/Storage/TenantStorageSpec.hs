@@ -3,11 +3,16 @@
 module Storage.TenantStorageSpec (spec) where
 
 import Control.Concurrent (threadDelay)
-import Data.Aeson (decode, encode)
+import Data.Aeson (decode, encode, object, (.=))
+import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time (UTCTime, addUTCTime, getCurrentTime)
+import System.Directory (removeFile)
+import System.IO (hClose, openTempFile)
+import System.IO.Error (catchIOError)
+import System.Directory (getTemporaryDirectory)
 import StudioMCP.Auth.Types (TenantId (..))
 import StudioMCP.Storage.Keys (BucketName (..), ObjectKey (..))
 import StudioMCP.Storage.TenantStorage
@@ -36,6 +41,30 @@ spec = do
       service <- newTenantStorageService defaultTenantStorageConfig
       artifacts <- listTenantArtifacts service (TenantId "test")
       artifacts `shouldBe` []
+
+    it "persists artifacts, versions, and tenant backend overrides to disk" $ do
+      tempDir <- getTemporaryDirectory
+      (path, handle) <- openTempFile tempDir "studiomcp-tenant-storage.json"
+      hClose handle
+      removeFileIfExists path
+
+      service <- newTenantStorageServiceWithFile defaultTenantStorageConfig path
+      configureTenantBackend
+        service
+        (TenantId "tenant-1")
+        (TenantOwnedS3 "https://s3.example.com" "us-east-1" "access" "secret")
+      Right created <- createTenantArtifact service (TenantId "tenant-1") "video/mp4" "video.mp4" 1024 Map.empty
+      Right _ <- createTenantArtifactVersion service (TenantId "tenant-1") (taArtifactId created) "video/mp4" "video-v2.mp4" 2048 Map.empty
+
+      reloaded <- newTenantStorageServiceWithFile defaultTenantStorageConfig path
+      Right latest <- getTenantArtifact reloaded (TenantId "tenant-1") (taArtifactId created)
+      taVersion latest `shouldBe` 2
+      Right versions <- listArtifactVersions reloaded (TenantId "tenant-1") (taArtifactId created)
+      map taVersion versions `shouldBe` [1, 2]
+      backend <- getTenantBackend reloaded (TenantId "tenant-1")
+      backend `shouldBe` TenantOwnedS3 "https://s3.example.com" "us-east-1" "access" "secret"
+
+      removeFileIfExists path
 
   describe "getTenantBucket" $ do
     it "generates correct bucket name for tenant" $ do
@@ -214,6 +243,20 @@ spec = do
         Left err -> expectationFailure $ "Expected ArtifactNotFound but got: " ++ show err
         Right _ -> expectationFailure "Expected failure - tenant isolation violated"
 
+    it "returns version-specific URLs and rejects unknown versions" $ do
+      service <- newTenantStorageService defaultTenantStorageConfig
+      Right created <- createTenantArtifact service (TenantId "t1") "video/mp4" "video.mp4" 1024 Map.empty
+      Right _ <- createTenantArtifactVersion service (TenantId "t1") (taArtifactId created) "video/mp4" "video-v2.mp4" 2048 Map.empty
+      Right versionOneUrl <- generateDownloadUrl service (TenantId "t1") (taArtifactId created) (Just 1)
+      T.isInfixOf "/v1?" (puUrl versionOneUrl) `shouldBe` True
+      missingResult <- generateDownloadUrl service (TenantId "t1") (taArtifactId created) (Just 99)
+      case missingResult of
+        Left (ArtifactVersionNotFound artifactId version) -> do
+          artifactId `shouldBe` taArtifactId created
+          version `shouldBe` 99
+        Left err -> expectationFailure $ "Expected ArtifactVersionNotFound but got: " ++ show err
+        Right _ -> expectationFailure "Expected failure for unknown artifact version"
+
   describe "TenantStorageError" $ do
     it "tenantStorageErrorCode returns correct codes" $ do
       tenantStorageErrorCode (TenantNotConfigured (TenantId "t")) `shouldBe` "tenant-not-configured"
@@ -233,6 +276,37 @@ spec = do
     it "round-trips PlatformMinIO" $ do
       (decode (encode PlatformMinIO) :: Maybe TenantStorageBackend) `shouldBe` Just PlatformMinIO
 
+  describe "loadTenantBackendConfigFile" $ do
+    it "loads tenant backend overrides from JSON" $ do
+      tempDir <- getTemporaryDirectory
+      (path, handle) <- openTempFile tempDir "studiomcp-tenant-backends.json"
+      hClose handle
+      LBS.writeFile
+        path
+        ( encode
+            ( object
+                [ "tenants"
+                    .= object
+                      [ "tenant-a"
+                          .= object
+                            [ "type" .= ("tenant-s3" :: T.Text),
+                              "endpoint" .= ("https://s3.example.com" :: T.Text),
+                              "region" .= ("us-east-1" :: T.Text),
+                              "accessKeyId" .= ("access" :: T.Text),
+                              "secretAccessKey" .= ("secret" :: T.Text)
+                            ]
+                      ]
+                ]
+            )
+        )
+      result <- loadTenantBackendConfigFile path
+      case result of
+        Left err -> expectationFailure $ "Expected backend config to load: " ++ T.unpack err
+        Right backends ->
+          Map.lookup (TenantId "tenant-a") backends
+            `shouldBe` Just (TenantOwnedS3 "https://s3.example.com" "us-east-1" "access" "secret")
+      removeFileIfExists path
+
   describe "TenantArtifact JSON" $ do
     it "round-trips artifact" $ do
       service <- newTenantStorageService defaultTenantStorageConfig
@@ -245,3 +319,6 @@ spec = do
       Right url <- generateUploadUrl service (TenantId "t1") "a1" "video/mp4"
       (decode (encode url) :: Maybe PresignedUrl) `shouldBe` Just url
 
+removeFileIfExists :: FilePath -> IO ()
+removeFileIfExists path =
+  removeFile path `catchIOError` \_ -> pure ()

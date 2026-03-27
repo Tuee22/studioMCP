@@ -5,13 +5,15 @@
 **Supersedes**: N/A
 **Referenced by**: [../README.md](../README.md#documentation-suite), [../development/local_dev.md](../development/local_dev.md#cross-references), [../operations/runbook_local_debugging.md](../operations/runbook_local_debugging.md#cross-references), [../architecture/cli_architecture.md](../architecture/cli_architecture.md#cross-references), [../engineering/k8s_storage.md](../engineering/k8s_storage.md#cross-references), [../../STUDIOMCP_DEVELOPMENT_PLAN.md](../../STUDIOMCP_DEVELOPMENT_PLAN.md#current-validation-state)
 
-> **Purpose**: Canonical reference for the supported current and future `studiomcp` CLI surface.
+> **Purpose**: Canonical reference for the supported current `studiomcp` CLI surface, including server modes, validation commands, and cluster operations.
 
 ## Current Implemented Commands
 
 The codebase currently implements this subset:
 
 - `studiomcp server`
+- `studiomcp stdio`
+- `studiomcp bff`
 - `studiomcp inference`
 - `studiomcp worker`
 - `studiomcp validate-dag <path>`
@@ -26,7 +28,6 @@ The codebase currently implements this subset:
 - `studiomcp validate boundary`
 - `studiomcp validate ffmpeg-adapter`
 - `studiomcp validate executor`
-- `studiomcp validate mcp`
 - `studiomcp validate mcp-stdio`
 - `studiomcp validate mcp-http`
 - `studiomcp validate keycloak`
@@ -47,31 +48,40 @@ The codebase currently implements this subset:
 - `studiomcp validate quotas`
 - `studiomcp validate rate-limit`
 - `studiomcp validate mcp-conformance`
+- `studiomcp validate storage-policy`
 - `studiomcp cluster up`
 - `studiomcp cluster down`
+- `studiomcp cluster reset`
 - `studiomcp cluster status`
 - `studiomcp cluster deploy sidecars`
 - `studiomcp cluster deploy server`
 - `studiomcp cluster storage reconcile`
+- `studiomcp cluster storage delete <name>`
 
 Current note:
 
-- `studiomcp validate mcp` currently validates the legacy custom DAG HTTP server surface, not a standards-compliant MCP surface.
-- `studiomcp-bff` exists as a dedicated executable today; wiring `studiomcp bff` into the main CLI remains future ergonomic work.
+- The retired `studiomcp validate mcp` alias has been removed. Use `validate mcp-stdio`, `validate mcp-http`, or `validate mcp-conformance`.
+- `studiomcp bff` is implemented in the main CLI, and `studiomcp-bff` remains available as the dedicated executable form.
 
-## Required Target Surface
+## Current Command Families
 
-The supported command surface must converge on one Haskell CLI with at least these families:
+The supported command surface is organized into these families today.
 
 ### Server Modes
 
 | Command | Description | Status |
 |---------|-------------|--------|
-| `studiomcp server` | Start MCP server (HTTP + legacy routes) | ✅ Implemented |
-| `studiomcp stdio` | Start MCP server in stdio transport mode | 📋 Planned (Phase 13) |
+| `studiomcp server` | Start MCP server (HTTP + operational endpoints) | ✅ Implemented |
+| `studiomcp stdio` | Start MCP server over stdio transport | ✅ Implemented |
+| `studiomcp bff` | Start BFF server | ✅ Implemented |
 | `studiomcp inference` | Start inference mode server | ✅ Implemented |
 | `studiomcp worker` | Start worker mode server | ✅ Implemented |
-| `studiomcp bff` | Start BFF server | 📋 Planned (Phase 16) |
+
+Startup behavior note:
+
+- invalid startup configuration must produce a graceful non-zero exit with a helpful redacted message
+- raw exception text is not an acceptable user-facing startup contract
+- canonical rule: [CLI Architecture](../architecture/cli_architecture.md#startup-failure-semantics)
 
 ### DAG Commands
 
@@ -87,10 +97,10 @@ The supported command surface must converge on one Haskell CLI with at least the
 |---------|-------------|
 | `studiomcp cluster up` | Start local Kubernetes cluster |
 | `studiomcp cluster down` | Stop local Kubernetes cluster |
-| `studiomcp cluster reset` | Reset cluster to clean state |
+| `studiomcp cluster reset` | Recreate the local cluster and clear local cluster data |
 | `studiomcp cluster status` | Show cluster status |
 | `studiomcp cluster storage reconcile` | Reconcile storage resources |
-| `studiomcp cluster storage delete <name>` | Delete a storage resource |
+| `studiomcp cluster storage delete <name>` | Delete a reconciled local storage resource |
 | `studiomcp cluster deploy sidecars` | Deploy sidecar services |
 | `studiomcp cluster deploy server` | Deploy MCP server |
 
@@ -107,9 +117,7 @@ The supported command surface must converge on one Haskell CLI with at least the
 | `studiomcp validate executor` | Validate DAG executor | 11 |
 | `studiomcp validate e2e` | End-to-end validation | 12 |
 | `studiomcp validate worker` | Validate worker mode | 12 |
-| `studiomcp validate mcp` | Validate legacy /runs surface (DEPRECATED in Phase 18) | 12 |
 | `studiomcp validate inference` | Validate inference mode | 12 |
-| `studiomcp validate observability` | Validate observability stack | 12 |
 
 ### Validation Commands - MCP Protocol (Phase 13) - ✅ IMPLEMENTED
 
@@ -155,7 +163,7 @@ The supported command surface must converge on one Haskell CLI with at least the
 - Insufficient scope rejected (403)
 - Tenant context resolved correctly
 
-### Validation Commands - Session Scaling (Phase 15) - ✅ IMPLEMENTED (local contract validation)
+### Validation Commands - Session Scaling (Phase 15) - ✅ IMPLEMENTED
 
 | Command | Description | Status |
 |---------|-------------|--------|
@@ -184,10 +192,18 @@ The supported command surface must converge on one Haskell CLI with at least the
 
 **`validate web-bff`** tests:
 - BFF server starts
-- User authentication flow
-- MCP client integration
+- Built-in browser shell is served
+- Browser login and cookie session issuance
+- Profile lookup
 - Upload presigned URL generation
+- Upload confirmation
 - Download presigned URL generation
+- Advisory chat response
+- Advisory chat SSE framing
+- MCP-backed workflow submission, list, status, and cancel
+- Run-progress SSE framing
+- MCP-backed artifact hide and archive
+- Logout and session invalidation
 
 ### Validation Commands - Artifacts (Phase 17) - ✅ IMPLEMENTED
 
@@ -235,13 +251,20 @@ The supported command surface must converge on one Haskell CLI with at least the
 - Prompt templates render correctly
 - Prompt arguments validated
 
-### Validation Commands - Observability (Phase 19) - ✅ IMPLEMENTED (local services)
+### Validation Commands - Observability (Phase 19) - ✅ IMPLEMENTED
 
 | Command | Description | Status |
 |---------|-------------|--------|
+| `studiomcp validate observability` | Validate observability stack | ✅ Implemented |
 | `studiomcp validate audit` | Validate audit logging | ✅ Implemented |
 | `studiomcp validate quotas` | Validate quota enforcement | ✅ Implemented |
 | `studiomcp validate rate-limit` | Validate rate limiting and redaction | ✅ Implemented |
+
+**`validate observability`** tests:
+- MCP method and tool metrics emitted through `/metrics`
+- Live tool execution increments the expected counters
+- `/healthz` reflects degraded dependencies when sidecars are unavailable
+- Prometheus export includes the expected observability surface
 
 **`validate audit`** tests:
 - Correlation IDs present in logs
@@ -250,7 +273,7 @@ The supported command surface must converge on one Haskell CLI with at least the
 - Token redaction working
 - Structured log format correct
 
-### Validation Commands - Conformance (Phase 21) - ✅ IMPLEMENTED (local conformance suite)
+### Validation Commands - Conformance (Phase 21) - ✅ IMPLEMENTED
 
 | Command | Description | Status |
 |---------|-------------|--------|
@@ -262,6 +285,7 @@ The supported command surface must converge on one Haskell CLI with at least the
 - Error code compliance
 - Session behavior compliance
 - Transport compliance (both stdio and HTTP)
+- BFF-mediated HTTP MCP validation path
 
 ## Validation Command Evolution
 
@@ -273,19 +297,18 @@ The supported command surface must converge on one Haskell CLI with at least the
 | 16 | `validate web-bff` |
 | 17 | `validate artifact-storage`, `validate artifact-governance` |
 | 18 | `validate mcp-tools`, `validate mcp-resources`, `validate mcp-prompts` |
-| 19 | `validate audit`, `validate quotas`, `validate rate-limit` |
+| 19 | `validate observability`, `validate audit`, `validate quotas`, `validate rate-limit` |
 | 21 | `validate mcp-conformance` |
 
-## Deprecation Notice
+## Legacy Alias Retirement
 
-Starting Phase 18, `studiomcp validate mcp` will emit a deprecation warning:
+The historical `studiomcp validate mcp` alias has been removed.
 
-```
-WARNING: 'validate mcp' validates the legacy /runs surface.
-This surface is deprecated. Use 'validate mcp-http' or 'validate mcp-stdio'.
-```
+Use:
 
-In Phase 21, the legacy `validate mcp` command will be removed or aliased to `validate mcp-http`.
+- `studiomcp validate mcp-stdio` for the stdio transport
+- `studiomcp validate mcp-http` for the HTTP transport
+- `studiomcp validate mcp-conformance` for the broader end-to-end MCP validation story
 
 The exact final taxonomy may evolve, but the repository must not reintroduce shell wrappers for these responsibilities.
 
@@ -299,7 +322,7 @@ docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp <subco
 
 ## Current Repo Note
 
-This reference intentionally describes both the implemented surface and the remaining target state. The current command surface now covers cluster lifecycle, DAG validation, documentation validation, executor and end-to-end validation, worker-runtime validation, Pulsar, MinIO, boundary, FFmpeg-adapter, legacy MCP validation, MCP transport validation, auth validation, session scaling validation, BFF validation, artifact validation, MCP catalog validation, inference, observability, quotas, rate limiting, and local MCP conformance validation. The remaining target surface includes future ergonomics such as `cluster reset`, a first-class `studiomcp bff` subcommand, and deeper production-integration checks against live Keycloak and Redis infrastructure.
+This reference describes the implemented command surface. The current command surface covers server, stdio, BFF, inference, and worker entrypoints; cluster lifecycle and storage operations; DAG validation; documentation validation; executor and end-to-end validation; worker-runtime validation; Pulsar, MinIO, boundary, and FFmpeg-adapter validation; MCP transport validation; auth validation; session scaling validation; BFF validation; artifact validation; MCP catalog validation; inference; observability; quotas; rate limiting; storage policy; and MCP conformance validation.
 
 ## Cross-References
 

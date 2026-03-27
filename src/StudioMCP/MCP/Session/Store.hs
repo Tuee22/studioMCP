@@ -104,6 +104,7 @@ data SessionLock = SessionLock
   deriving (Eq, Show, Generic)
 
 instance ToJSON SessionLock
+instance FromJSON SessionLock
 
 -- | Session store interface
 class SessionStore s where

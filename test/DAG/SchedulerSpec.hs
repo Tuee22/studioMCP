@@ -6,7 +6,7 @@ module DAG.SchedulerSpec
 where
 
 import Data.Text (Text)
-import StudioMCP.DAG.Scheduler (scheduleTopologically)
+import StudioMCP.DAG.Scheduler (scheduleInParallelBatches, scheduleTopologically)
 import StudioMCP.DAG.Types
   ( DagSpec (..),
     NodeId (..),
@@ -20,17 +20,27 @@ import Test.Hspec (Spec, describe, expectationFailure, it, shouldBe)
 
 spec :: Spec
 spec =
-  describe "scheduleTopologically" $ do
-    it "produces a deterministic dependency-respecting order" $
-      fmap (map nodeId) (scheduleTopologically orderedDag)
-        `shouldBe` Right [NodeId "ingest", NodeId "transcode", NodeId "summary"]
+  do
+    describe "scheduleTopologically" $ do
+      it "produces a deterministic dependency-respecting order" $
+        fmap (map nodeId) (scheduleTopologically orderedDag)
+          `shouldBe` Right [NodeId "ingest", NodeId "transcode", NodeId "summary"]
 
-    it "fails cleanly when the graph contains a cycle" $
-      case scheduleTopologically cyclicDag of
-        Left failureDetail ->
-          failureCode failureDetail `shouldBe` "scheduler-cycle"
-        Right orderedNodes ->
-          expectationFailure ("expected cycle failure but got order: " <> show (map nodeId orderedNodes))
+      it "fails cleanly when the graph contains a cycle" $
+        case scheduleTopologically cyclicDag of
+          Left failureDetail ->
+            failureCode failureDetail `shouldBe` "scheduler-cycle"
+          Right orderedNodes ->
+            expectationFailure ("expected cycle failure but got order: " <> show (map nodeId orderedNodes))
+
+    describe "scheduleInParallelBatches" $ do
+      it "groups independent nodes into deterministic batches" $
+        fmap (map (map nodeId)) (scheduleInParallelBatches parallelDag)
+          `shouldBe`
+            Right
+              [ [NodeId "a", NodeId "b"],
+                [NodeId "summary"]
+              ]
 
 orderedDag :: DagSpec
 orderedDag =
@@ -53,6 +63,18 @@ cyclicDag =
         [ mkNode "a" PureNode [NodeId "b"] "text/plain",
           mkNode "b" BoundaryNode [NodeId "a"] "audio/wav",
           mkNode "summary" SummaryNode [NodeId "b"] "summary/run"
+        ]
+    }
+
+parallelDag :: DagSpec
+parallelDag =
+  DagSpec
+    { dagName = "parallel",
+      dagDescription = Just "Scheduler batch test DAG.",
+      dagNodes =
+        [ mkNode "b" PureNode [] "text/plain",
+          mkNode "summary" SummaryNode [NodeId "a", NodeId "b"] "summary/run",
+          mkNode "a" PureNode [] "text/plain"
         ]
     }
 

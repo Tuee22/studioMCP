@@ -31,7 +31,7 @@ spec:
               value: "3002"
             # Pulsar subchart service endpoints
             - name: STUDIO_MCP_PULSAR_HTTP_URL
-              value: "http://{{ .Release.Name }}-pulsar-proxy:8080"
+              value: "http://{{ .Release.Name }}-pulsar-proxy"
             - name: STUDIO_MCP_PULSAR_BINARY_URL
               value: "pulsar://{{ .Release.Name }}-pulsar-proxy:6650"
             # MinIO subchart service endpoint
@@ -50,7 +50,7 @@ spec:
             {{- if .Values.redis.enabled }}
             # Redis subchart service endpoint (Sentinel mode)
             - name: STUDIO_MCP_REDIS_URL
-              value: "redis://{{ .Release.Name }}-redis:6379"
+              value: "redis://{{ .Release.Name }}-redis-master:6379"
             - name: STUDIO_MCP_REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:

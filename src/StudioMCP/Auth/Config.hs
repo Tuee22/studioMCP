@@ -25,6 +25,7 @@ module StudioMCP.Auth.Config
   )
 where
 
+import Control.Exception (throwIO)
 import Data.Aeson
   ( FromJSON (parseJSON),
     ToJSON (toJSON),
@@ -34,9 +35,15 @@ import Data.Aeson
     (.:?),
     (.=),
   )
+import Data.Char (toLower)
+import Data.List (nub)
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
+import StudioMCP.Util.Startup
+  ( invalidEnvironmentVariable,
+    startupFailure,
+  )
 import System.Environment (lookupEnv)
 
 -- | Keycloak server configuration
@@ -167,7 +174,7 @@ loadAuthConfigFromEnv = do
             kcJwksFetchTimeoutSeconds = jwksFetchTimeout
           }
 
-  pure
+  validateLoadedAuthConfig
     AuthConfig
       { acKeycloak = keycloakConfig,
         acEnabled = enabled,
@@ -188,9 +195,23 @@ lookupEnvMaybe name = fmap T.pack <$> lookupEnv name
 lookupEnvInt :: String -> Int -> IO Int
 lookupEnvInt name def = do
   mVal <- lookupEnv name
-  pure $ case mVal of
-    Just s -> maybe def id (readMaybe s)
-    Nothing -> def
+  case mVal of
+    Just rawValue ->
+      case readMaybe rawValue of
+        Just value -> pure value
+        Nothing ->
+          throwIO $
+            invalidEnvironmentVariable
+              name
+              "expected an integer"
+              ( Just
+                  ( "Set "
+                      <> T.pack name
+                      <> " to a valid integer or unset it to use the default "
+                      <> T.pack (show def)
+                  )
+              )
+    Nothing -> pure def
   where
     readMaybe s = case reads s of
       [(v, "")] -> Just v
@@ -200,12 +221,18 @@ lookupEnvInt name def = do
 lookupEnvBool :: String -> Bool -> IO Bool
 lookupEnvBool name def = do
   mVal <- lookupEnv name
-  pure $ case mVal of
-    Just "true" -> True
-    Just "1" -> True
-    Just "false" -> False
-    Just "0" -> False
-    _ -> def
+  case fmap (map toLower) mVal of
+    Just "true" -> pure True
+    Just "1" -> pure True
+    Just "false" -> pure False
+    Just "0" -> pure False
+    Just _ ->
+      throwIO $
+        invalidEnvironmentVariable
+          name
+          "expected a boolean value of true, false, 1, or 0"
+          (Just ("Set " <> T.pack name <> " to true or false, or unset it to use the default " <> T.pack (show def)))
+    Nothing -> pure def
 
 -- | Get JWKS endpoint URL from Keycloak config
 jwksEndpoint :: KeycloakConfig -> Text

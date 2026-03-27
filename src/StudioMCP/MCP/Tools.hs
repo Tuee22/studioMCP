@@ -7,6 +7,7 @@ module StudioMCP.MCP.Tools
     newToolCatalog,
     newToolCatalogWithExecutor,
     newToolCatalogWithRuntime,
+    newToolCatalogWithRuntimeAndAudit,
     listTools,
     callTool,
     WorkflowRunRecord (..),
@@ -69,7 +70,7 @@ import qualified Data.Text.Encoding as TE
 import Data.Time (UTCTime, getCurrentTime)
 import Data.Time.Clock (diffUTCTime)
 import StudioMCP.Auth.Types (SubjectId (..), TenantId (..))
-import StudioMCP.DAG.Executor (ExecutorAdapters, ExecutionReport (..), executeSequential)
+import StudioMCP.DAG.Executor (ExecutorAdapters, ExecutionReport (..), executeParallel)
 import StudioMCP.DAG.Parser (decodeDagBytes)
 import StudioMCP.DAG.Runtime (PersistedRun (..), RuntimeConfig (..), runDagSpecEndToEnd)
 import StudioMCP.DAG.Summary (RunId (..), summaryFinishedAt, summaryStartedAt, summaryStatus)
@@ -87,8 +88,17 @@ import StudioMCP.Observability.McpMetrics
   ( McpMetricsService,
     recordToolCall,
   )
+import StudioMCP.Storage.AuditTrail
+  ( AuditAction (..),
+    AuditOutcome (..),
+    AuditTrailService,
+    recordAccessAttempt,
+    recordAuditEntry,
+    recordStateChange,
+  )
 import StudioMCP.Storage.Governance
   ( ArtifactState (..),
+    GovernanceAction (..),
     GovernanceService,
     GovernanceMetadata (..),
     archiveArtifact,
@@ -101,12 +111,15 @@ import StudioMCP.Storage.Keys (summaryRefForRun)
 import StudioMCP.Storage.MinIO (MinIOConfig, readSummary)
 import StudioMCP.Storage.TenantStorage
   ( TenantArtifact (..),
+    TenantStorageBackend (..),
     TenantStorageError (..),
     TenantStorageService,
     createTenantArtifact,
+    createTenantArtifactVersion,
     defaultTenantStorageConfig,
     generateDownloadUrl,
     generateUploadUrl,
+    getTenantBackend,
     getTenantArtifact,
     listTenantArtifacts,
     newTenantStorageService,
@@ -231,6 +244,7 @@ data ToolCatalog = ToolCatalog
     tcMinIOConfig :: Maybe MinIOConfig,
     tcTenantStorage :: TenantStorageService,
     tcGovernance :: GovernanceService,
+    tcAuditTrail :: Maybe AuditTrailService,
     tcMetrics :: Maybe McpMetricsService
   }
 
@@ -240,9 +254,10 @@ newToolCatalogInternal ::
   Maybe MinIOConfig ->
   TenantStorageService ->
   GovernanceService ->
+  Maybe AuditTrailService ->
   Maybe McpMetricsService ->
   IO ToolCatalog
-newToolCatalogInternal maybeAdapters maybeRuntime maybeMinioConfig tenantStorage governance maybeMetrics = do
+newToolCatalogInternal maybeAdapters maybeRuntime maybeMinioConfig tenantStorage governance maybeAuditTrail maybeMetrics = do
   stateVar <-
     newTVarIO
       ToolCatalogState
@@ -258,6 +273,7 @@ newToolCatalogInternal maybeAdapters maybeRuntime maybeMinioConfig tenantStorage
         tcMinIOConfig = maybeMinioConfig,
         tcTenantStorage = tenantStorage,
         tcGovernance = governance,
+        tcAuditTrail = maybeAuditTrail,
         tcMetrics = maybeMetrics
       }
 
@@ -266,14 +282,14 @@ newToolCatalog :: IO ToolCatalog
 newToolCatalog = do
   tenantStorage <- newTenantStorageService defaultTenantStorageConfig
   governance <- newGovernanceService defaultGovernancePolicy
-  newToolCatalogInternal Nothing Nothing Nothing tenantStorage governance Nothing
+  newToolCatalogInternal Nothing Nothing Nothing tenantStorage governance Nothing Nothing
 
 -- | Create a new tool catalog with DAG executor and MinIO config
 newToolCatalogWithExecutor :: ExecutorAdapters -> MinIOConfig -> IO ToolCatalog
 newToolCatalogWithExecutor adapters minioConfig = do
   tenantStorage <- newTenantStorageService defaultTenantStorageConfig
   governance <- newGovernanceService defaultGovernancePolicy
-  newToolCatalogInternal (Just adapters) Nothing (Just minioConfig) tenantStorage governance Nothing
+  newToolCatalogInternal (Just adapters) Nothing (Just minioConfig) tenantStorage governance Nothing Nothing
 
 -- | Create a new tool catalog that submits workflows through the full DAG runtime.
 newToolCatalogWithRuntime ::
@@ -283,7 +299,24 @@ newToolCatalogWithRuntime ::
   Maybe McpMetricsService ->
   IO ToolCatalog
 newToolCatalogWithRuntime runtimeConfig tenantStorage governance maybeMetrics =
-  newToolCatalogInternal Nothing (Just runtimeConfig) (Just (runtimeMinioConfig runtimeConfig)) tenantStorage governance maybeMetrics
+  newToolCatalogInternal Nothing (Just runtimeConfig) (Just (runtimeMinioConfig runtimeConfig)) tenantStorage governance Nothing maybeMetrics
+
+newToolCatalogWithRuntimeAndAudit ::
+  RuntimeConfig ->
+  TenantStorageService ->
+  GovernanceService ->
+  AuditTrailService ->
+  Maybe McpMetricsService ->
+  IO ToolCatalog
+newToolCatalogWithRuntimeAndAudit runtimeConfig tenantStorage governance auditTrail maybeMetrics =
+  newToolCatalogInternal
+    Nothing
+    (Just runtimeConfig)
+    (Just (runtimeMinioConfig runtimeConfig))
+    tenantStorage
+    governance
+    (Just auditTrail)
+    maybeMetrics
 
 -- | List all available tools
 listTools :: ToolCatalog -> IO [ToolDefinition]
@@ -450,7 +483,7 @@ executeWorkflowSubmit catalog executor =
                   ("Workflow accepted for tenant " <> tenantIdText <> ". Run ID: " <> unRunId runId <> ". Status: accepted")
                   (workflowRunRecordToJson runRecord)
             Just adapters -> do
-              result <- executeSequential adapters runId now dagSpec
+              result <- executeParallel adapters runId now dagSpec
               case result of
                 Left failureDetail -> do
                   let runRecord =
@@ -582,6 +615,7 @@ executeArtifactGet catalog executor =
               pure $ ToolFailure (tenantStorageErrorToToolError err)
             Right artifact -> do
               artifactState <- getArtifactState (tcGovernance catalog) artifactId
+              recordAccessAudit catalog executor artifactId True "granted"
               pure $
                 plainTextResult $
                   "Artifact "
@@ -613,7 +647,15 @@ executeArtifactDownloadUrl catalog executor =
           case result of
             Left err ->
               pure $ ToolFailure (tenantStorageErrorToToolError err)
-            Right presigned ->
+            Right presigned -> do
+              recordAuditEntryIfConfigured
+                catalog
+                executor
+                artifactId
+                Nothing
+                AuditPresignedUrlGenerated
+                OutcomeSuccess
+                (Map.singleton "operation" "download")
               pure $
                 plainTextResult $
                   "Download URL for artifact "
@@ -636,14 +678,26 @@ executeArtifactUploadUrl catalog executor =
         Just contentType -> do
           let fileName = maybe "upload.bin" id (extractStringArg "file_name" args)
               fileSize = maybe 0 id (extractIntArg "file_size" args)
+              maybeArtifactId = extractStringArg "artifact_id" args
           artifactResult <-
-            createTenantArtifact
-              (tcTenantStorage catalog)
-              (teTenantId executor)
-              contentType
-              fileName
-              (fromIntegral fileSize)
-              Map.empty
+            case maybeArtifactId of
+              Nothing ->
+                createTenantArtifact
+                  (tcTenantStorage catalog)
+                  (teTenantId executor)
+                  contentType
+                  fileName
+                  (fromIntegral fileSize)
+                  Map.empty
+              Just artifactId ->
+                createTenantArtifactVersion
+                  (tcTenantStorage catalog)
+                  (teTenantId executor)
+                  artifactId
+                  contentType
+                  fileName
+                  (fromIntegral fileSize)
+                  Map.empty
           case artifactResult of
             Left err ->
               pure $ ToolFailure (tenantStorageErrorToToolError err)
@@ -652,7 +706,28 @@ executeArtifactUploadUrl catalog executor =
               case urlResult of
                 Left err ->
                   pure $ ToolFailure (tenantStorageErrorToToolError err)
-                Right presigned ->
+                Right presigned -> do
+                  recordAuditEntryIfConfigured
+                    catalog
+                    executor
+                    (taArtifactId artifact)
+                    (Just ("v" <> T.pack (show (taVersion artifact))))
+                    (if taVersion artifact > 1 then AuditVersionCreated else AuditCreate)
+                    OutcomeSuccess
+                    ( Map.fromList
+                        [ ("contentType", contentType),
+                          ("fileName", fileName),
+                          ("version", T.pack (show (taVersion artifact)))
+                        ]
+                    )
+                  recordAuditEntryIfConfigured
+                    catalog
+                    executor
+                    (taArtifactId artifact)
+                    Nothing
+                    AuditPresignedUrlGenerated
+                    OutcomeSuccess
+                    (Map.singleton "operation" "upload")
                   pure $
                     plainTextResult $
                       "Upload URL generated for artifact "
@@ -688,8 +763,17 @@ executeArtifactHide catalog executor =
               case result of
                 Left err ->
                   pure $ ToolFailure $ ExecutionFailed $ T.pack (show err)
-                Right _ ->
-                  pure $ plainTextResult $ "Artifact " <> artifactId <> " hidden successfully. State: hidden"
+                Right _ -> do
+                  recordGovernanceAudit catalog executor artifactId ActionHide Hidden
+                  pure $
+                    toolResultWithData
+                      ("Artifact " <> artifactId <> " hidden successfully. State: hidden")
+                      ( object
+                          [ "artifactId" .= artifactId,
+                            "action" .= ("hide" :: Text),
+                            "status" .= ("hidden" :: Text)
+                          ]
+                      )
 
 -- | Execute artifact.archive tool
 executeArtifactArchive :: ToolCatalog -> ToolExecutor -> IO ToolResult
@@ -715,8 +799,17 @@ executeArtifactArchive catalog executor =
               case result of
                 Left err ->
                   pure $ ToolFailure $ ExecutionFailed $ T.pack (show err)
-                Right _ ->
-                  pure $ plainTextResult $ "Artifact " <> artifactId <> " archived successfully. State: archived"
+                Right _ -> do
+                  recordGovernanceAudit catalog executor artifactId ActionArchive Archived
+                  pure $
+                    toolResultWithData
+                      ("Artifact " <> artifactId <> " archived successfully. State: archived")
+                      ( object
+                          [ "artifactId" .= artifactId,
+                            "action" .= ("archive" :: Text),
+                            "status" .= ("archived" :: Text)
+                          ]
+                      )
 
 -- | Execute tenant.info tool
 executeTenantInfo :: ToolCatalog -> ToolExecutor -> IO ToolResult
@@ -724,6 +817,7 @@ executeTenantInfo catalog executor = do
   let TenantId tenantIdText = teTenantId executor
       SubjectId subjectIdText = teSubjectId executor
   artifacts <- listTenantArtifacts (tcTenantStorage catalog) (teTenantId executor)
+  storageBackend <- getTenantBackend (tcTenantStorage catalog) (teTenantId executor)
   let usedBytes = sum (map taFileSize artifacts)
   pure $
     plainTextResult $
@@ -734,7 +828,9 @@ executeTenantInfo catalog executor = do
         <> "  Subject ID: "
         <> subjectIdText
         <> "\n"
-        <> "  Storage Backend: platform-minio\n"
+        <> "  Storage Backend: "
+        <> renderTenantStorageBackend storageBackend
+        <> "\n"
         <> "  Artifact Count: "
         <> T.pack (show (length artifacts))
         <> "\n"
@@ -824,11 +920,70 @@ governanceMetadata executor reason now =
       gmRelatedArtifacts = []
     }
 
+recordAccessAudit :: ToolCatalog -> ToolExecutor -> Text -> Bool -> Text -> IO ()
+recordAccessAudit catalog executor artifactId allowed reason =
+  case tcAuditTrail catalog of
+    Nothing -> pure ()
+    Just auditTrail -> do
+      _ <-
+        recordAccessAttempt
+          auditTrail
+          (teTenantId executor)
+          (teSubjectId executor)
+          artifactId
+          allowed
+          reason
+      pure ()
+
+recordGovernanceAudit :: ToolCatalog -> ToolExecutor -> Text -> GovernanceAction -> ArtifactState -> IO ()
+recordGovernanceAudit catalog executor artifactId action newState =
+  case tcAuditTrail catalog of
+    Nothing -> pure ()
+    Just auditTrail -> do
+      _ <-
+        recordStateChange
+          auditTrail
+          (teTenantId executor)
+          (teSubjectId executor)
+          artifactId
+          action
+          newState
+      pure ()
+
+recordAuditEntryIfConfigured ::
+  ToolCatalog ->
+  ToolExecutor ->
+  Text ->
+  Maybe Text ->
+  AuditAction ->
+  AuditOutcome ->
+  Map.Map Text Text ->
+  IO ()
+recordAuditEntryIfConfigured catalog executor artifactId versionId action outcome details =
+  case tcAuditTrail catalog of
+    Nothing -> pure ()
+    Just auditTrail -> do
+      _ <-
+        recordAuditEntry
+          auditTrail
+          (teTenantId executor)
+          (teSubjectId executor)
+          artifactId
+          versionId
+          action
+          outcome
+          details
+      pure ()
+
 renderArtifactState :: ArtifactState -> Text
 renderArtifactState Active = "active"
 renderArtifactState Hidden = "hidden"
 renderArtifactState Archived = "archived"
 renderArtifactState (Superseded newArtifactId) = "superseded by " <> newArtifactId
+
+renderTenantStorageBackend :: TenantStorageBackend -> Text
+renderTenantStorageBackend PlatformMinIO = "platform-minio"
+renderTenantStorageBackend TenantOwnedS3 {} = "tenant-s3"
 
 tenantStorageErrorToToolError :: TenantStorageError -> ToolError
 tenantStorageErrorToToolError err =
@@ -1060,7 +1215,7 @@ artifactUploadUrlTool :: ToolDefinition
 artifactUploadUrlTool =
   ToolDefinition
     { tdName = "artifact.upload_url",
-      tdDescription = Just "Generate a presigned upload URL for a new artifact",
+      tdDescription = Just "Generate a presigned upload URL for a new artifact or a new version of an existing artifact",
       tdInputSchema =
         ToolInputSchema
           { tisType = "object",
@@ -1081,6 +1236,11 @@ artifactUploadUrlTool =
                       .= object
                         [ "type" .= ("integer" :: Text),
                           "description" .= ("File size in bytes" :: Text)
+                        ],
+                    "artifact_id"
+                      .= object
+                        [ "type" .= ("string" :: Text),
+                          "description" .= ("Existing artifact ID when uploading a new version" :: Text)
                         ]
                   ],
             tisRequired = Just ["content_type"]

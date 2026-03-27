@@ -11,6 +11,7 @@ module StudioMCP.Storage.AuditTrail
     -- * Audit Trail Service
     AuditTrailService (..),
     newAuditTrailService,
+    newAuditTrailServiceWithFile,
 
     -- * Recording Audit Events
     recordAuditEntry,
@@ -39,17 +40,24 @@ import Data.Aeson
   ( FromJSON (parseJSON),
     ToJSON (toJSON),
     Value (String),
+    decode,
+    encode,
     object,
     withObject,
     withText,
     (.:),
     (.:?),
+    (.!=),
     (.=),
   )
+import qualified Data.ByteString.Lazy as LBS
+import Data.List (sortOn)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time (UTCTime, addUTCTime, getCurrentTime)
+import System.Directory (createDirectoryIfMissing, doesFileExist)
+import System.FilePath (takeDirectory)
 import StudioMCP.Auth.Types (SubjectId (..), TenantId (..))
 import StudioMCP.Storage.Governance (ArtifactState, GovernanceAction)
 
@@ -252,23 +260,50 @@ data AuditTrailState = AuditTrailState
     atsNextId :: Int
   }
 
+data AuditTrailSnapshot = AuditTrailSnapshot
+  { atsSnapshotEntries :: [AuditEntry],
+    atsSnapshotNextId :: Int
+  }
+
+instance ToJSON AuditTrailSnapshot where
+  toJSON AuditTrailSnapshot {..} =
+    object
+      [ "entries" .= atsSnapshotEntries,
+        "nextId" .= atsSnapshotNextId
+      ]
+
+instance FromJSON AuditTrailSnapshot where
+  parseJSON = withObject "AuditTrailSnapshot" $ \obj ->
+    AuditTrailSnapshot
+      <$> obj .:? "entries" .!= []
+      <*> obj .:? "nextId" .!= 1
+
 -- | Audit trail service
 data AuditTrailService = AuditTrailService
-  { atsState :: TVar AuditTrailState
+  { atsState :: TVar AuditTrailState,
+    atsPersistencePath :: Maybe FilePath
   }
 
 -- | Create a new audit trail service
 newAuditTrailService :: IO AuditTrailService
-newAuditTrailService = do
-  stateVar <-
-    newTVarIO
-      AuditTrailState
-        { atsEntries = Map.empty,
-          atsByArtifact = Map.empty,
-          atsByTenant = Map.empty,
-          atsNextId = 1
-        }
-  pure AuditTrailService {atsState = stateVar}
+newAuditTrailService = newAuditTrailServiceInternal Nothing
+
+newAuditTrailServiceWithFile :: FilePath -> IO AuditTrailService
+newAuditTrailServiceWithFile persistencePath =
+  newAuditTrailServiceInternal (Just persistencePath)
+
+newAuditTrailServiceInternal :: Maybe FilePath -> IO AuditTrailService
+newAuditTrailServiceInternal maybePersistencePath = do
+  initialState <-
+    case maybePersistencePath of
+      Just persistencePath -> loadAuditTrailState persistencePath
+      Nothing -> pure emptyAuditTrailState
+  stateVar <- newTVarIO initialState
+  pure
+    AuditTrailService
+      { atsState = stateVar,
+        atsPersistencePath = maybePersistencePath
+      }
 
 -- | Record a new audit entry
 recordAuditEntry ::
@@ -314,6 +349,7 @@ recordAuditEntry service tenantId subjectId artifactId versionId action outcome 
         atsByTenant =
           Map.insertWith (++) tenantId [entryId] (atsByTenant s)
       }
+  persistAuditTrailState service
   pure entry
 
 -- | Record an access attempt
@@ -393,7 +429,7 @@ queryAuditTrail service query = do
   state <- readTVarIO (atsState service)
   let allEntries = Map.elems (atsEntries state)
       filtered = filter (matchesQuery query) allEntries
-      sorted = filtered -- Would sort by timestamp in production
+      sorted = reverse (sortOn aeTimestamp filtered)
       paginated = take (aqLimit query) $ drop (aqOffset query) sorted
   pure paginated
 
@@ -520,3 +556,55 @@ actionToText AuditSupersede = "supersede"
 -- | Extract text from SubjectId
 extractSubjectId :: SubjectId -> Text
 extractSubjectId (SubjectId t) = t
+
+emptyAuditTrailState :: AuditTrailState
+emptyAuditTrailState =
+  AuditTrailState
+    { atsEntries = Map.empty,
+      atsByArtifact = Map.empty,
+      atsByTenant = Map.empty,
+      atsNextId = 1
+    }
+
+auditTrailSnapshot :: AuditTrailState -> AuditTrailSnapshot
+auditTrailSnapshot state =
+  AuditTrailSnapshot
+    { atsSnapshotEntries = sortOn aeTimestamp (Map.elems (atsEntries state)),
+      atsSnapshotNextId = atsNextId state
+    }
+
+rebuildAuditTrailState :: AuditTrailSnapshot -> AuditTrailState
+rebuildAuditTrailState snapshot =
+  foldr insertEntry baseState (atsSnapshotEntries snapshot)
+  where
+    baseState =
+      emptyAuditTrailState
+        { atsNextId = atsSnapshotNextId snapshot
+        }
+
+    insertEntry entry state =
+      let entryId = aeEntryId entry
+       in state
+            { atsEntries = Map.insert entryId entry (atsEntries state),
+              atsByArtifact = Map.insertWith (++) (aeArtifactId entry) [entryId] (atsByArtifact state),
+              atsByTenant = Map.insertWith (++) (aeTenantId entry) [entryId] (atsByTenant state)
+            }
+
+loadAuditTrailState :: FilePath -> IO AuditTrailState
+loadAuditTrailState persistencePath = do
+  exists <- doesFileExist persistencePath
+  if not exists
+    then pure emptyAuditTrailState
+    else do
+      rawBytes <- LBS.readFile persistencePath
+      pure $
+        maybe emptyAuditTrailState rebuildAuditTrailState (decode rawBytes)
+
+persistAuditTrailState :: AuditTrailService -> IO ()
+persistAuditTrailState service =
+  case atsPersistencePath service of
+    Nothing -> pure ()
+    Just persistencePath -> do
+      currentState <- readTVarIO (atsState service)
+      createDirectoryIfMissing True (takeDirectory persistencePath)
+      LBS.writeFile persistencePath (encode (auditTrailSnapshot currentState))

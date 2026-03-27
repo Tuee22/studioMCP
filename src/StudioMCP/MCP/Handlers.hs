@@ -13,12 +13,17 @@ module StudioMCP.MCP.Handlers
 where
 
 import Control.Concurrent (forkIO)
+import Control.Exception (throwIO)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
+import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Time (getCurrentTime)
 import Data.Time.Format (defaultTimeLocale, formatTime)
 import Network.HTTP.Client (Manager, defaultManagerSettings, newManager)
+import System.Directory (createDirectoryIfMissing)
+import System.Environment (lookupEnv)
+import System.FilePath ((</>))
 import StudioMCP.DAG.Executor (ExecutionReport (..))
 import StudioMCP.API.Health (HealthReport, probeDependencies)
 import StudioMCP.API.Metrics
@@ -39,17 +44,30 @@ import StudioMCP.DAG.Types (DagSpec)
 import StudioMCP.DAG.Validator (validateDag)
 import StudioMCP.MCP.Protocol (SubmissionResponse (..))
 import StudioMCP.MCP.Resources (ResourceCatalog, newResourceCatalogWithRuntime)
-import StudioMCP.MCP.Tools (ToolCatalog, newToolCatalogWithRuntime)
+import StudioMCP.MCP.Session.RedisConfig (loadRedisConfigFromEnv)
+import StudioMCP.MCP.Session.RedisStore (RedisSessionStore, newRedisSessionStore)
+import StudioMCP.MCP.Tools (ToolCatalog, newToolCatalogWithRuntimeAndAudit)
 import StudioMCP.Messaging.Topics (defaultExecutionTopic)
 import StudioMCP.Observability.McpMetrics (McpMetricsService, newMcpMetricsService)
 import StudioMCP.Observability.Quotas (QuotaService, defaultQuotaConfig, newQuotaService)
 import StudioMCP.Observability.RateLimiting (RateLimiterService, defaultRateLimiterConfig, newRateLimiterService)
 import StudioMCP.Result.Failure (FailureDetail)
 import StudioMCP.Result.Types (Result (Failure, Success))
-import StudioMCP.Storage.Governance (GovernanceService, defaultGovernancePolicy, newGovernanceService)
+import StudioMCP.Storage.AuditTrail (AuditTrailService, newAuditTrailServiceWithFile)
+import StudioMCP.Storage.Governance (GovernanceService, defaultGovernancePolicy, newGovernanceServiceWithFile)
 import StudioMCP.Storage.MinIO (MinIOConfig (..), readSummary)
 import StudioMCP.Storage.Keys (summaryRefForRun)
-import StudioMCP.Storage.TenantStorage (TenantStorageService, defaultTenantStorageConfig, newTenantStorageService)
+import StudioMCP.Storage.TenantStorage
+  ( TenantStorageService,
+    configureTenantBackend,
+    defaultTenantStorageConfig,
+    loadTenantBackendConfigFile,
+    newTenantStorageServiceWithFile,
+    tscPlatformAccessKeyId,
+    tscPlatformEndpoint,
+    tscPlatformSecretAccessKey,
+  )
+import StudioMCP.Util.Startup (invalidConfigurationFile)
 import StudioMCP.Messaging.Pulsar (PulsarConfig (..))
 
 data ServerEnv = ServerEnv
@@ -60,8 +78,10 @@ data ServerEnv = ServerEnv
     serverMcpMetrics :: McpMetricsService,
     serverRateLimiter :: RateLimiterService,
     serverQuotaService :: QuotaService,
+    serverSessionStore :: RedisSessionStore,
     serverTenantStorage :: TenantStorageService,
     serverGovernance :: GovernanceService,
+    serverAuditTrail :: AuditTrailService,
     serverToolCatalog :: ToolCatalog,
     serverResourceCatalog :: ResourceCatalog
   }
@@ -79,15 +99,40 @@ createServerEnv appConfig = do
   mcpMetrics <- newMcpMetricsService
   rateLimiter <- newRateLimiterService defaultRateLimiterConfig
   quotaService <- newQuotaService defaultQuotaConfig
-  tenantStorage <- newTenantStorageService defaultTenantStorageConfig
-  governance <- newGovernanceService defaultGovernancePolicy
+  redisConfig <- loadRedisConfigFromEnv
+  sessionStore <- newRedisSessionStore redisConfig
+  persistenceRoot <- resolvePersistenceRoot
+  let tenantStorageConfig =
+        defaultTenantStorageConfig
+          { tscPlatformEndpoint = minioUrl
+          , tscPlatformAccessKeyId = minioAccess
+          , tscPlatformSecretAccessKey = minioSecret
+          }
+  tenantStorage <- newTenantStorageServiceWithFile tenantStorageConfig (persistenceRoot </> "tenant-storage.json")
+  maybeTenantBackendConfig <- resolveTenantBackendConfigPath
+  case maybeTenantBackendConfig of
+    Nothing -> pure ()
+    Just configPath -> do
+      backendOverridesResult <- loadTenantBackendConfigFile configPath
+      case backendOverridesResult of
+        Left err ->
+          throwIO $
+            invalidConfigurationFile
+              "tenant backend override"
+              configPath
+              err
+              (Just "Fix the backend override file contents or unset STUDIO_MCP_TENANT_BACKENDS_FILE.")
+        Right backendOverrides ->
+          mapM_ (uncurry (configureTenantBackend tenantStorage)) (Map.toList backendOverrides)
+  governance <- newGovernanceServiceWithFile defaultGovernancePolicy (persistenceRoot </> "governance.json")
+  auditTrail <- newAuditTrailServiceWithFile (persistenceRoot </> "audit.json")
   let runtimeConfig =
         RuntimeConfig
           { runtimePulsarConfig = PulsarConfig pulsarHttp pulsarBinary,
             runtimeMinioConfig = MinIOConfig minioUrl minioAccess minioSecret,
             runtimeTopicName = defaultExecutionTopic
           }
-  toolCatalog <- newToolCatalogWithRuntime runtimeConfig tenantStorage governance (Just mcpMetrics)
+  toolCatalog <- newToolCatalogWithRuntimeAndAudit runtimeConfig tenantStorage governance auditTrail (Just mcpMetrics)
   resourceCatalog <-
     newResourceCatalogWithRuntime
       (runtimeMinioConfig runtimeConfig)
@@ -104,11 +149,26 @@ createServerEnv appConfig = do
         serverMcpMetrics = mcpMetrics,
         serverRateLimiter = rateLimiter,
         serverQuotaService = quotaService,
+        serverSessionStore = sessionStore,
         serverTenantStorage = tenantStorage,
         serverGovernance = governance,
+        serverAuditTrail = auditTrail,
         serverToolCatalog = toolCatalog,
         serverResourceCatalog = resourceCatalog
       }
+
+resolvePersistenceRoot :: IO FilePath
+resolvePersistenceRoot = do
+  persistenceRoot <- maybe ".studiomcp-data" id <$> lookupEnv "STUDIOMCP_DATA_DIR"
+  createDirectoryIfMissing True persistenceRoot
+  pure persistenceRoot
+
+resolveTenantBackendConfigPath :: IO (Maybe FilePath)
+resolveTenantBackendConfigPath = do
+  primary <- lookupEnv "STUDIO_MCP_TENANT_BACKENDS_FILE"
+  case primary of
+    Just _ -> pure primary
+    Nothing -> lookupEnv "STUDIOMCP_TENANT_BACKENDS_FILE"
 
 submitDag :: ServerEnv -> DagSpec -> IO SubmissionResult
 submitDag serverEnv dagSpec =

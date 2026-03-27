@@ -5,32 +5,30 @@
 **Supersedes**: N/A
 **Referenced by**: [../README.md](../README.md#documentation-suite), [../operations/runbook_local_debugging.md](../operations/runbook_local_debugging.md#cross-references), [../reference/cli_surface.md](../reference/cli_surface.md#cross-references), [../architecture/server_mode.md](../architecture/server_mode.md#cross-references), [../../STUDIOMCP_DEVELOPMENT_PLAN.md](../../STUDIOMCP_DEVELOPMENT_PLAN.md#documentation-governance)
 
-> **Purpose**: Canonical reference for the target public MCP-facing surface in `studioMCP`, including target transports, capability scope, operational endpoints, and the current implementation gap.
+> **Purpose**: Canonical reference for the public MCP-facing surface in `studioMCP`, including transports, capability scope, and operational endpoints.
 
 ## Current Repo Status
 
-The current repository now exposes a real MCP surface alongside the legacy `/runs` migration surface.
+The current repository exposes the completed MCP-first automation surface.
 
 Implemented today:
 
 - MCP JSON-RPC handling with `initialize`, `tools/*`, `resources/*`, and `prompts/*`
 - Streamable HTTP on `POST /mcp` plus SSE bootstrap on `GET /mcp`
 - admin and observability endpoints on `/healthz`, `/version`, and `/metrics`
-- `validate mcp-stdio` and `validate mcp-http` transport validators
-- a custom DAG-oriented `/runs` HTTP API that still coexists for migration
+- live auth, session, catalog, and conformance validation through `validate mcp-http`, `validate mcp-auth`, `validate observability`, and `validate mcp-conformance`
 
-Current limitations:
+Current note:
 
-- the legacy `/runs` surface has not yet been retired
-- the stdio transport is validated locally but is not yet exposed as a `studiomcp stdio` CLI entry point
-- production auth hardening still lacks cryptographic JWT signature verification
+- the legacy `validate mcp` alias has been retired
+- the stdio transport is exposed directly through `studiomcp stdio`
 
-## Target Public MCP Surface
+## Public MCP Surface
 
-The target public MCP surface is:
+The current public MCP surface is:
 
 - `stdio` for local development and local tooling
-- Streamable HTTP for remote clients and BFF mediation
+- Streamable HTTP for remote clients and the BFF mediation path
 - a single MCP endpoint for remote protocol traffic
 - separate operational endpoints for `/healthz`, `/version`, and `/metrics`
 
@@ -79,14 +77,15 @@ Each message is a complete JSON-RPC 2.0 object on a single line. No length prefi
 ### CLI Invocation
 
 ```bash
+studiomcp stdio                     # Start stdio MCP server
 studiomcp validate mcp-stdio       # Validate stdio transport
 ```
 
-**Note**: The stdio transport core exists and `validate mcp-stdio` passes locally. A first-class `studiomcp stdio` entry point is still future CLI work.
+**Note**: `studiomcp stdio` and `validate mcp-stdio` exercise the same stdio transport implementation.
 
 ## Streamable HTTP Transport Specification
 
-The Streamable HTTP transport is used for remote SaaS access and BFF mediation.
+The Streamable HTTP transport is used for remote SaaS access and is the current BFF mediation path for workflow and artifact-governance operations.
 
 ### Endpoint
 
@@ -146,7 +145,7 @@ Session behavior:
 - Server returns `Mcp-Session-Id` in response
 - Client includes `Mcp-Session-Id` in subsequent requests
 - Sessions expire after inactivity timeout (default: 30 minutes)
-- Session state currently flows through the session-store abstraction with local horizontal-scale validation; production Redis hardening remains open work
+- Session state flows through the shared Redis-backed session store and is validated across store instances
 
 ### HTTP Status Codes
 
@@ -247,15 +246,14 @@ Release-priority capability groups:
 
 The exact catalog lives in [mcp_tool_catalog.md](mcp_tool_catalog.md#mcp-tool-catalog).
 
-## Current Versus Target
+## Public Surface
 
 ```mermaid
 flowchart TB
-  Legacy[Legacy /runs Surface] --> Target[Target MCP Surface]
-  Target --> Tools[Tools]
-  Target --> Resources[Resources]
-  Target --> Prompts[Prompts]
-  Target --> Ops[Health Version Metrics]
+  MCP[MCP Surface] --> Tools[Tools]
+  MCP --> Resources[Resources]
+  MCP --> Prompts[Prompts]
+  MCP --> Ops[Health Version Metrics]
 ```
 
 ## Operational Endpoints
@@ -275,15 +273,15 @@ They exist for operational control, not as a substitute automation contract.
 - external MCP clients authenticate directly through the MCP auth model
 - tenant scoping is enforced on every capability
 
-## Migration Rule
+## Validation Rule
 
-The existing `validate mcp` command must eventually split into:
+Use the explicit MCP validators:
 
-- validation of the legacy migration surface while it still exists
-- validation of the real MCP `stdio` surface
-- validation of the real remote HTTP MCP surface
+- `validate mcp-stdio`
+- `validate mcp-http`
+- `validate mcp-conformance`
 
-New public feature work should target the MCP surface first.
+New public feature work must continue to target the MCP surface first.
 
 ## Cross-References
 

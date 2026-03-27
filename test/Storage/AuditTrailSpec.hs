@@ -5,12 +5,11 @@ module Storage.AuditTrailSpec (spec) where
 import Data.Aeson (decode, encode)
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Map.Strict as Map
-import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Time (UTCTime, addUTCTime, getCurrentTime)
+import Data.Time (addUTCTime, getCurrentTime)
 import StudioMCP.Auth.Types (SubjectId (..), TenantId (..))
 import StudioMCP.Storage.AuditTrail
-import StudioMCP.Storage.Governance (GovernanceAction(..))
+import StudioMCP.Storage.Governance (ArtifactState (Active), GovernanceAction (..))
 import Test.Hspec
 
 spec :: Spec
@@ -123,7 +122,7 @@ spec = do
         (SubjectId "user-1")
         "artifact-1"
         ActionHide
-        undefined -- state not used in current impl
+        Active
       case aeAction entry of
         AuditStateChange ActionHide -> pure ()
         other -> expectationFailure $ "Expected AuditStateChange ActionHide but got: " ++ show other
@@ -136,7 +135,7 @@ spec = do
         (SubjectId "user-1")
         "artifact-1"
         ActionArchive
-        undefined
+        Active
       case aeAction entry of
         AuditStateChange ActionArchive -> pure ()
         other -> expectationFailure $ "Expected AuditStateChange ActionArchive but got: " ++ show other
@@ -165,7 +164,9 @@ spec = do
       _ <- recordAuditEntry service (TenantId "tenant-2") (SubjectId "u") "b" Nothing AuditCreate OutcomeSuccess Map.empty
       entries <- queryAuditTrail service defaultAuditQuery { aqTenantId = Just (TenantId "tenant-1") }
       length entries `shouldBe` 1
-      aeTenantId (head entries) `shouldBe` TenantId "tenant-1"
+      case entries of
+        [entry] -> aeTenantId entry `shouldBe` TenantId "tenant-1"
+        other -> expectationFailure $ "Expected a single entry, got: " ++ show other
 
     it "filters by subject ID" $ do
       service <- newAuditTrailService
@@ -173,7 +174,9 @@ spec = do
       _ <- recordAuditEntry service (TenantId "t") (SubjectId "user-2") "b" Nothing AuditCreate OutcomeSuccess Map.empty
       entries <- queryAuditTrail service defaultAuditQuery { aqSubjectId = Just (SubjectId "user-1") }
       length entries `shouldBe` 1
-      aeSubjectId (head entries) `shouldBe` SubjectId "user-1"
+      case entries of
+        [entry] -> aeSubjectId entry `shouldBe` SubjectId "user-1"
+        other -> expectationFailure $ "Expected a single entry, got: " ++ show other
 
     it "filters by artifact ID" $ do
       service <- newAuditTrailService
@@ -181,7 +184,9 @@ spec = do
       _ <- recordAuditEntry service (TenantId "t") (SubjectId "u") "artifact-2" Nothing AuditCreate OutcomeSuccess Map.empty
       entries <- queryAuditTrail service defaultAuditQuery { aqArtifactId = Just "artifact-1" }
       length entries `shouldBe` 1
-      aeArtifactId (head entries) `shouldBe` "artifact-1"
+      case entries of
+        [entry] -> aeArtifactId entry `shouldBe` "artifact-1"
+        other -> expectationFailure $ "Expected a single entry, got: " ++ show other
 
     it "filters by action types" $ do
       service <- newAuditTrailService
@@ -190,7 +195,9 @@ spec = do
       _ <- recordAuditEntry service (TenantId "t") (SubjectId "u") "c" Nothing AuditDeleteAttempt (OutcomeDenied "no") Map.empty
       entries <- queryAuditTrail service defaultAuditQuery { aqActions = [AuditDeleteAttempt] }
       length entries `shouldBe` 1
-      aeAction (head entries) `shouldBe` AuditDeleteAttempt
+      case entries of
+        [entry] -> aeAction entry `shouldBe` AuditDeleteAttempt
+        other -> expectationFailure $ "Expected a single entry, got: " ++ show other
 
     it "respects limit parameter" $ do
       service <- newAuditTrailService

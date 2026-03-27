@@ -48,7 +48,7 @@ import Data.Aeson
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Time (UTCTime, getCurrentTime)
+import Data.Time (UTCTime, diffUTCTime, getCurrentTime)
 import StudioMCP.Auth.Types (SubjectId (..), TenantId (..))
 import StudioMCP.Storage.ContentAddressed (ContentAddress (..))
 
@@ -442,5 +442,5 @@ compareVersions service olderId newerId = do
                   vcNewerVersion = newerId,
                   vcContentChanged = avContentAddress older /= avContentAddress newer,
                   vcSizeChange = avContentSize newer - avContentSize older,
-                  vcTimeDelta = 0 -- Would need proper time diff calculation
+                  vcTimeDelta = round (abs (diffUTCTime (avCreatedAt newer) (avCreatedAt older)))
                 }

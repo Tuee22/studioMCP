@@ -3,10 +3,12 @@
 module StudioMCP.DAG.Scheduler
   ( SchedulerMode (..),
     scheduleTopologically,
+    scheduleInParallelBatches,
   )
 where
 
 import Control.Monad (foldM)
+import Data.List (sortOn)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (mapMaybe)
 import StudioMCP.DAG.Types (DagSpec (..), NodeSpec (..))
@@ -14,10 +16,15 @@ import StudioMCP.Result.Failure (FailureDetail, validationFailure)
 
 data SchedulerMode
   = TopologicalSequential
+  | TopologicalParallelBatched
   deriving (Eq, Show)
 
 scheduleTopologically :: DagSpec -> Either FailureDetail [NodeSpec]
-scheduleTopologically dagSpec = go initialReadyQueue initialInDegree []
+scheduleTopologically dagSpec =
+  fmap concat (scheduleInParallelBatches dagSpec)
+
+scheduleInParallelBatches :: DagSpec -> Either FailureDetail [[NodeSpec]]
+scheduleInParallelBatches dagSpec = go initialReadyQueue initialInDegree []
   where
     nodesById = Map.fromList [(nodeId nodeSpec, nodeSpec) | nodeSpec <- dagNodes dagSpec]
     initialInDegree = Map.fromList [(nodeId nodeSpec, length (nodeInputs nodeSpec)) | nodeSpec <- dagNodes dagSpec]
@@ -27,21 +34,21 @@ scheduleTopologically dagSpec = go initialReadyQueue initialInDegree []
         Map.empty
         (dagNodes dagSpec)
     initialReadyQueue =
-      [ nodeSpec
-      | nodeSpec <- dagNodes dagSpec,
-        Map.findWithDefault 0 (nodeId nodeSpec) initialInDegree == 0
-      ]
+      sortNodes
+        [ nodeSpec
+        | nodeSpec <- dagNodes dagSpec,
+          Map.findWithDefault 0 (nodeId nodeSpec) initialInDegree == 0
+        ]
 
-    go [] _ scheduledNodes
-      | length scheduledNodes == length (dagNodes dagSpec) = Right (reverse scheduledNodes)
+    go [] _ scheduledBatches
+      | sum (map length scheduledBatches) == length (dagNodes dagSpec) = Right (reverse scheduledBatches)
       | otherwise =
           Left (validationFailure "scheduler-cycle" "Scheduler could not produce a full topological order.")
-    go (currentNode : remainingQueue) remainingInDegree scheduledNodes = do
-      (nextInDegree, newlyReadyNodeIds) <- releaseDependents currentNode remainingInDegree
+    go readyQueue remainingInDegree scheduledBatches = do
+      (nextInDegree, newlyReadyNodeIds) <- releaseDependents readyQueue remainingInDegree
       let nextReadyNodes =
-            remainingQueue
-              <> mapMaybe (`Map.lookup` nodesById) newlyReadyNodeIds
-      go nextReadyNodes nextInDegree (currentNode : scheduledNodes)
+            sortNodes (mapMaybe (`Map.lookup` nodesById) newlyReadyNodeIds)
+      go nextReadyNodes nextInDegree (readyQueue : scheduledBatches)
 
     registerDependents dependentsByNode nodeSpec =
       foldl'
@@ -49,8 +56,11 @@ scheduleTopologically dagSpec = go initialReadyQueue initialInDegree []
         dependentsByNode
         (nodeInputs nodeSpec)
 
-    releaseDependents currentNode remainingInDegree =
-      foldM releaseDependent (remainingInDegree, []) dependentNodeIds
+    releaseDependents currentBatch remainingInDegree =
+      foldM releaseBatchNode (remainingInDegree, []) currentBatch
+
+    releaseBatchNode (inDegreeMap, readyNodeIds) currentNode =
+      foldM releaseDependent (inDegreeMap, readyNodeIds) dependentNodeIds
       where
         dependentNodeIds = Map.findWithDefault [] (nodeId currentNode) dependencyGraph
 
@@ -68,3 +78,5 @@ scheduleTopologically dagSpec = go initialReadyQueue initialInDegree []
            in if nextInDegree == 0
                 then Right (updatedMap, readyNodeIds <> [dependentNodeId])
                 else Right (updatedMap, readyNodeIds)
+
+    sortNodes = sortOn nodeId

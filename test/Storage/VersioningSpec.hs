@@ -3,6 +3,7 @@
 module Storage.VersioningSpec (spec) where
 
 import qualified Data.Map.Strict as Map
+import Control.Concurrent (threadDelay)
 import StudioMCP.Auth.Types (SubjectId (..), TenantId (..))
 import StudioMCP.Storage.ContentAddressed (ContentAddress (..))
 import StudioMCP.Storage.Versioning
@@ -153,3 +154,21 @@ spec = do
       case result of
         Left (ContentAddressMismatch _ _ _) -> pure ()
         _ -> expectationFailure "Expected ContentAddressMismatch error"
+
+  describe "compareVersions" $ do
+    it "reports the elapsed time between versions" $ do
+      service <- newVersioningService defaultVersioningPolicy
+      Right initial <- createInitialVersion service "artifact-1"
+        (ContentAddress "sha256:abc") 1000 "text/plain"
+        (SubjectId "user-1") (TenantId "tenant-1") Map.empty
+      threadDelay 1100000
+      Right newer <- createNewVersion service "artifact-1"
+        (ContentAddress "sha256:def") 2000 "text/plain"
+        (SubjectId "user-1") Map.empty
+      result <- compareVersions service (avVersionId initial) (avVersionId newer)
+      case result of
+        Right comparison -> do
+          vcContentChanged comparison `shouldBe` True
+          vcSizeChange comparison `shouldBe` 1000
+          vcTimeDelta comparison `shouldSatisfy` (>= 1)
+        Left err -> expectationFailure $ "Expected success but got: " ++ show err

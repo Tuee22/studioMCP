@@ -26,6 +26,7 @@ module StudioMCP.Auth.Claims
   )
 where
 
+import Control.Applicative ((<|>))
 import Data.Aeson
   ( Value (..),
     object,
@@ -165,9 +166,26 @@ resolveTenant strategy payload =
 -- | Extract tenant from azp-related claims
 extractAzpTenant :: JwtPayload -> Maybe Text
 extractAzpTenant payload =
-  -- This would look for azp.tenant or similar nested claim
-  -- For now, return Nothing as the structure depends on Keycloak config
-  Nothing
+  directAzpTenant <|> nestedAzpTenant
+  where
+    directAzpTenant =
+      lookupString "azp.tenant" (jpRaw payload)
+        <|> lookupString "azp_tenant" (jpRaw payload)
+        <|> (lookupString "tenant" =<< getObjectClaim "azp" (jpRaw payload))
+
+    nestedAzpTenant =
+      lookupString "tenant" =<< getObjectClaim "authorized_party" (jpRaw payload)
+
+    getObjectClaim :: Text -> Value -> Maybe Value
+    getObjectClaim key (Object obj) = KM.lookup (K.fromText key) obj
+    getObjectClaim _ _ = Nothing
+
+    lookupString :: Text -> Value -> Maybe Text
+    lookupString key (Object obj) =
+      case KM.lookup (K.fromText key) obj of
+        Just (String value) -> Just value
+        _ -> Nothing
+    lookupString _ _ = Nothing
 
 -- | Extract tenant from role-based claims (e.g., "tenant:acme-corp")
 extractTenantFromRoles :: JwtPayload -> Maybe Text
