@@ -5,13 +5,13 @@
 **Supersedes**: N/A
 **Referenced by**: [../README.md](../README.md#documentation-suite), [mcp_protocol_architecture.md](mcp_protocol_architecture.md#cross-references), [server_mode.md](server_mode.md#cross-references), [multi_tenant_saas_mcp_auth_architecture.md](multi_tenant_saas_mcp_auth_architecture.md#cross-references), [artifact_storage_architecture.md](artifact_storage_architecture.md#cross-references)
 
-> **Purpose**: Canonical high-level description of the current `studioMCP` system boundary, major runtime components, and the top-level document map for the MCP-first architecture.
+> **Purpose**: Canonical high-level description of the target `studioMCP` system boundary, major runtime components, and the top-level document map for the MCP-first architecture.
 
 ## Executive Summary
 
-`studioMCP` is a Haskell-first MCP platform for secure multi-tenant media workflows. The implemented public automation surface is MCP on `/mcp`, not a custom REST automation API, and it couples that protocol layer to a typed DAG execution engine, tenant-aware storage, and a browser-facing BFF layer.
+`studioMCP` is a Haskell-first MCP platform for secure multi-tenant media workflows. The target system exposes a real MCP surface, not a custom REST automation API, and couples that protocol layer to a typed DAG execution engine, tenant-aware storage, and a browser-facing SaaS application.
 
-The current system has four major planes:
+The target public topology has four major planes:
 
 - browser and external MCP clients
 - BFF and auth plane
@@ -20,7 +20,7 @@ The current system has four major planes:
 
 ## Current Repo Note
 
-The current codebase has completed the tracked MCP-first migration plan. `/mcp` is the live automation surface, the browser-facing BFF now mediates workflow and governance operations through the MCP HTTP boundary, the BFF serves a built-in browser control-room UI plus SSE chat and run-progress routes, deterministic parallel DAG execution is live, and the CLI ergonomics tracked in the plan are implemented. Browser-session state is shared through Redis for multi-instance deployment.
+The current codebase already includes strong execution foundations, but the shipped `server` binary still exposes a custom DAG-oriented HTTP surface rather than a proper MCP transport. The documents in this suite define the target architecture and the migration path called out in [../../STUDIOMCP_DEVELOPMENT_PLAN.md](../../STUDIOMCP_DEVELOPMENT_PLAN.md#current-repo-assessment-against-this-plan).
 
 ## System Topology
 
@@ -54,15 +54,11 @@ flowchart TB
 
 - protocol shape: [MCP Protocol Architecture](mcp_protocol_architecture.md#mcp-protocol-architecture)
 - server runtime: [Server Mode](server_mode.md#server-mode)
-- BFF runtime: [BFF Architecture](bff_architecture.md#bff-architecture)
-- CLI control plane: [CLI Architecture](cli_architecture.md#cli-architecture)
-- advisory model path: [Inference Mode](inference_mode.md#inference-mode)
 - public network and auth topology: [Multi-Tenant SaaS MCP Auth Architecture](multi_tenant_saas_mcp_auth_architecture.md#multi-tenant-saas-mcp-auth-architecture)
 - artifact rules: [Artifact Storage Architecture](artifact_storage_architecture.md#artifact-storage-architecture)
 - storage split: [Pulsar vs MinIO](pulsar_vs_minio.md#pulsar-vs-minio)
 - security rules: [Security Model](../engineering/security_model.md#security-model)
 - non-sticky scaling rules: [Session Scaling](../engineering/session_scaling.md#session-scaling)
-- timeout rules: [Timeout Enforcement Policy](../engineering/timeout_policy.md#timeout-enforcement-policy)
 - tool and resource catalog: [MCP Surface Reference](../reference/mcp_surface.md#mcp-surface-reference)
 - web/BFF product surface: [Web Portal Surface](../reference/web_portal_surface.md#web-portal-surface)
 

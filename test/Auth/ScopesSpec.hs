@@ -119,23 +119,23 @@ spec = do
       perms `shouldBe` Set.empty
 
   describe "authorizeToolCall" $ do
-    it "authorizes workflow.submit with workflow:write" $ do
+    it "authorizes workflow.submit_dag with workflow:write" $ do
       let ctx = testAuthContext {acSubject = testSubject {subjectScopes = Set.fromList [scopeWorkflowWrite]}}
-      authorizeToolCall "workflow.submit" ctx `shouldBe` Allowed
+      authorizeToolCall "workflow.submit_dag" ctx `shouldBe` Allowed
 
-    it "denies workflow.submit without workflow:write" $ do
+    it "denies workflow.submit_dag without workflow:write" $ do
       let ctx = testAuthContext {acSubject = testSubject {subjectScopes = Set.fromList [scopeWorkflowRead]}}
-      case authorizeToolCall "workflow.submit" ctx of
+      case authorizeToolCall "workflow.submit_dag" ctx of
         Denied _ -> pure ()
         Allowed -> expectationFailure "Expected Denied"
 
-    it "authorizes workflow.list with workflow:read" $ do
+    it "authorizes workflow.list_runs with workflow:read" $ do
       let ctx = testAuthContext {acSubject = testSubject {subjectScopes = Set.fromList [scopeWorkflowRead]}}
-      authorizeToolCall "workflow.list" ctx `shouldBe` Allowed
+      authorizeToolCall "workflow.list_runs" ctx `shouldBe` Allowed
 
-    it "authorizes artifact.download_url with artifact:read" $ do
+    it "authorizes artifact.download with artifact:read" $ do
       let ctx = testAuthContext {acSubject = testSubject {subjectScopes = Set.fromList [scopeArtifactRead]}}
-      authorizeToolCall "artifact.download_url" ctx `shouldBe` Allowed
+      authorizeToolCall "artifact.download_presigned" ctx `shouldBe` Allowed
 
     it "authorizes artifact.hide with artifact:manage" $ do
       let ctx = testAuthContext {acSubject = testSubject {subjectScopes = Set.fromList [scopeArtifactManage]}}

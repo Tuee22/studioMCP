@@ -26,7 +26,7 @@ where
 
 import Control.Concurrent.MVar (MVar, newMVar, putMVar, takeMVar)
 import Control.Concurrent.STM (TVar, atomically, newTVarIO, readTVarIO, writeTVar)
-import Control.Exception (SomeException, bracket_, throwIO, try)
+import Control.Exception (SomeException, bracket_, try)
 import Control.Monad (forM, forM_, unless)
 import Data.Aeson (FromJSON, ToJSON, decode, encode)
 import qualified Data.ByteString as BS
@@ -73,7 +73,6 @@ import StudioMCP.MCP.Session.Types
     sessionLastActiveAt,
     toSessionData,
   )
-import StudioMCP.Util.Startup (startupFailure)
 
 data RedisSessionStore = RedisSessionStore
   { rssConfig :: RedisConfig,
@@ -92,16 +91,7 @@ data RedisHealth = RedisHealth
 
 newRedisSessionStore :: RedisConfig -> IO RedisSessionStore
 newRedisSessionStore config = do
-  connectInfo <- either throwIO pure (buildConnectInfo config)
-  connectionResult <- try (checkedConnect connectInfo) :: IO (Either SomeException Connection)
-  connection <-
-    case connectionResult of
-      Right establishedConnection -> pure establishedConnection
-      Left _ ->
-        throwIO $
-          startupFailure
-            "Unable to establish the initial Redis connection"
-            (Just "Verify the Redis host, port, credentials, and network reachability before restarting.")
+  connection <- checkedConnect (buildConnectInfo config)
   connectedVar <- newTVarIO True
   writeLock <- newMVar ()
   pure
@@ -411,22 +401,17 @@ refreshAssociatedStateTtl store sid = do
       [ execRedis store (expire key ttlSeconds) | key <- subscriptionKeys <> cursorKeys ]
   pure (voidEithers touchResults)
 
-buildConnectInfo :: RedisConfig -> Either StartupFailure Redis.ConnectInfo
+buildConnectInfo :: RedisConfig -> Redis.ConnectInfo
 buildConnectInfo config =
   case parseConnectInfo redisUrl of
-    Left err ->
-      Left $
-        startupFailure
-          ("Invalid Redis connection configuration: " <> T.pack err)
-          (Just "Fix the Redis host, port, database, or STUDIO_MCP_REDIS_URL setting and retry.")
+    Left err -> error ("Invalid Redis connection info: " <> err)
     Right connectInfo ->
-      Right
-        connectInfo
-          { connectAuth = TE.encodeUtf8 <$> rcPassword config,
-            connectDatabase = fromIntegral (rcDatabase config),
-            connectMaxConnections = rcPoolSize config,
-            connectTimeout = Just (fromIntegral (rcConnectionTimeout config))
-          }
+      connectInfo
+        { connectAuth = TE.encodeUtf8 <$> rcPassword config,
+          connectDatabase = fromIntegral (rcDatabase config),
+          connectMaxConnections = rcPoolSize config,
+          connectTimeout = Just (fromIntegral (rcConnectionTimeout config))
+        }
   where
     scheme
       | rcUseTls config = "rediss://"

@@ -116,6 +116,37 @@ Examples of intended usage:
 - `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp cluster deploy sidecars`
 - `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp cluster deploy server`
 
+## Container Naming Policy
+
+All containers created by the `studioMCP` CLI and validation tools must use fixed, predictable names.
+
+Required naming convention:
+
+| Purpose | Container Name | Notes |
+|---------|---------------|-------|
+| Kind cluster | `studiomcp` | Via `STUDIOMCP_KIND_CLUSTER` env var |
+| Validation Redis | `studiomcp-test-redis` | Used by `withTemporaryRedisConfig` |
+| Future test containers | `studiomcp-test-{service}` | Follow this pattern for new services |
+
+Rationale:
+
+- Idempotent operations: Re-running a command automatically cleans up any stale container with the same name
+- No orphaned containers: Fixed names prevent accumulation of randomly-named containers from interrupted tests
+- Predictable state: `docker ps -a --filter "name=studiomcp"` shows all project containers
+
+Implementation pattern for temporary containers:
+
+```haskell
+-- Cleanup-before-start ensures idempotent behavior
+_ <- readProcessWithExitCode "docker" ["rm", "-f", containerName] ""
+_ <- readProcessWithExitCode "docker" ["run", "-d", "--name", containerName, ...] ""
+```
+
+Forbidden:
+
+- `docker run -d` without `--name` for project containers
+- Random or timestamp-based container names for validation infrastructure
+
 ## Current Repo Note
 
 This policy is now materially embodied. The legacy top-level `scripts/` directory and Docker shell assets are gone, the multi-stage Dockerfile now defines both `env` and `production` targets, and the outer-container workflow has been verified on this machine against a running kind cluster, deployed sidecars, and the deployed server. Remaining work is now incremental: storage-backed Helm releases under non-default values, broader host-context coverage, and any additional CLI ergonomics the next plan chooses to add.

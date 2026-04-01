@@ -41,13 +41,11 @@ The repository uses `documents/`, not `docs/`.
 - `documents/domain/`: DAG schema and execution-domain rules
 - `documents/engineering/`: engineering standards such as Kubernetes-native development policy
 - `documents/operations/`: runbooks and operability procedures
-- `documents/research/`: reference-only research notes and source material that do not define current repo behavior
 - `documents/reference/`: public-surface and API-style reference material
 - `documents/tools/`: tool and sidecar integration notes
 
 The navigational index for the suite is [README.md](README.md#studiomcp-documentation-index).
 There is no ADR category in the governed suite. Historical decision trails belong in git history and code review, not in `documents/`.
-Research notes are allowed only as `Reference only` source material. They must not be written or linked as if they define the current architecture, API surface, or operational contract.
 
 ## 3. Naming Rules
 

@@ -42,7 +42,7 @@ helm repo add minio https://charts.min.io/
 studiomcp cluster storage reconcile  # creates PVs
 helm install minio minio/minio \
   --set replicas=3 \
-  --set persistence.storageClass="" \
+  --set persistence.storageClass="studiomcp-manual" \
   --set persistence.size=20Gi \
   --set rootUser=minioadmin \
   --set rootPassword=minioadmin123

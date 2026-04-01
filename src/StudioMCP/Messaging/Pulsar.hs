@@ -202,42 +202,13 @@ classifyPulsarFailure operationName topicName maybeExitCode commandOutput =
 
 runPulsarClientCommand :: PulsarConfig -> Text -> TopicName -> [String] -> IO (Either FailureDetail Text)
 runPulsarClientCommand config operationName topicName pulsarArgs = do
-  targetResult <- resolvePulsarClientTarget operationName topicName
-  case targetResult of
-    Left failureDetail -> pure (Left failureDetail)
-    Right kubectlTarget -> do
-      commandResult <-
-        try
-          ( readProcessWithExitCode
-              "kubectl"
-              ( ["exec", kubectlTarget, "--", "bin/pulsar-client", "--url", Text.unpack (pulsarBinaryEndpoint config)]
-                  <> pulsarArgs
-              )
-              ""
-          ) :: IO (Either IOException (ExitCode, String, String))
-      case commandResult of
-        Left ioException ->
-          pure (Left (classifyPulsarFailure operationName topicName Nothing (Text.pack (show ioException))))
-        Right (exitCodeValue, stdoutText, stderrText) ->
-          let combinedOutput = Text.pack (stdoutText <> stderrText)
-           in case exitCodeValue of
-                ExitSuccess -> pure (Right combinedOutput)
-                ExitFailure codeValue ->
-                  pure (Left (classifyPulsarFailure operationName topicName (Just codeValue) combinedOutput))
-
-resolvePulsarClientTarget :: Text -> TopicName -> IO (Either FailureDetail String)
-resolvePulsarClientTarget operationName topicName = do
   commandResult <-
     try
       ( readProcessWithExitCode
           "kubectl"
-          [ "get",
-            "pods",
-            "-l",
-            "app=pulsar,component=toolset",
-            "-o",
-            "jsonpath={range .items[*]}{.metadata.name}:{.status.phase}{\"\\n\"}{end}"
-          ]
+          ( ["exec", "deploy/studiomcp-pulsar", "--", "bin/pulsar-client", "--url", Text.unpack (pulsarBinaryEndpoint config)]
+              <> pulsarArgs
+          )
           ""
       ) :: IO (Either IOException (ExitCode, String, String))
   case commandResult of
@@ -245,27 +216,8 @@ resolvePulsarClientTarget operationName topicName = do
       pure (Left (classifyPulsarFailure operationName topicName Nothing (Text.pack (show ioException))))
     Right (exitCodeValue, stdoutText, stderrText) ->
       let combinedOutput = Text.pack (stdoutText <> stderrText)
-          runningPods =
-            [ podName
-            | line <- lines stdoutText
-            , let (podName, podStatusWithColon) = break (== ':') line
-            , not (null podName)
-            , drop 1 podStatusWithColon == "Running"
-            ]
        in case exitCodeValue of
-            ExitSuccess ->
-              case runningPods of
-                podName : _ -> pure (Right ("pod/" <> podName))
-                [] ->
-                  pure
-                    ( Left
-                        ( classifyPulsarFailure
-                            operationName
-                            topicName
-                            Nothing
-                            "No running Pulsar toolset pod is available for pulsar-client commands."
-                        )
-                    )
+            ExitSuccess -> pure (Right combinedOutput)
             ExitFailure codeValue ->
               pure (Left (classifyPulsarFailure operationName topicName (Just codeValue) combinedOutput))
 

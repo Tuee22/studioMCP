@@ -65,7 +65,7 @@ healthyConfig port =
   AppConfig
     { appMode = ServerMode,
       pulsarHttpUrl = baseUrl port,
-      pulsarBinaryUrl = "pulsar://studiomcp-pulsar-proxy:6650",
+      pulsarBinaryUrl = "pulsar://studiomcp-pulsar:6650",
       minioEndpoint = baseUrl port,
       minioAccessKey = "minioadmin",
       minioSecretKey = "minioadmin123"

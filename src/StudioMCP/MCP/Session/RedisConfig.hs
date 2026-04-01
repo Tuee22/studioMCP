@@ -24,8 +24,6 @@ module StudioMCP.MCP.Session.RedisConfig
   )
 where
 
-import Control.Exception (throwIO)
-import Control.Monad (when)
 import Data.Aeson
   ( FromJSON (parseJSON),
     ToJSON (toJSON),
@@ -40,10 +38,6 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 import StudioMCP.MCP.Session.Types (SessionId (..))
-import StudioMCP.Util.Startup
-  ( invalidEnvironmentVariable,
-    startupFailure,
-  )
 import System.Environment (lookupEnv)
 
 -- | Redis connection configuration
@@ -119,11 +113,8 @@ defaultRedisConfig =
 -- | Load Redis configuration from environment variables
 loadRedisConfigFromEnv :: IO RedisConfig
 loadRedisConfigFromEnv = do
-  maybeRedisUrl <- lookupEnvAny ["STUDIO_MCP_REDIS_URL", "STUDIOMCP_REDIS_URL"]
-  urlConfig <-
-    case maybeRedisUrl of
-      Nothing -> pure defaultRedisConfig
-      Just (envName, redisUrl) -> applyRedisUrlConfig envName (T.pack redisUrl)
+  redisUrl <- lookupEnvMaybeAny ["STUDIO_MCP_REDIS_URL", "STUDIOMCP_REDIS_URL"]
+  let urlConfig = maybe defaultRedisConfig applyRedisUrlConfig redisUrl
 
   host <- lookupEnvTextAny ["STUDIO_MCP_REDIS_HOST", "STUDIOMCP_REDIS_HOST"] (rcHost urlConfig)
   port <- lookupEnvIntAny ["STUDIO_MCP_REDIS_PORT", "STUDIOMCP_REDIS_PORT"] (rcPort urlConfig)
@@ -139,7 +130,7 @@ loadRedisConfigFromEnv = do
         Just value -> Just value
         Nothing -> rcPassword urlConfig
 
-  validateRedisConfig
+  pure
     RedisConfig
       { rcHost = host,
         rcPort = port,
@@ -154,43 +145,29 @@ loadRedisConfigFromEnv = do
       }
 
 -- | Helper to lookup text env var with default
-lookupEnvAny :: [String] -> IO (Maybe (String, String))
+lookupEnvAny :: [String] -> IO (Maybe String)
 lookupEnvAny [] = pure Nothing
 lookupEnvAny (name : remaining) = do
   value <- lookupEnv name
   case value of
-    Just current -> pure (Just (name, current))
+    Just _ -> pure value
     Nothing -> lookupEnvAny remaining
 
 -- | Helper to lookup text env var with default
 lookupEnvTextAny :: [String] -> Text -> IO Text
-lookupEnvTextAny names def = maybe def (T.pack . snd) <$> lookupEnvAny names
+lookupEnvTextAny names def = maybe def T.pack <$> lookupEnvAny names
 
 -- | Helper to lookup optional text env var
 lookupEnvMaybeAny :: [String] -> IO (Maybe Text)
-lookupEnvMaybeAny names = fmap (T.pack . snd) <$> lookupEnvAny names
+lookupEnvMaybeAny names = fmap T.pack <$> lookupEnvAny names
 
 -- | Helper to lookup int env var with default
 lookupEnvIntAny :: [String] -> Int -> IO Int
 lookupEnvIntAny names def = do
   mVal <- lookupEnvAny names
-  case mVal of
-    Just (envName, rawValue) ->
-      case readMaybe rawValue of
-        Just value -> pure value
-        Nothing ->
-          throwIO $
-            invalidEnvironmentVariable
-              envName
-              "expected an integer"
-              ( Just
-                  ( "Set "
-                      <> T.pack envName
-                      <> " to a valid integer or unset it to use the default "
-                      <> T.pack (show def)
-                  )
-              )
-    Nothing -> pure def
+  pure $ case mVal of
+    Just s -> maybe def id (readMaybe s)
+    Nothing -> def
   where
     readMaybe s = case reads s of
       [(v, "")] -> Just v
@@ -200,84 +177,28 @@ lookupEnvIntAny names def = do
 lookupEnvBoolAny :: [String] -> Bool -> IO Bool
 lookupEnvBoolAny names def = do
   mVal <- lookupEnvAny names
-  case mVal of
-    Just (envName, rawValue) ->
+  pure $ case mVal of
+    Just rawValue ->
       case map toLower rawValue of
-        "true" -> pure True
-        "1" -> pure True
-        "false" -> pure False
-        "0" -> pure False
-        _ ->
-          throwIO $
-            invalidEnvironmentVariable
-              envName
-              "expected a boolean value of true, false, 1, or 0"
-              ( Just
-                  ( "Set "
-                      <> T.pack envName
-                      <> " to true or false, or unset it to use the default "
-                      <> T.pack (show def)
-                  )
-              )
-    Nothing -> pure def
+        "true" -> True
+        "1" -> True
+        "false" -> False
+        "0" -> False
+        _ -> def
+    Nothing -> def
 
-applyRedisUrlConfig :: String -> Text -> IO RedisConfig
-applyRedisUrlConfig envName redisUrl =
+applyRedisUrlConfig :: Text -> RedisConfig
+applyRedisUrlConfig redisUrl =
   case parseRedisUrl redisUrl of
-    Left err ->
-      throwIO $
-        invalidEnvironmentVariable
-          envName
-          ("invalid Redis URL (" <> T.pack err <> ")")
-          (Just ("Set " <> T.pack envName <> " to redis://host:6379/0 or unset it."))
+    Left err -> error ("Invalid Redis URL in environment: " <> err)
     Right parsed ->
-      pure $
-        defaultRedisConfig
-          { rcHost = rucHost parsed,
-            rcPort = rucPort parsed,
-            rcPassword = rucPassword parsed,
-            rcDatabase = rucDatabase parsed,
-            rcUseTls = rucUseTls parsed
-          }
-
-validateRedisConfig :: RedisConfig -> IO RedisConfig
-validateRedisConfig config = do
-  when (T.null (T.strip (rcHost config))) $
-    throwIO $
-      startupFailure
-        "Invalid Redis configuration: host must not be empty"
-        (Just "Set STUDIO_MCP_REDIS_HOST or STUDIO_MCP_REDIS_URL to a valid Redis host.")
-  when (rcPort config < 1 || rcPort config > 65535) $
-    throwIO $
-      startupFailure
-        "Invalid Redis configuration: port must be between 1 and 65535"
-        (Just "Set STUDIO_MCP_REDIS_PORT or STUDIO_MCP_REDIS_URL to a valid Redis port.")
-  when (rcDatabase config < 0) $
-    throwIO $
-      startupFailure
-        "Invalid Redis configuration: database number must be zero or greater"
-        (Just "Set STUDIO_MCP_REDIS_DATABASE or STUDIO_MCP_REDIS_URL to a valid Redis database number.")
-  when (rcPoolSize config <= 0) $
-    throwIO $
-      startupFailure
-        "Invalid Redis configuration: pool size must be greater than zero"
-        (Just "Set STUDIO_MCP_REDIS_POOL_SIZE to a positive integer.")
-  when (rcConnectionTimeout config <= 0) $
-    throwIO $
-      startupFailure
-        "Invalid Redis configuration: connection timeout must be greater than zero"
-        (Just "Set STUDIO_MCP_REDIS_TIMEOUT to a positive integer number of seconds.")
-  when (rcSessionTtl config <= 0) $
-    throwIO $
-      startupFailure
-        "Invalid Redis configuration: session TTL must be greater than zero"
-        (Just "Set STUDIO_MCP_SESSION_TTL to a positive integer number of seconds.")
-  when (rcLockTtl config <= 0) $
-    throwIO $
-      startupFailure
-        "Invalid Redis configuration: lock TTL must be greater than zero"
-        (Just "Set STUDIO_MCP_LOCK_TTL to a positive integer number of seconds.")
-  pure config
+      defaultRedisConfig
+        { rcHost = rucHost parsed,
+          rcPort = rucPort parsed,
+          rcPassword = rucPassword parsed,
+          rcDatabase = rucDatabase parsed,
+          rcUseTls = rucUseTls parsed
+        }
 
 data RedisUrlConfig = RedisUrlConfig
   { rucHost :: Text,

@@ -49,7 +49,7 @@ postgresql-ha:
   postgresql:
     replicaCount: 3
   persistence:
-    storageClass: ""
+    storageClass: "studiomcp-manual"
   pgpool:
     replicaCount: 2
 ```

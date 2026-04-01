@@ -69,8 +69,7 @@ spec = do
     it "round-trips through JSON" $ do
       let req =
             UploadRequest
-              { urArtifactId = Nothing,
-                urFileName = "video.mp4",
+              { urFileName = "video.mp4",
                 urContentType = "video/mp4",
                 urFileSize = 1024000,
                 urMetadata = Just [("key", "value")]
@@ -83,8 +82,7 @@ spec = do
     it "handles missing metadata" $ do
       let req =
             UploadRequest
-              { urArtifactId = Nothing,
-                urFileName = "audio.wav",
+              { urFileName = "audio.wav",
                 urContentType = "audio/wav",
                 urFileSize = 500000,
                 urMetadata = Nothing
@@ -195,52 +193,6 @@ spec = do
           decoded = decode encoded :: Maybe PresignedDownloadUrl
       fmap pduContentType decoded `shouldBe` Just "video/mp4"
       fmap pduFileSize decoded `shouldBe` Just 1024000
-
-  describe "LoginResponse" $ do
-    it "round-trips through JSON" $ do
-      now <- getCurrentTime
-      let response =
-            LoginResponse
-              { lrpProfile =
-                  ProfileResponse
-                    { prSubjectId = "user-123"
-                    , prTenantId = "tenant-456"
-                    , prExpiresAt = now
-                    , prCreatedAt = now
-                    , prLastActiveAt = now
-                    }
-              }
-          decoded = decode (encode response) :: Maybe LoginResponse
-      fmap (prSubjectId . lrpProfile) decoded `shouldBe` Just "user-123"
-
-  describe "RunListResponse" $ do
-    it "round-trips through JSON" $ do
-      now <- getCurrentTime
-      let response =
-            RunListResponse
-              { rlrRuns =
-                  [ RunStatusResponse
-                      { rsrRunId = RunId "run-list-123"
-                      , rsrStatus = "running"
-                      , rsrProgress = Just 25
-                      , rsrStartedAt = Just now
-                      , rsrCompletedAt = Nothing
-                      }
-                  ]
-              }
-          decoded = decode (encode response) :: Maybe RunListResponse
-      fmap (length . rlrRuns) decoded `shouldBe` Just 1
-
-  describe "ArtifactGovernanceResponse" $ do
-    it "round-trips through JSON" $ do
-      let response =
-            ArtifactGovernanceResponse
-              { agrArtifactId = "artifact-123"
-              , agrAction = "archive"
-              , agrStatus = "archived"
-              }
-          decoded = decode (encode response) :: Maybe ArtifactGovernanceResponse
-      fmap agrStatus decoded `shouldBe` Just "archived"
 
 sampleDagSpec :: DagSpec
 sampleDagSpec =

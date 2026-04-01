@@ -13,9 +13,7 @@ module StudioMCP.MCP.Handlers
 where
 
 import Control.Concurrent (forkIO)
-import Control.Exception (throwIO)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
-import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Time (getCurrentTime)
@@ -59,15 +57,12 @@ import StudioMCP.Storage.MinIO (MinIOConfig (..), readSummary)
 import StudioMCP.Storage.Keys (summaryRefForRun)
 import StudioMCP.Storage.TenantStorage
   ( TenantStorageService,
-    configureTenantBackend,
     defaultTenantStorageConfig,
-    loadTenantBackendConfigFile,
-    newTenantStorageServiceWithFile,
+    newTenantStorageService,
     tscPlatformAccessKeyId,
     tscPlatformEndpoint,
     tscPlatformSecretAccessKey,
   )
-import StudioMCP.Util.Startup (invalidConfigurationFile)
 import StudioMCP.Messaging.Pulsar (PulsarConfig (..))
 
 data ServerEnv = ServerEnv
@@ -108,22 +103,7 @@ createServerEnv appConfig = do
           , tscPlatformAccessKeyId = minioAccess
           , tscPlatformSecretAccessKey = minioSecret
           }
-  tenantStorage <- newTenantStorageServiceWithFile tenantStorageConfig (persistenceRoot </> "tenant-storage.json")
-  maybeTenantBackendConfig <- resolveTenantBackendConfigPath
-  case maybeTenantBackendConfig of
-    Nothing -> pure ()
-    Just configPath -> do
-      backendOverridesResult <- loadTenantBackendConfigFile configPath
-      case backendOverridesResult of
-        Left err ->
-          throwIO $
-            invalidConfigurationFile
-              "tenant backend override"
-              configPath
-              err
-              (Just "Fix the backend override file contents or unset STUDIO_MCP_TENANT_BACKENDS_FILE.")
-        Right backendOverrides ->
-          mapM_ (uncurry (configureTenantBackend tenantStorage)) (Map.toList backendOverrides)
+  tenantStorage <- newTenantStorageService tenantStorageConfig
   governance <- newGovernanceServiceWithFile defaultGovernancePolicy (persistenceRoot </> "governance.json")
   auditTrail <- newAuditTrailServiceWithFile (persistenceRoot </> "audit.json")
   let runtimeConfig =
@@ -162,13 +142,6 @@ resolvePersistenceRoot = do
   persistenceRoot <- maybe ".studiomcp-data" id <$> lookupEnv "STUDIOMCP_DATA_DIR"
   createDirectoryIfMissing True persistenceRoot
   pure persistenceRoot
-
-resolveTenantBackendConfigPath :: IO (Maybe FilePath)
-resolveTenantBackendConfigPath = do
-  primary <- lookupEnv "STUDIO_MCP_TENANT_BACKENDS_FILE"
-  case primary of
-    Just _ -> pure primary
-    Nothing -> lookupEnv "STUDIOMCP_TENANT_BACKENDS_FILE"
 
 submitDag :: ServerEnv -> DagSpec -> IO SubmissionResult
 submitDag serverEnv dagSpec =

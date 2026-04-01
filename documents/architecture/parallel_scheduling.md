@@ -5,22 +5,22 @@
 **Supersedes**: N/A
 **Referenced by**: [overview.md](overview.md#canonical-follow-on-documents), [../../STUDIOMCP_DEVELOPMENT_PLAN.md](../../STUDIOMCP_DEVELOPMENT_PLAN.md#current-repo-assessment-against-this-plan)
 
-> **Purpose**: Canonical current-state contract for the deterministic parallel scheduler implemented in `studioMCP`, including the semantics it must preserve as the runtime evolves.
+> **Purpose**: Canonical current-state contract for how `studioMCP` may add deterministic parallel scheduling without weakening the typed execution, timeout, and summary guarantees that already exist in the sequential runtime.
 
 ## Summary
 
-`studioMCP` now executes DAGs in deterministic topological batches. The runtime runs each runnable batch concurrently while preserving the same externally visible semantics that previously held under strictly sequential execution:
+`studioMCP` currently executes DAGs sequentially in topological order. Any future parallel executor is a bounded optimization layer over that baseline and must preserve the same externally visible semantics:
 
 - DAG validity is still decided before execution starts
 - every node still resolves to a typed success or structured failure
 - timeout remains a first-class failure outcome
 - the final summary remains the terminal immutable record of the run
 
-This document defines the guarantees of the implemented scheduler and the constraints any future optimization must preserve.
+This document defines the required guarantees for a future parallel scheduler. It does not claim that production parallel execution code exists today.
 
 ## Execution Model
 
-The implemented scheduler reduces wall-clock time for workflows with independent stages:
+A parallel scheduler reduces wall-clock time for workflows with independent stages:
 
 ```
 DAG: A -> [B, C] -> D
@@ -29,7 +29,7 @@ Sequential: A, B, C, D (4 time units)
 Parallel:   A, (B || C), D (3 time units)
 ```
 
-Independent nodes (B and C above) may execute concurrently while respecting dependency edges. The current runtime groups runnable nodes into deterministic batches using stable `NodeId` ordering and executes each batch concurrently before advancing to the next batch.
+Independent nodes (B and C above) may execute concurrently while respecting dependency edges.
 
 ## Design Rationale
 
@@ -44,7 +44,7 @@ This design implies that worker pool sizing affects parallel throughput, Pulsar 
 
 ## Correctness Baseline
 
-- the sequential topological order remains the semantic baseline for validation, reporting order, and summary construction
+- the sequential executor remains the correctness baseline
 - DAG validation remains the authority for dependency correctness before execution starts
 - parallel scheduling may change throughput, but it may not redefine runtime semantics
 - the standalone `worker` entrypoint may support direct execution, but the server remains the authoritative orchestration runtime

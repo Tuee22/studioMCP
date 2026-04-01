@@ -2,8 +2,6 @@
 
 module StudioMCP.MCP.Server
   ( runServer,
-    runStdioServer,
-    application,
   )
 where
 
@@ -60,7 +58,6 @@ import StudioMCP.MCP.Core
     defaultServerConfig,
     handleMessageWithAuth,
     newMcpServerWithCatalogs,
-    runMcpServer,
   )
 import StudioMCP.MCP.Handlers
   ( ServerEnv (..),
@@ -74,7 +71,6 @@ import StudioMCP.MCP.Session.Store (storeDeleteSession)
 import StudioMCP.MCP.Session.Types (Session (sessionId), SessionData (..), SessionId (..))
 import StudioMCP.MCP.Session.RedisStore (readSessionData, writeSessionData)
 import StudioMCP.MCP.Transport.Http (getMcpSessionId)
-import StudioMCP.MCP.Transport.Stdio (createStdioTransport, defaultStdioConfig, runStdioTransport)
 import qualified StudioMCP.Observability.McpMetrics as McpMetrics
 import StudioMCP.Util.Logging (configureProcessLogging)
 import System.Environment (lookupEnv)
@@ -82,47 +78,29 @@ import System.Environment (lookupEnv)
 runServer :: IO ()
 runServer = do
   configureProcessLogging
-  (serverEnv, mcpServer, authConfig, authService) <- buildServerRuntime
+  appConfig <- loadAppConfig
+  serverEnv <- createServerEnv appConfig
+
+  -- Initialize auth service
+  authConfig <- loadAuthConfigFromEnv
+  httpManager <- newManager defaultManagerSettings
+  authService <- newAuthService authConfig httpManager
+
+  promptCatalog <- newPromptCatalog
+  mcpServer <-
+    newMcpServerWithCatalogs
+      defaultServerConfig
+      (serverToolCatalog serverEnv)
+      (serverResourceCatalog serverEnv)
+      promptCatalog
+      (Just (serverRateLimiter serverEnv))
+      (Just (serverMcpMetrics serverEnv))
   port <- resolveServerPort
   putStrLn ("studioMCP server listening on 0.0.0.0:" <> show port)
   putStrLn ("Auth enabled: " <> show (acEnabled authConfig))
   runSettings
     (setHost "0.0.0.0" (setPort port (setTimeout 0 defaultSettings)))
     (application serverEnv mcpServer authConfig authService)
-
-runStdioServer :: IO ()
-runStdioServer = do
-  configureProcessLogging
-  (serverEnv, _, _, _) <- buildServerRuntime
-  promptCatalog <- newPromptCatalog
-  mcpServer <-
-    newMcpServerWithCatalogs
-      defaultServerConfig
-      (serverToolCatalog serverEnv)
-      (serverResourceCatalog serverEnv)
-      promptCatalog
-      (Just (serverRateLimiter serverEnv))
-      (Just (serverMcpMetrics serverEnv))
-  stdioTransport <- createStdioTransport defaultStdioConfig
-  runMcpServer mcpServer (runStdioTransport stdioTransport)
-
-buildServerRuntime :: IO (ServerEnv, McpServer, AuthConfig, AuthService)
-buildServerRuntime = do
-  appConfig <- loadAppConfig
-  serverEnv <- createServerEnv appConfig
-  authConfig <- loadAuthConfigFromEnv
-  httpManager <- newManager defaultManagerSettings
-  authService <- newAuthService authConfig httpManager
-  promptCatalog <- newPromptCatalog
-  mcpServer <-
-    newMcpServerWithCatalogs
-      defaultServerConfig
-      (serverToolCatalog serverEnv)
-      (serverResourceCatalog serverEnv)
-      promptCatalog
-      (Just (serverRateLimiter serverEnv))
-      (Just (serverMcpMetrics serverEnv))
-  pure (serverEnv, mcpServer, authConfig, authService)
 
 application :: ServerEnv -> McpServer -> AuthConfig -> AuthService -> Application
 application serverEnv mcpServer authConfig authService request respond =

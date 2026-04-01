@@ -5,10 +5,10 @@ where
 
 import Control.Monad (unless)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import System.Exit (ExitCode (ExitSuccess))
+import System.Exit (ExitCode (ExitSuccess, ExitFailure))
 import System.IO.Unsafe (unsafePerformIO)
 import System.Process (readProcessWithExitCode)
-import Test.Hspec (Spec, describe, it, shouldBe, shouldContain)
+import Test.Hspec (Spec, describe, expectationFailure, it, shouldBe, shouldContain)
 
 spec :: Spec
 spec =
@@ -53,15 +53,10 @@ spec =
       output <- runOuterCliExpectSuccess ["validate", "minio"]
       output `shouldContain` "MinIO validation passed."
 
-    it "exercises MCP conformance through the outer-container CLI" $ do
+    it "exercises the MCP HTTP transport through the outer-container CLI" $ do
       ensureOuterEnvironment
-      output <- runOuterCliExpectSuccess ["validate", "mcp-conformance"]
-      output `shouldContain` "validate mcp-conformance: PASS"
-
-    it "exercises the BFF browser surface through the outer-container CLI" $ do
-      ensureOuterEnvironment
-      output <- runOuterCliExpectSuccess ["validate", "web-bff"]
-      output `shouldContain` "validate web-bff: PASS"
+      output <- runOuterCliExpectSuccess ["validate", "mcp-http"]
+      output `shouldContain` "MCP HTTP validation passed."
 
     it "runs the inference advisory mode validation through the outer-container CLI" $ do
       ensureOuterContainer
@@ -72,6 +67,21 @@ spec =
       ensureOuterEnvironment
       output <- runOuterCliExpectSuccess ["validate", "observability"]
       output `shouldContain` "Observability validation passed."
+
+    it "rehearses horizontal scaling across deployed MCP replicas" $ do
+      ensureOuterEnvironment
+      output <- runOuterCliExpectSuccess ["validate", "mcp-horizontal-scale"]
+      output `shouldContain` "validate horizontal-scale: PASS"
+
+    it "exercises MCP conformance through the outer-container CLI" $ do
+      ensureOuterEnvironment
+      output <- runOuterCliExpectSuccess ["validate", "mcp-conformance"]
+      output `shouldContain` "validate mcp-conformance: PASS"
+
+    it "exercises the BFF browser surface through the outer-container CLI" $ do
+      ensureOuterEnvironment
+      output <- runOuterCliExpectSuccess ["validate", "web-bff"]
+      output `shouldContain` "validate web-bff: PASS"
 
 ensureOuterContainer :: IO ()
 ensureOuterContainer = do
@@ -94,8 +104,11 @@ ensureOuterEnvironment = do
   alreadyReady <- readIORef outerEnvironmentReadyRef
   unless alreadyReady $ do
     ensureOuterContainer
-    _ <- runOuterCliExpectSuccess ["cluster", "up"]
-    _ <- runOuterCliExpectSuccess ["cluster", "deploy", "sidecars"]
+    -- Use the idempotent 'cluster ensure' command which:
+    -- 1. Creates/verifies cluster (idempotent)
+    -- 2. Deploys sidecars (idempotent via helm upgrade --install)
+    -- 3. Waits for all services to be ready
+    _ <- runOuterCliExpectSuccessWithDiagnostics ["cluster", "ensure"]
     writeIORef outerEnvironmentReadyRef True
 
 runComposeExpectSuccess :: [String] -> IO String
@@ -121,6 +134,28 @@ runOuterCliExpectSuccess args = do
   let combinedOutput = stdoutText <> stderrText
   exitCode `shouldBe` ExitSuccess
   pure combinedOutput
+
+-- | Like runOuterCliExpectSuccess but provides detailed diagnostics on failure.
+-- Use this for critical setup commands (like cluster ensure) where understanding
+-- the failure reason is essential.
+runOuterCliExpectSuccessWithDiagnostics :: [String] -> IO String
+runOuterCliExpectSuccessWithDiagnostics args = do
+  (exitCode, stdoutText, stderrText) <-
+    readProcessWithExitCode
+      "docker"
+      ( ["compose", "-f", "docker/docker-compose.yaml", "exec", "-T", "studiomcp-env", "studiomcp"]
+          <> args
+      )
+      ""
+  let combinedOutput = stdoutText <> stderrText
+  case exitCode of
+    ExitSuccess -> pure combinedOutput
+    ExitFailure code -> do
+      expectationFailure $
+        "Command 'studiomcp " <> unwords args <> "' failed with exit code " <> show code <> ":\n"
+          <> "--- stdout ---\n" <> stdoutText <> "\n"
+          <> "--- stderr ---\n" <> stderrText
+      pure ""  -- unreachable due to expectationFailure throwing, but needed for types
 
 outerContainerReadyRef :: IORef Bool
 outerContainerReadyRef = unsafePerformIO (newIORef False)

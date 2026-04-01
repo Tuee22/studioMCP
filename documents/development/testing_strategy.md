@@ -69,7 +69,7 @@ Required integration categories:
 - session-store-backed reconnect behavior
 - real MCP transport behavior over `stdio`
 - real MCP transport behavior over Streamable HTTP
-- browser and BFF flows through the live BFF-to-MCP path
+- browser and BFF flows once implemented
 
 ## Protocol Validation
 
@@ -106,23 +106,52 @@ Security validation must cover:
 
 ## Browser And BFF Validation
 
-The BFF and browser-facing validation surface must cover:
+Once the BFF and browser surface exist, end-to-end tests must cover:
 
 - login
-- profile lookup
 - upload
 - run submission
-- run listing and status observation
-- run cancellation
-- artifact governance actions
 - progress observation
 - artifact download
 - chat-assisted workflow operations
-- logout and session invalidation
+
+## Idempotent Test Infrastructure
+
+Test infrastructure that creates external resources (containers, clusters, temporary files) must follow idempotent patterns:
+
+Required behavior:
+
+- Fixed, predictable names for all test containers (see [Docker Policy](../engineering/docker_policy.md#container-naming-policy))
+- Cleanup-before-start: Remove any existing resource with the same name before creating
+- Cleanup-on-exit: Bracket patterns that remove resources even on test failure
+
+Implementation pattern:
+
+```haskell
+withTemporaryResource action =
+  bracket
+    (cleanupExisting >> createResource)  -- cleanup-before-start
+    cleanupResource                       -- cleanup-on-exit
+    action
+```
+
+Benefits:
+
+- Re-running tests never fails due to leftover containers from previous runs
+- Interrupted tests (Ctrl+C, crashes) don't leave orphaned resources
+- CI runners don't accumulate stale test infrastructure
+- `docker ps -a --filter "name=studiomcp"` shows predictable container state
+
+Fixed names in use:
+
+| Container | Purpose |
+|-----------|---------|
+| `studiomcp` | Kind cluster |
+| `studiomcp-test-redis` | Validation Redis for session tests |
 
 ## Current Repo Note
 
-The current repo already has strong foundational unit and integration coverage for execution and sidecar behavior. Its MCP transport and conformance coverage now runs through `validate mcp-stdio`, `validate mcp-http`, and `validate mcp-conformance`, and the browser-facing BFF surface is exercised through `validate web-bff` plus the outer integration harness, including the served browser shell and the chat/run SSE routes.
+The current repo already has strong foundational unit and integration coverage for execution and sidecar behavior. Its MCP transport and conformance coverage now runs through `validate mcp-stdio`, `validate mcp-http`, and `validate mcp-conformance`.
 
 ## Cross-References
 

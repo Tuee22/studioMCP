@@ -5,15 +5,13 @@
 **Supersedes**: N/A
 **Referenced by**: [../README.md](../README.md#documentation-suite), [../development/local_dev.md](../development/local_dev.md#cross-references), [../operations/runbook_local_debugging.md](../operations/runbook_local_debugging.md#cross-references), [../architecture/cli_architecture.md](../architecture/cli_architecture.md#cross-references), [../engineering/k8s_storage.md](../engineering/k8s_storage.md#cross-references), [../../STUDIOMCP_DEVELOPMENT_PLAN.md](../../STUDIOMCP_DEVELOPMENT_PLAN.md#current-validation-state)
 
-> **Purpose**: Canonical reference for the supported current `studiomcp` CLI surface, including server modes, validation commands, and cluster operations.
+> **Purpose**: Canonical reference for the supported current `studiomcp` CLI surface and near-term planned ergonomics.
 
 ## Current Implemented Commands
 
 The codebase currently implements this subset:
 
 - `studiomcp server`
-- `studiomcp stdio`
-- `studiomcp bff`
 - `studiomcp inference`
 - `studiomcp worker`
 - `studiomcp validate-dag <path>`
@@ -48,40 +46,32 @@ The codebase currently implements this subset:
 - `studiomcp validate quotas`
 - `studiomcp validate rate-limit`
 - `studiomcp validate mcp-conformance`
-- `studiomcp validate storage-policy`
 - `studiomcp cluster up`
 - `studiomcp cluster down`
-- `studiomcp cluster reset`
 - `studiomcp cluster status`
+- `studiomcp cluster ensure`
 - `studiomcp cluster deploy sidecars`
 - `studiomcp cluster deploy server`
 - `studiomcp cluster storage reconcile`
-- `studiomcp cluster storage delete <name>`
 
 Current note:
 
 - The retired `studiomcp validate mcp` alias has been removed. Use `validate mcp-stdio`, `validate mcp-http`, or `validate mcp-conformance`.
-- `studiomcp bff` is implemented in the main CLI, and `studiomcp-bff` remains available as the dedicated executable form.
+- `studiomcp-bff` exists as a dedicated executable today; wiring `studiomcp bff` into the main CLI remains future ergonomic work.
 
-## Current Command Families
+## Required Target Surface
 
-The supported command surface is organized into these families today.
+The supported command surface must converge on one Haskell CLI with at least these families:
 
 ### Server Modes
 
 | Command | Description | Status |
 |---------|-------------|--------|
 | `studiomcp server` | Start MCP server (HTTP + operational endpoints) | ✅ Implemented |
-| `studiomcp stdio` | Start MCP server over stdio transport | ✅ Implemented |
-| `studiomcp bff` | Start BFF server | ✅ Implemented |
+| `studiomcp stdio` | Start MCP server in stdio transport mode | 📋 Planned ergonomic follow-up |
 | `studiomcp inference` | Start inference mode server | ✅ Implemented |
 | `studiomcp worker` | Start worker mode server | ✅ Implemented |
-
-Startup behavior note:
-
-- invalid startup configuration must produce a graceful non-zero exit with a helpful redacted message
-- raw exception text is not an acceptable user-facing startup contract
-- canonical rule: [CLI Architecture](../architecture/cli_architecture.md#startup-failure-semantics)
+| `studiomcp bff` | Start BFF server | 📋 Planned ergonomic follow-up |
 
 ### DAG Commands
 
@@ -97,12 +87,31 @@ Startup behavior note:
 |---------|-------------|
 | `studiomcp cluster up` | Start local Kubernetes cluster |
 | `studiomcp cluster down` | Stop local Kubernetes cluster |
-| `studiomcp cluster reset` | Recreate the local cluster and clear local cluster data |
+| `studiomcp cluster reset` | Reset cluster to clean state |
 | `studiomcp cluster status` | Show cluster status |
+| `studiomcp cluster ensure` | Idempotent setup: up + sidecars + wait for all services (recommended for automation) |
 | `studiomcp cluster storage reconcile` | Reconcile storage resources |
-| `studiomcp cluster storage delete <name>` | Delete a reconciled local storage resource |
+| `studiomcp cluster storage delete <name>` | Delete a storage resource |
 | `studiomcp cluster deploy sidecars` | Deploy sidecar services |
 | `studiomcp cluster deploy server` | Deploy MCP server |
+
+### Idempotency Guarantees
+
+All cluster management commands are idempotent and safe to run repeatedly:
+
+| Command | Behavior |
+|---------|----------|
+| `cluster up` | Creates cluster only if it doesn't exist; ensures network connectivity |
+| `cluster down` | Deletes cluster only if it exists |
+| `cluster deploy sidecars` | Uses `helm upgrade --install` pattern (idempotent) |
+| `cluster deploy server` | Uses `helm upgrade --install` pattern (idempotent) |
+| `cluster storage reconcile` | Uses `kubectl apply` (idempotent) |
+| `cluster ensure` | Single idempotent command: brings up cluster, deploys sidecars, waits for all services (Redis, PostgreSQL, MinIO, Pulsar, Keycloak). Recommended for automation and tests. |
+
+Running any of these commands multiple times produces the same result as running once. This design supports:
+- **Developer workflow**: Run `cluster ensure` at any point to guarantee a working environment
+- **CI/CD**: Integration tests use `cluster ensure` for reliable setup
+- **Recovery**: After failures or interruptions, simply re-run the command
 
 ### Validation Commands - Current (Phases 0-12)
 
@@ -192,18 +201,10 @@ Startup behavior note:
 
 **`validate web-bff`** tests:
 - BFF server starts
-- Built-in browser shell is served
-- Browser login and cookie session issuance
-- Profile lookup
+- User authentication flow
+- MCP client integration
 - Upload presigned URL generation
-- Upload confirmation
 - Download presigned URL generation
-- Advisory chat response
-- Advisory chat SSE framing
-- MCP-backed workflow submission, list, status, and cancel
-- Run-progress SSE framing
-- MCP-backed artifact hide and archive
-- Logout and session invalidation
 
 ### Validation Commands - Artifacts (Phase 17) - ✅ IMPLEMENTED
 
@@ -260,12 +261,6 @@ Startup behavior note:
 | `studiomcp validate quotas` | Validate quota enforcement | ✅ Implemented |
 | `studiomcp validate rate-limit` | Validate rate limiting and redaction | ✅ Implemented |
 
-**`validate observability`** tests:
-- MCP method and tool metrics emitted through `/metrics`
-- Live tool execution increments the expected counters
-- `/healthz` reflects degraded dependencies when sidecars are unavailable
-- Prometheus export includes the expected observability surface
-
 **`validate audit`** tests:
 - Correlation IDs present in logs
 - Subject/tenant context logged
@@ -285,7 +280,6 @@ Startup behavior note:
 - Error code compliance
 - Session behavior compliance
 - Transport compliance (both stdio and HTTP)
-- BFF-mediated HTTP MCP validation path
 
 ## Validation Command Evolution
 
@@ -297,7 +291,7 @@ Startup behavior note:
 | 16 | `validate web-bff` |
 | 17 | `validate artifact-storage`, `validate artifact-governance` |
 | 18 | `validate mcp-tools`, `validate mcp-resources`, `validate mcp-prompts` |
-| 19 | `validate observability`, `validate audit`, `validate quotas`, `validate rate-limit` |
+| 19 | `validate audit`, `validate quotas`, `validate rate-limit` |
 | 21 | `validate mcp-conformance` |
 
 ## Legacy Alias Retirement
@@ -322,7 +316,7 @@ docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp <subco
 
 ## Current Repo Note
 
-This reference describes the implemented command surface. The current command surface covers server, stdio, BFF, inference, and worker entrypoints; cluster lifecycle and storage operations; DAG validation; documentation validation; executor and end-to-end validation; worker-runtime validation; Pulsar, MinIO, boundary, and FFmpeg-adapter validation; MCP transport validation; auth validation; session scaling validation; BFF validation; artifact validation; MCP catalog validation; inference; observability; quotas; rate limiting; storage policy; and MCP conformance validation.
+This reference describes the implemented command surface plus remaining CLI ergonomics. The current command surface covers cluster lifecycle, DAG validation, documentation validation, executor and end-to-end validation, worker-runtime validation, Pulsar, MinIO, boundary, FFmpeg-adapter, MCP transport validation, auth validation, session scaling validation, BFF validation, artifact validation, MCP catalog validation, inference, observability, quotas, rate limiting, and MCP conformance validation. The remaining target surface is mostly ergonomic: `cluster reset`, a first-class `studiomcp bff` subcommand, and any future operator-facing convenience commands.
 
 ## Cross-References
 

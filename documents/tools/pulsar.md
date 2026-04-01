@@ -42,7 +42,7 @@ helm install pulsar apache/pulsar \
   --set zookeeper.replicaCount=3 \
   --set bookkeeper.replicaCount=3 \
   --set broker.replicaCount=3 \
-  --set persistence.storageClass=""
+  --set persistence.storageClass="studiomcp-manual"
 ```
 
 HA deployment is the preferred mode where possible. See [../engineering/k8s_storage.md](../engineering/k8s_storage.md#ha-deployment-mode) for the full policy.

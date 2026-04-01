@@ -12,7 +12,6 @@ where
 
 data Command
   = ServerCommand
-  | StdioCommand
   | BffCommand
   | InferenceCommand
   | WorkerCommand
@@ -60,8 +59,8 @@ data ValidateCommand
 data ClusterCommand
   = ClusterUpCommand
   | ClusterDownCommand
-  | ClusterResetCommand
   | ClusterStatusCommand
+  | ClusterEnsureCommand
   | ClusterDeployCommand ClusterDeployTarget
   | ClusterStorageCommand ClusterStorageCommand
   deriving (Eq, Show)
@@ -73,14 +72,12 @@ data ClusterDeployTarget
 
 data ClusterStorageCommand
   = ClusterStorageReconcile
-  | ClusterStorageDelete String
   deriving (Eq, Show)
 
 parseCommand :: [String] -> Either String Command
 parseCommand args =
   case args of
     ["server"] -> Right ServerCommand
-    ["stdio"] -> Right StdioCommand
     ["bff"] -> Right BffCommand
     ["inference"] -> Right InferenceCommand
     ["worker"] -> Right WorkerCommand
@@ -119,12 +116,11 @@ parseCommand args =
     ["validate", "storage-policy"] -> Right (ValidateCommand ValidateStoragePolicyCommand)
     ["cluster", "up"] -> Right (ClusterCommand ClusterUpCommand)
     ["cluster", "down"] -> Right (ClusterCommand ClusterDownCommand)
-    ["cluster", "reset"] -> Right (ClusterCommand ClusterResetCommand)
     ["cluster", "status"] -> Right (ClusterCommand ClusterStatusCommand)
+    ["cluster", "ensure"] -> Right (ClusterCommand ClusterEnsureCommand)
     ["cluster", "deploy", "sidecars"] -> Right (ClusterCommand (ClusterDeployCommand DeploySidecars))
     ["cluster", "deploy", "server"] -> Right (ClusterCommand (ClusterDeployCommand DeployServer))
     ["cluster", "storage", "reconcile"] -> Right (ClusterCommand (ClusterStorageCommand ClusterStorageReconcile))
-    ["cluster", "storage", "delete", volumeName] -> Right (ClusterCommand (ClusterStorageCommand (ClusterStorageDelete volumeName)))
     _ -> Left usageText
 
 usageText :: String
@@ -132,7 +128,6 @@ usageText =
   unlines
     [ "usage:"
     , "  studiomcp server"
-    , "  studiomcp stdio"
     , "  studiomcp bff"
     , "  studiomcp inference"
     , "  studiomcp worker"
@@ -171,10 +166,9 @@ usageText =
     , "  studiomcp validate storage-policy # Storage policy enforcement"
     , "  studiomcp cluster up"
     , "  studiomcp cluster down"
-    , "  studiomcp cluster reset"
     , "  studiomcp cluster status"
+    , "  studiomcp cluster ensure            # Idempotent: up + sidecars + wait for all services"
     , "  studiomcp cluster deploy sidecars"
     , "  studiomcp cluster deploy server"
     , "  studiomcp cluster storage reconcile"
-    , "  studiomcp cluster storage delete <name>"
     ]

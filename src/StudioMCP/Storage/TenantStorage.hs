@@ -1,4 +1,3 @@
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 
@@ -11,7 +10,6 @@ module StudioMCP.Storage.TenantStorage
     -- * Tenant Storage Service
     TenantStorageService (..),
     newTenantStorageService,
-    newTenantStorageServiceWithFile,
 
     -- * Tenant Artifact
     TenantArtifact (..),
@@ -20,14 +18,8 @@ module StudioMCP.Storage.TenantStorage
     getTenantBucket,
     getTenantArtifactKey,
     createTenantArtifact,
-    createTenantArtifactVersion,
     getTenantArtifact,
-    getTenantArtifactVersion,
     listTenantArtifacts,
-    listArtifactVersions,
-    configureTenantBackend,
-    getTenantBackend,
-    loadTenantBackendConfigFile,
 
     -- * Presigned URLs
     generateUploadUrl,
@@ -48,33 +40,22 @@ import Data.ByteArray.Encoding (Base (Base16), convertToBase)
 import Data.Aeson
   ( FromJSON (parseJSON),
     ToJSON (toJSON),
-    Value,
-    decode,
-    encode,
     object,
     withObject,
     (.:),
-    (.:?),
-    (.!=),
     (.=),
   )
-import Data.Aeson.Types (Parser)
-import qualified Data.ByteString as ByteString
-import qualified Data.ByteString.Lazy as LBS
 import Data.Char (isAlphaNum, ord)
-import Data.List (sortOn)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
+import qualified Data.ByteString as ByteString
 import Data.Time (UTCTime, addUTCTime, getCurrentTime)
 import Data.Time.Format (defaultTimeLocale, formatTime)
 import qualified Data.UUID as UUID
 import qualified Data.UUID.V4 as UUID
-import GHC.Generics (Generic)
-import System.Directory (createDirectoryIfMissing, doesFileExist)
-import System.FilePath (takeDirectory)
 import StudioMCP.Auth.Types (TenantId (..))
 import StudioMCP.Storage.ContentAddressed (ContentAddress)
 import StudioMCP.Storage.Keys (BucketName (..), ObjectKey (..))
@@ -247,95 +228,31 @@ tenantStorageErrorCode (StorageQuotaExceeded _) = "storage-quota-exceeded"
 -- | Internal state for tenant storage service
 data TenantStorageState = TenantStorageState
   { tssArtifacts :: Map.Map Text TenantArtifact,
-    tssArtifactVersions :: Map.Map Text [TenantArtifact],
     tssTenantBackends :: Map.Map TenantId TenantStorageBackend,
     tssPresignedUrls :: Map.Map Text PresignedUrl
   }
 
-data TenantBackendAssignment = TenantBackendAssignment
-  { tbaTenantId :: TenantId,
-    tbaBackend :: TenantStorageBackend
-  }
-  deriving (Eq, Show, Generic)
-
-instance ToJSON TenantBackendAssignment where
-  toJSON TenantBackendAssignment {..} =
-    object
-      [ "tenantId" .= tbaTenantId,
-        "backend" .= tenantStorageBackendConfigValue tbaBackend
-      ]
-
-instance FromJSON TenantBackendAssignment where
-  parseJSON = withObject "TenantBackendAssignment" $ \obj ->
-    TenantBackendAssignment
-      <$> obj .: "tenantId"
-      <*> (obj .: "backend" >>= parseTenantStorageBackendConfigValue)
-
-data ArtifactVersionHistory = ArtifactVersionHistory
-  { avhArtifactId :: Text,
-    avhVersions :: [TenantArtifact]
-  }
-  deriving (Eq, Show, Generic)
-
-instance ToJSON ArtifactVersionHistory
-instance FromJSON ArtifactVersionHistory
-
-data TenantStorageSnapshot = TenantStorageSnapshot
-  { tssSnapshotArtifacts :: [TenantArtifact],
-    tssSnapshotVersions :: [ArtifactVersionHistory],
-    tssSnapshotTenantBackends :: [TenantBackendAssignment]
-  }
-  deriving (Eq, Show, Generic)
-
-instance ToJSON TenantStorageSnapshot
-instance FromJSON TenantStorageSnapshot
-
-data TenantBackendConfigFile = TenantBackendConfigFile
-  { tbcTenants :: Map.Map Text TenantStorageBackend
-  }
-  deriving (Eq, Show, Generic)
-
-instance FromJSON TenantBackendConfigFile where
-  parseJSON = withObject "TenantBackendConfigFile" $ \obj ->
-    TenantBackendConfigFile <$> obj .:? "tenants" .!= Map.empty
-
 -- | Tenant storage service
 data TenantStorageService = TenantStorageService
   { tssConfig :: TenantStorageConfig,
-    tssState :: TVar TenantStorageState,
-    tssPersistencePath :: Maybe FilePath
+    tssState :: TVar TenantStorageState
   }
 
 -- | Create a new tenant storage service
 newTenantStorageService :: TenantStorageConfig -> IO TenantStorageService
-newTenantStorageService = newTenantStorageServiceInternal Nothing
-
-newTenantStorageServiceWithFile :: TenantStorageConfig -> FilePath -> IO TenantStorageService
-newTenantStorageServiceWithFile config persistencePath =
-  newTenantStorageServiceInternal (Just persistencePath) config
-
-newTenantStorageServiceInternal :: Maybe FilePath -> TenantStorageConfig -> IO TenantStorageService
-newTenantStorageServiceInternal maybePersistencePath config = do
-  initialState <-
-    case maybePersistencePath of
-      Just persistencePath -> loadTenantStorageState persistencePath
-      Nothing -> pure emptyTenantStorageState
-  stateVar <- newTVarIO initialState
+newTenantStorageService config = do
+  stateVar <-
+    newTVarIO
+      TenantStorageState
+        { tssArtifacts = Map.empty,
+          tssTenantBackends = Map.empty,
+          tssPresignedUrls = Map.empty
+        }
   pure
     TenantStorageService
       { tssConfig = config,
-        tssState = stateVar,
-        tssPersistencePath = maybePersistencePath
+        tssState = stateVar
       }
-
-emptyTenantStorageState :: TenantStorageState
-emptyTenantStorageState =
-  TenantStorageState
-    { tssArtifacts = Map.empty,
-      tssArtifactVersions = Map.empty,
-      tssTenantBackends = Map.empty,
-      tssPresignedUrls = Map.empty
-    }
 
 -- | Get the bucket name for a tenant
 getTenantBucket :: TenantStorageService -> TenantId -> BucketName
@@ -384,57 +301,8 @@ createTenantArtifact service tenantId contentType fileName fileSize metadata = d
               }
       atomically $ do
         modifyTVar' (tssState service) $ \state ->
-          state
-            { tssArtifacts = Map.insert artifactId artifact (tssArtifacts state),
-              tssArtifactVersions = Map.insert artifactId [artifact] (tssArtifactVersions state)
-            }
-      persistTenantStorageState service
+          state {tssArtifacts = Map.insert artifactId artifact (tssArtifacts state)}
       pure $ Right artifact
-
-createTenantArtifactVersion ::
-  TenantStorageService ->
-  TenantId ->
-  Text ->
-  Text ->
-  Text ->
-  Integer ->
-  Map.Map Text Text ->
-  IO (Either TenantStorageError TenantArtifact)
-createTenantArtifactVersion service tenantId artifactId contentType fileName fileSize metadata = do
-  let config = tssConfig service
-  if fileSize > tscMaxArtifactSize config
-    then pure $ Left $ ArtifactTooLarge fileSize (tscMaxArtifactSize config)
-    else do
-      existingResult <- getTenantArtifact service tenantId artifactId
-      case existingResult of
-        Left err -> pure $ Left err
-        Right existingArtifact -> do
-          state <- readTVarIO (tssState service)
-          let existingVersions =
-                Map.findWithDefault [existingArtifact] artifactId (tssArtifactVersions state)
-          now <- getCurrentTime
-          let artifact =
-                existingArtifact
-                  { taContentAddress = Nothing,
-                    taContentType = contentType,
-                    taFileName = fileName,
-                    taFileSize = fileSize,
-                    taVersion = taVersion existingArtifact + 1,
-                    taCreatedAt = now,
-                    taMetadata = metadata
-                  }
-          atomically $ do
-            modifyTVar' (tssState service) $ \state ->
-              state
-                { tssArtifacts = Map.insert artifactId artifact (tssArtifacts state),
-                  tssArtifactVersions =
-                    Map.insert
-                      artifactId
-                      (sortArtifactsByVersion (existingVersions <> [artifact]))
-                      (tssArtifactVersions state)
-                }
-          persistTenantStorageState service
-          pure $ Right artifact
 
 -- | Get a tenant artifact by ID
 getTenantArtifact ::
@@ -461,35 +329,6 @@ listTenantArtifacts service tenantId = do
   state <- readTVarIO (tssState service)
   pure $ filter (\a -> taTenantId a == tenantId) $ Map.elems (tssArtifacts state)
 
-getTenantArtifactVersion ::
-  TenantStorageService ->
-  TenantId ->
-  Text ->
-  Int ->
-  IO (Either TenantStorageError TenantArtifact)
-getTenantArtifactVersion service tenantId artifactId version = do
-  state <- readTVarIO (tssState service)
-  case Map.lookup artifactId (tssArtifactVersions state) of
-    Nothing -> pure $ Left $ ArtifactNotFound artifactId
-    Just artifacts ->
-      case filter (\artifact -> taTenantId artifact == tenantId && taVersion artifact == version) artifacts of
-        [] -> pure $ Left $ ArtifactVersionNotFound artifactId version
-        artifact : _ -> pure $ Right artifact
-
-listArtifactVersions ::
-  TenantStorageService ->
-  TenantId ->
-  Text ->
-  IO (Either TenantStorageError [TenantArtifact])
-listArtifactVersions service tenantId artifactId = do
-  state <- readTVarIO (tssState service)
-  case Map.lookup artifactId (tssArtifactVersions state) of
-    Nothing -> pure $ Left $ ArtifactNotFound artifactId
-    Just artifacts ->
-      if all ((/= tenantId) . taTenantId) artifacts
-        then pure $ Left $ ArtifactNotFound artifactId
-        else pure $ Right $ sortArtifactsByVersion (filter ((== tenantId) . taTenantId) artifacts)
-
 -- | Generate a presigned URL for upload
 generateUploadUrl ::
   TenantStorageService ->
@@ -500,20 +339,15 @@ generateUploadUrl ::
 generateUploadUrl service tenantId artifactId contentType = do
   now <- getCurrentTime
   backend <- resolveTenantBackend service tenantId
-  latestArtifactResult <- getTenantArtifact service tenantId artifactId
   let config = tssConfig service
       bucket = getTenantBucket service tenantId
-      version =
-        case latestArtifactResult of
-          Right artifact -> taVersion artifact
-          Left _ -> 1
-      key = getTenantArtifactKey tenantId artifactId version
+      key = getTenantArtifactKey tenantId artifactId 1
+      expiresAt = addUTCTime (fromIntegral (tscUploadUrlTtl config)) now
       headers =
         Map.fromList
           [ ("Content-Type", contentType),
             ("x-amz-meta-artifact-id", artifactId),
-            ("x-amz-meta-tenant-id", let TenantId t = tenantId in t),
-            ("x-amz-meta-version", T.pack (show version))
+            ("x-amz-meta-tenant-id", let TenantId t = tenantId in t)
           ]
   case buildPresignedUrl config backend now (tscUploadUrlTtl config) "PUT" bucket key headers of
     Left err -> pure (Left err)
@@ -534,18 +368,16 @@ generateDownloadUrl ::
   Maybe Int ->
   IO (Either TenantStorageError PresignedUrl)
 generateDownloadUrl service tenantId artifactId maybeVersion = do
-  artifactResult <-
-    case maybeVersion of
-      Nothing -> getTenantArtifact service tenantId artifactId
-      Just version -> getTenantArtifactVersion service tenantId artifactId version
+  artifactResult <- getTenantArtifact service tenantId artifactId
   case artifactResult of
     Left err -> pure $ Left err
     Right artifact -> do
       now <- getCurrentTime
       backend <- resolveTenantBackend service tenantId
       let config = tssConfig service
+          version = maybe (taVersion artifact) id maybeVersion
           bucket = getTenantBucket service tenantId
-          key = getTenantArtifactKey tenantId artifactId (taVersion artifact)
+          key = getTenantArtifactKey tenantId artifactId version
       pure $
         buildPresignedUrl
           config
@@ -563,19 +395,6 @@ generateArtifactId = do
   uuid <- UUID.nextRandom
   pure $ "artifact-" <> UUID.toText uuid
 
-configureTenantBackend :: TenantStorageService -> TenantId -> TenantStorageBackend -> IO ()
-configureTenantBackend service tenantId backend = do
-  atomically $ do
-    modifyTVar' (tssState service) $ \state ->
-      state
-        { tssTenantBackends =
-            Map.insert tenantId backend (tssTenantBackends state)
-        }
-  persistTenantStorageState service
-
-getTenantBackend :: TenantStorageService -> TenantId -> IO TenantStorageBackend
-getTenantBackend = resolveTenantBackend
-
 resolveTenantBackend :: TenantStorageService -> TenantId -> IO TenantStorageBackend
 resolveTenantBackend service tenantId = do
   state <- readTVarIO (tssState service)
@@ -584,118 +403,6 @@ resolveTenantBackend service tenantId = do
       (tscDefaultBackend (tssConfig service))
       tenantId
       (tssTenantBackends state)
-
-loadTenantBackendConfigFile :: FilePath -> IO (Either Text (Map.Map TenantId TenantStorageBackend))
-loadTenantBackendConfigFile configPath = do
-  exists <- doesFileExist configPath
-  if not exists
-    then pure $ Left ("Tenant backend config file does not exist: " <> T.pack configPath)
-    else do
-      rawBytes <- LBS.readFile configPath
-      pure $
-        case decode rawBytes of
-          Just configFile ->
-            Right $
-              Map.fromList
-                [ (TenantId tenantIdText, backend)
-                | (tenantIdText, backend) <- Map.toList (tbcTenants configFile)
-                ]
-          Nothing ->
-            Left ("Tenant backend config file is not valid JSON: " <> T.pack configPath)
-
-sortArtifactsByVersion :: [TenantArtifact] -> [TenantArtifact]
-sortArtifactsByVersion = sortOn taVersion
-
-tenantStorageSnapshot :: TenantStorageState -> TenantStorageSnapshot
-tenantStorageSnapshot state =
-  TenantStorageSnapshot
-    { tssSnapshotArtifacts = Map.elems (tssArtifacts state),
-      tssSnapshotVersions =
-        [ ArtifactVersionHistory artifactId (sortArtifactsByVersion versions)
-        | (artifactId, versions) <- Map.toList (tssArtifactVersions state)
-        ],
-      tssSnapshotTenantBackends =
-        [ TenantBackendAssignment tenantId backend
-        | (tenantId, backend) <- Map.toList (tssTenantBackends state)
-        ]
-    }
-
-loadTenantStorageState :: FilePath -> IO TenantStorageState
-loadTenantStorageState persistencePath = do
-  exists <- doesFileExist persistencePath
-  if not exists
-    then pure emptyTenantStorageState
-    else do
-      rawBytes <- LBS.readFile persistencePath
-      pure $
-        case decode rawBytes of
-          Nothing -> emptyTenantStorageState
-          Just snapshot ->
-            let versionMap =
-                  Map.fromList
-                    [ (avhArtifactId history, sortArtifactsByVersion (avhVersions history))
-                    | history <- tssSnapshotVersions snapshot
-                    ]
-                artifactMap =
-                  Map.fromList
-                    [ (taArtifactId artifact, artifact)
-                    | artifact <- tssSnapshotArtifacts snapshot
-                    ]
-                    <> Map.fromList
-                      [ (artifactId, latestArtifact)
-                      | (artifactId, versions) <- Map.toList versionMap
-                      , latestArtifact <- case reverse versions of
-                          latest : _ -> [latest]
-                          [] -> []
-                      ]
-                backendMap =
-                  Map.fromList
-                    [ (tbaTenantId assignment, tbaBackend assignment)
-                    | assignment <- tssSnapshotTenantBackends snapshot
-                    ]
-             in TenantStorageState
-                  { tssArtifacts = artifactMap,
-                    tssArtifactVersions = versionMap,
-                    tssTenantBackends = backendMap,
-                    tssPresignedUrls = Map.empty
-                  }
-
-persistTenantStorageState :: TenantStorageService -> IO ()
-persistTenantStorageState service =
-  case tssPersistencePath service of
-    Nothing -> pure ()
-    Just persistencePath -> do
-      currentState <- readTVarIO (tssState service)
-      createDirectoryIfMissing True (takeDirectory persistencePath)
-      LBS.writeFile persistencePath (encode (tenantStorageSnapshot currentState))
-
-tenantStorageBackendConfigValue :: TenantStorageBackend -> Value
-tenantStorageBackendConfigValue backend =
-  case backend of
-    PlatformMinIO ->
-      object ["type" .= ("platform-minio" :: Text)]
-    TenantOwnedS3 {..} ->
-      object
-        [ "type" .= ("tenant-s3" :: Text),
-          "endpoint" .= tosEndpoint,
-          "region" .= tosRegion,
-          "accessKeyId" .= tosAccessKeyId,
-          "secretAccessKey" .= tosSecretAccessKey
-        ]
-
-parseTenantStorageBackendConfigValue :: Value -> Parser TenantStorageBackend
-parseTenantStorageBackendConfigValue =
-  withObject "TenantStorageBackendConfig" $ \obj -> do
-    backendType <- obj .: "type"
-    case (backendType :: Text) of
-      "platform-minio" -> pure PlatformMinIO
-      "tenant-s3" ->
-        TenantOwnedS3
-          <$> obj .: "endpoint"
-          <*> obj .: "region"
-          <*> obj .: "accessKeyId"
-          <*> obj .: "secretAccessKey"
-      other -> fail ("Unknown backend type: " <> T.unpack other)
 
 buildPresignedUrl ::
   TenantStorageConfig ->

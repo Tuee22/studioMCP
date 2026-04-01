@@ -485,7 +485,8 @@ dagPlanningPrompt =
                 paDescription = Just "Desired output format",
                 paRequired = Just False
               }
-          ]
+          ],
+      pdRequiredScopes = ["prompt:read"]
     }
 
 dagRepairPrompt :: PromptDefinition
@@ -505,7 +506,8 @@ dagRepairPrompt =
                 paDescription = Just "The error message from validation or execution",
                 paRequired = Just False
               }
-          ]
+          ],
+      pdRequiredScopes = ["prompt:read"]
     }
 
 workflowAnalysisPrompt :: PromptDefinition
@@ -525,7 +527,8 @@ workflowAnalysisPrompt =
                 paDescription = Just "JSON summary of the workflow run",
                 paRequired = Just False
               }
-          ]
+          ],
+      pdRequiredScopes = ["prompt:read", "workflow:read"]
     }
 
 artifactNamingPrompt :: PromptDefinition
@@ -545,7 +548,8 @@ artifactNamingPrompt =
                 paDescription = Just "Context about the artifact's purpose",
                 paRequired = Just False
               }
-          ]
+          ],
+      pdRequiredScopes = ["prompt:read"]
     }
 
 errorDiagnosisPrompt :: PromptDefinition
@@ -570,5 +574,6 @@ errorDiagnosisPrompt =
                 paDescription = Just "Additional context about when the error occurred",
                 paRequired = Just False
               }
-          ]
+          ],
+      pdRequiredScopes = ["prompt:read"]
     }

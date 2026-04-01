@@ -24,6 +24,7 @@ module StudioMCP.Auth.Scopes
     scopeArtifactManage,
     scopePromptRead,
     scopeResourceRead,
+    scopeTenantRead,
 
     -- * Role Constants
     roleUser,
@@ -48,9 +49,10 @@ scopeArtifactRead = Scope "artifact:read"
 scopeArtifactWrite = Scope "artifact:write"
 scopeArtifactManage = Scope "artifact:manage"
 
-scopePromptRead, scopeResourceRead :: Scope
+scopePromptRead, scopeResourceRead, scopeTenantRead :: Scope
 scopePromptRead = Scope "prompt:read"
 scopeResourceRead = Scope "resource:read"
+scopeTenantRead = Scope "tenant:read"
 
 -- | Role constants
 roleUser, roleOperator, roleAdmin :: Role
@@ -97,6 +99,7 @@ permissionToScopes perm = case perm of
   ArtifactManage -> Set.singleton scopeArtifactManage
   PromptRead -> Set.singleton scopePromptRead
   ResourceRead -> Set.singleton scopeResourceRead
+  TenantRead -> Set.singleton scopeTenantRead
   AdminAccess ->
     Set.fromList
       [ scopeWorkflowRead,
@@ -105,7 +108,8 @@ permissionToScopes perm = case perm of
         scopeArtifactWrite,
         scopeArtifactManage,
         scopePromptRead,
-        scopeResourceRead
+        scopeResourceRead,
+        scopeTenantRead
       ]
 
 -- | Map role to granted permissions
@@ -116,7 +120,8 @@ roleToPermissions (Role r) = case r of
       [ WorkflowRead,
         WorkflowWrite,
         ArtifactRead,
-        ArtifactWrite
+        ArtifactWrite,
+        TenantRead
       ]
   "operator" ->
     Set.fromList
@@ -126,7 +131,8 @@ roleToPermissions (Role r) = case r of
         ArtifactWrite,
         ArtifactManage,
         PromptRead,
-        ResourceRead
+        ResourceRead,
+        TenantRead
       ]
   "admin" ->
     Set.fromList
@@ -137,6 +143,7 @@ roleToPermissions (Role r) = case r of
         ArtifactManage,
         PromptRead,
         ResourceRead,
+        TenantRead,
         AdminAccess
       ]
   _ -> Set.empty
@@ -152,15 +159,16 @@ authorizeToolCall toolName ctx =
 toolPermissions :: Text -> [Permission]
 toolPermissions toolName
   | "workflow.submit" `T.isPrefixOf` toolName = [WorkflowWrite]
+  | "workflow.status" `T.isPrefixOf` toolName = [WorkflowRead]
   | "workflow.list" `T.isPrefixOf` toolName = [WorkflowRead]
-  | "workflow.get" `T.isPrefixOf` toolName = [WorkflowRead]
   | "workflow.cancel" `T.isPrefixOf` toolName = [WorkflowWrite]
+  | "artifact.get" `T.isPrefixOf` toolName = [ArtifactRead]
   | "artifact.upload" `T.isPrefixOf` toolName = [ArtifactWrite]
   | "artifact.download" `T.isPrefixOf` toolName = [ArtifactRead]
-  | "artifact.prepare" `T.isPrefixOf` toolName = [ArtifactRead, ArtifactWrite]
   | "artifact.hide" `T.isPrefixOf` toolName = [ArtifactManage]
   | "artifact.archive" `T.isPrefixOf` toolName = [ArtifactManage]
-  | otherwise = [WorkflowRead] -- Default to read permission
+  | "tenant.info" `T.isPrefixOf` toolName = [TenantRead]
+  | otherwise = [ResourceRead] -- Default to resource read permission
 
 -- | Authorize MCP resource read
 authorizeResourceRead :: Text -> AuthContext -> AuthDecision

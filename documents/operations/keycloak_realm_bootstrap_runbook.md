@@ -31,6 +31,7 @@ Helm-first packaging baseline:
 
 - realm definition
 - browser client
+- BFF client
 - MCP resource-server client
 - service-account clients
 - roles
@@ -143,37 +144,35 @@ For external MCP clients and CLI tools.
 }
 ```
 
-### Browser App Client (Public with PKCE)
+### BFF Client (Confidential)
 
-For the browser application that acquires the access token later presented to the BFF login route.
+For the web portal backend-for-frontend.
 
 ```json
 {
-  "clientId": "studiomcp-web",
-  "name": "studioMCP Web App",
+  "clientId": "studiomcp-bff",
+  "name": "studioMCP BFF",
   "enabled": true,
-  "publicClient": true,
+  "publicClient": false,
   "standardFlowEnabled": true,
-  "directAccessGrantsEnabled": false,
+  "serviceAccountsEnabled": true,
   "authorizationServicesEnabled": false,
   "protocol": "openid-connect",
+  "secret": "${BFF_CLIENT_SECRET}",
   "redirectUris": [
-    "https://app.${DOMAIN}/*",
-    "http://localhost:*"
+    "https://app.${DOMAIN}/callback",
+    "http://localhost:3001/callback"
   ],
   "webOrigins": [
     "https://app.${DOMAIN}",
-    "http://localhost:*"
+    "http://localhost:3001"
   ],
   "defaultClientScopes": [
     "openid", "profile",
     "workflow:read", "workflow:write",
     "artifact:read", "artifact:write"
   ],
-  "optionalClientScopes": ["artifact:manage"],
-  "attributes": {
-    "pkce.code.challenge.method": "S256"
-  }
+  "optionalClientScopes": ["artifact:manage"]
 }
 ```
 

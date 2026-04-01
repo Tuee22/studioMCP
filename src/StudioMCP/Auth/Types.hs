@@ -279,6 +279,7 @@ data Permission
   | ArtifactManage
   | PromptRead
   | ResourceRead
+  | TenantRead
   | AdminAccess
   deriving (Eq, Show, Ord, Generic, Enum, Bounded)
 
@@ -290,6 +291,7 @@ instance ToJSON Permission where
   toJSON ArtifactManage = "artifact:manage"
   toJSON PromptRead = "prompt:read"
   toJSON ResourceRead = "resource:read"
+  toJSON TenantRead = "tenant:read"
   toJSON AdminAccess = "admin:access"
 
 instance FromJSON Permission where
@@ -302,6 +304,7 @@ instance FromJSON Permission where
       "artifact:manage" -> pure ArtifactManage
       "prompt:read" -> pure PromptRead
       "resource:read" -> pure ResourceRead
+      "tenant:read" -> pure TenantRead
       "admin:access" -> pure AdminAccess
       _ -> fail $ "Unknown permission: " <> T.unpack t
 

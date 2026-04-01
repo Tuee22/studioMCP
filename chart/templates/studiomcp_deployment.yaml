@@ -29,7 +29,7 @@ spec:
               value: {{ .Values.studiomcp.service.port | quote }}
             # Pulsar subchart service endpoints
             - name: STUDIO_MCP_PULSAR_HTTP_URL
-              value: "http://{{ .Release.Name }}-pulsar-proxy"
+              value: "http://{{ .Release.Name }}-pulsar-proxy:8080"
             - name: STUDIO_MCP_PULSAR_BINARY_URL
               value: "pulsar://{{ .Release.Name }}-pulsar-proxy:6650"
             # MinIO subchart service endpoint

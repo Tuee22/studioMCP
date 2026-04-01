@@ -3,7 +3,7 @@
 
 **Status**: Authoritative source
 **Supersedes**: N/A
-**Referenced by**: [overview.md](overview.md#canonical-follow-on-documents), [server_mode.md](server_mode.md#startup-configuration-failure-handling), [../development/local_dev.md](../development/local_dev.md#cross-references), [../engineering/docker_policy.md](../engineering/docker_policy.md#cross-references), [../engineering/k8s_storage.md](../engineering/k8s_storage.md#cross-references), [../engineering/security_model.md](../engineering/security_model.md#failure-handling-rules), [../reference/cli_surface.md](../reference/cli_surface.md#cross-references), [../../README.md](../../README.md#repository-architecture)
+**Referenced by**: [overview.md](overview.md#canonical-follow-on-documents), [../development/local_dev.md](../development/local_dev.md#cross-references), [../engineering/docker_policy.md](../engineering/docker_policy.md#cross-references), [../engineering/k8s_storage.md](../engineering/k8s_storage.md#cross-references), [../reference/cli_surface.md](../reference/cli_surface.md#cross-references), [../../README.md](../../README.md#repository-architecture)
 
 > **Purpose**: Canonical architecture for the single Haskell CLI that owns supported repository commands and local cluster lifecycle management.
 
@@ -40,35 +40,6 @@ docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp <subco
 ```
 
 The CLI may internally call external tools such as `kind`, `kubectl`, and `helm`, but those calls must be orchestrated from Haskell rather than delegated to checked-in shell scripts.
-
-## Startup Failure Semantics
-
-Startup configuration must be validated before a supported `studioMCP` binary begins serving traffic or enters a long-lived runtime loop.
-
-This rule applies to:
-
-- `studiomcp server`
-- `studiomcp stdio`
-- `studiomcp bff`
-- `studiomcp inference`
-- `studiomcp worker`
-- dedicated executable wrappers that launch the same modes
-
-Required behavior on invalid startup configuration:
-
-- fail gracefully and exit non-zero before accepting requests
-- emit a concise, actionable error message that names the invalid environment variable, file, or setting
-- include a clear remediation hint when the fix is obvious
-- redact secrets, bearer tokens, presigned URL signatures, and other credentials from startup error output
-
-Forbidden behavior:
-
-- raw `error` or uncaught-exception crashes exposed directly to operators
-- partial-function or pattern-match failures presented as the primary startup error
-- opaque `user error` messages that do not identify the offending setting
-- deferred startup validation that lets the process begin serving traffic and only fail on the first live request
-
-Startup configuration failures are operational validation failures. They are not acceptable places to rely on raw exception text as the user-facing contract.
 
 ## Command Families
 
@@ -112,6 +83,4 @@ The implemented CLI surface already covers DAG validation, cluster lifecycle, si
 - [Architecture Overview](overview.md#architecture-overview)
 - [Docker Policy](../engineering/docker_policy.md#docker-policy)
 - [Kubernetes Storage Policy](../engineering/k8s_storage.md#kubernetes-storage-policy)
-- [Server Mode](server_mode.md#server-mode)
-- [Security Model](../engineering/security_model.md#security-model)
 - [CLI Surface Reference](../reference/cli_surface.md#cli-surface-reference)

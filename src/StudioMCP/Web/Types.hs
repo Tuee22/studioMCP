@@ -2,13 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module StudioMCP.Web.Types
-  ( -- * Auth Types
-    LoginRequest (..),
-    LoginResponse (..),
-    LogoutResponse (..),
-    ProfileResponse (..),
-
-    -- * Upload Types
+  ( -- * Upload Types
     UploadRequest (..),
     UploadResponse (..),
     PresignedUploadUrl (..),
@@ -32,13 +26,15 @@ module StudioMCP.Web.Types
     -- * Run Types
     RunSubmitRequest (..),
     RunStatusResponse (..),
-    RunListRequest (..),
-    RunListResponse (..),
     RunProgressEvent (..),
 
-    -- * Artifact Governance Types
-    ArtifactActionRequest (..),
-    ArtifactGovernanceResponse (..),
+    -- * OAuth Types
+    OAuthState (..),
+    newOAuthState,
+    LoginInitiateResponse (..),
+    OAuthCallbackRequest (..),
+    LogoutResponse (..),
+    TokenRefreshResponse (..),
   )
 where
 
@@ -53,97 +49,14 @@ import Data.Aeson
     (.=),
   )
 import Data.Text (Text)
-import Data.Time (UTCTime)
+import qualified Data.Text as T
+import Data.Time (UTCTime, getCurrentTime)
+import Data.UUID (UUID)
 import qualified Data.UUID as UUID
 import qualified Data.UUID.V4 as UUID
 import GHC.Generics (Generic)
 import StudioMCP.DAG.Summary (RunId (..))
 import StudioMCP.DAG.Types (DagSpec)
-
--- | Login request used to establish a browser-facing BFF session.
-data LoginRequest = LoginRequest
-  { lrAccessToken :: Text,
-    lrRefreshToken :: Maybe Text,
-    lrSubjectId :: Maybe Text,
-    lrTenantId :: Maybe Text
-  }
-  deriving (Eq, Show, Generic)
-
-instance ToJSON LoginRequest where
-  toJSON loginRequest =
-    object
-      [ "accessToken" .= lrAccessToken loginRequest,
-        "refreshToken" .= lrRefreshToken loginRequest,
-        "subjectId" .= lrSubjectId loginRequest,
-        "tenantId" .= lrTenantId loginRequest
-      ]
-
-instance FromJSON LoginRequest where
-  parseJSON = withObject "LoginRequest" $ \obj ->
-    LoginRequest
-      <$> obj .: "accessToken"
-      <*> obj .:? "refreshToken"
-      <*> obj .:? "subjectId"
-      <*> obj .:? "tenantId"
-
--- | Browser-facing session profile response.
-data ProfileResponse = ProfileResponse
-  { prSubjectId :: Text,
-    prTenantId :: Text,
-    prExpiresAt :: UTCTime,
-    prCreatedAt :: UTCTime,
-    prLastActiveAt :: UTCTime
-  }
-  deriving (Eq, Show, Generic)
-
-instance ToJSON ProfileResponse where
-  toJSON profile =
-    object
-      [ "subjectId" .= prSubjectId profile,
-        "tenantId" .= prTenantId profile,
-        "expiresAt" .= prExpiresAt profile,
-        "createdAt" .= prCreatedAt profile,
-        "lastActiveAt" .= prLastActiveAt profile
-      ]
-
-instance FromJSON ProfileResponse where
-  parseJSON = withObject "ProfileResponse" $ \obj ->
-    ProfileResponse
-      <$> obj .: "subjectId"
-      <*> obj .: "tenantId"
-      <*> obj .: "expiresAt"
-      <*> obj .: "createdAt"
-      <*> obj .: "lastActiveAt"
-
-data LoginResponse = LoginResponse
-  { lrpProfile :: ProfileResponse
-  }
-  deriving (Eq, Show, Generic)
-
-instance ToJSON LoginResponse where
-  toJSON response =
-    object
-      [ "profile" .= lrpProfile response
-      ]
-
-instance FromJSON LoginResponse where
-  parseJSON = withObject "LoginResponse" $ \obj ->
-    LoginResponse <$> obj .: "profile"
-
-data LogoutResponse = LogoutResponse
-  { lorLoggedOut :: Bool
-  }
-  deriving (Eq, Show, Generic)
-
-instance ToJSON LogoutResponse where
-  toJSON response =
-    object
-      [ "loggedOut" .= lorLoggedOut response
-      ]
-
-instance FromJSON LogoutResponse where
-  parseJSON = withObject "LogoutResponse" $ \obj ->
-    LogoutResponse <$> obj .: "loggedOut"
 
 -- | Web session identifier
 newtype WebSessionId = WebSessionId Text
@@ -168,7 +81,6 @@ data WebSession = WebSession
     wsTenantId :: Text,
     wsAccessToken :: Text,
     wsRefreshToken :: Maybe Text,
-    wsMcpSessionId :: Maybe Text,
     wsExpiresAt :: UTCTime,
     wsCreatedAt :: UTCTime,
     wsLastActiveAt :: UTCTime
@@ -181,12 +93,10 @@ instance ToJSON WebSession where
       [ "sessionId" .= wsSessionId ws,
         "subjectId" .= wsSubjectId ws,
         "tenantId" .= wsTenantId ws,
-        "accessToken" .= wsAccessToken ws,
-        "refreshToken" .= wsRefreshToken ws,
-        "mcpSessionId" .= wsMcpSessionId ws,
         "expiresAt" .= wsExpiresAt ws,
         "createdAt" .= wsCreatedAt ws,
         "lastActiveAt" .= wsLastActiveAt ws
+        -- Note: tokens intentionally not serialized to client
       ]
 
 instance FromJSON WebSession where
@@ -197,15 +107,13 @@ instance FromJSON WebSession where
       <*> obj .: "tenantId"
       <*> obj .: "accessToken"
       <*> obj .:? "refreshToken"
-      <*> obj .:? "mcpSessionId"
       <*> obj .: "expiresAt"
       <*> obj .: "createdAt"
       <*> obj .: "lastActiveAt"
 
 -- | Request to upload a file
 data UploadRequest = UploadRequest
-  { urArtifactId :: Maybe Text,
-    urFileName :: Text,
+  { urFileName :: Text,
     urContentType :: Text,
     urFileSize :: Integer,
     urMetadata :: Maybe [(Text, Text)]
@@ -215,8 +123,7 @@ data UploadRequest = UploadRequest
 instance ToJSON UploadRequest where
   toJSON ur =
     object
-      [ "artifactId" .= urArtifactId ur,
-        "fileName" .= urFileName ur,
+      [ "fileName" .= urFileName ur,
         "contentType" .= urContentType ur,
         "fileSize" .= urFileSize ur,
         "metadata" .= urMetadata ur
@@ -225,8 +132,7 @@ instance ToJSON UploadRequest where
 instance FromJSON UploadRequest where
   parseJSON = withObject "UploadRequest" $ \obj ->
     UploadRequest
-      <$> obj .:? "artifactId"
-      <*> obj .: "fileName"
+      <$> obj .: "fileName"
       <*> obj .: "contentType"
       <*> obj .: "fileSize"
       <*> obj .:? "metadata"
@@ -481,40 +387,6 @@ instance FromJSON RunStatusResponse where
       <*> obj .:? "startedAt"
       <*> obj .:? "completedAt"
 
-data RunListRequest = RunListRequest
-  { rlrStatus :: Maybe Text,
-    rlrLimit :: Maybe Int
-  }
-  deriving (Eq, Show, Generic)
-
-instance ToJSON RunListRequest where
-  toJSON requestValue =
-    object
-      [ "status" .= rlrStatus requestValue,
-        "limit" .= rlrLimit requestValue
-      ]
-
-instance FromJSON RunListRequest where
-  parseJSON = withObject "RunListRequest" $ \obj ->
-    RunListRequest
-      <$> obj .:? "status"
-      <*> obj .:? "limit"
-
-data RunListResponse = RunListResponse
-  { rlrRuns :: [RunStatusResponse]
-  }
-  deriving (Eq, Show, Generic)
-
-instance ToJSON RunListResponse where
-  toJSON responseValue =
-    object
-      [ "runs" .= rlrRuns responseValue
-      ]
-
-instance FromJSON RunListResponse where
-  parseJSON = withObject "RunListResponse" $ \obj ->
-    RunListResponse <$> obj .: "runs"
-
 -- | Run progress event (for SSE/WebSocket updates)
 data RunProgressEvent = RunProgressEvent
   { rpeRunId :: RunId,
@@ -547,39 +419,134 @@ instance FromJSON RunProgressEvent where
       <*> obj .:? "progress"
       <*> obj .: "timestamp"
 
-data ArtifactActionRequest = ArtifactActionRequest
-  { aarReason :: Maybe Text
+-- | OAuth state for CSRF protection during login flow
+data OAuthState = OAuthState
+  { -- | Random state parameter
+    osState :: Text,
+    -- | Nonce for additional protection
+    osNonce :: Text,
+    -- | Redirect URI after login (optional, for deep linking)
+    osRedirectUri :: Maybe Text,
+    -- | When the state was created
+    osCreatedAt :: UTCTime
   }
   deriving (Eq, Show, Generic)
 
-instance ToJSON ArtifactActionRequest where
-  toJSON requestValue =
+instance ToJSON OAuthState where
+  toJSON os =
     object
-      [ "reason" .= aarReason requestValue
+      [ "state" .= osState os,
+        "nonce" .= osNonce os,
+        "redirectUri" .= osRedirectUri os,
+        "createdAt" .= osCreatedAt os
       ]
 
-instance FromJSON ArtifactActionRequest where
-  parseJSON = withObject "ArtifactActionRequest" $ \obj ->
-    ArtifactActionRequest <$> obj .:? "reason"
+instance FromJSON OAuthState where
+  parseJSON = withObject "OAuthState" $ \obj ->
+    OAuthState
+      <$> obj .: "state"
+      <*> obj .: "nonce"
+      <*> obj .:? "redirectUri"
+      <*> obj .: "createdAt"
 
-data ArtifactGovernanceResponse = ArtifactGovernanceResponse
-  { agrArtifactId :: Text,
-    agrAction :: Text,
-    agrStatus :: Text
+-- | Generate a new OAuth state
+newOAuthState :: Maybe Text -> IO OAuthState
+newOAuthState mRedirectUri = do
+  stateUuid <- UUID.nextRandom
+  nonceUuid <- UUID.nextRandom
+  now <- getCurrentTime
+  pure
+    OAuthState
+      { osState = UUID.toText stateUuid,
+        osNonce = UUID.toText nonceUuid,
+        osRedirectUri = mRedirectUri,
+        osCreatedAt = now
+      }
+
+-- | Response to login initiation
+data LoginInitiateResponse = LoginInitiateResponse
+  { -- | URL to redirect user to for login
+    lirAuthorizationUrl :: Text,
+    -- | State parameter (also stored server-side)
+    lirState :: Text
   }
   deriving (Eq, Show, Generic)
 
-instance ToJSON ArtifactGovernanceResponse where
-  toJSON responseValue =
+instance ToJSON LoginInitiateResponse where
+  toJSON lir =
     object
-      [ "artifactId" .= agrArtifactId responseValue,
-        "action" .= agrAction responseValue,
-        "status" .= agrStatus responseValue
+      [ "authorizationUrl" .= lirAuthorizationUrl lir,
+        "state" .= lirState lir
       ]
 
-instance FromJSON ArtifactGovernanceResponse where
-  parseJSON = withObject "ArtifactGovernanceResponse" $ \obj ->
-    ArtifactGovernanceResponse
-      <$> obj .: "artifactId"
-      <*> obj .: "action"
-      <*> obj .: "status"
+instance FromJSON LoginInitiateResponse where
+  parseJSON = withObject "LoginInitiateResponse" $ \obj ->
+    LoginInitiateResponse
+      <$> obj .: "authorizationUrl"
+      <*> obj .: "state"
+
+-- | Request from OAuth callback
+data OAuthCallbackRequest = OAuthCallbackRequest
+  { -- | Authorization code from Keycloak
+    ocrCode :: Text,
+    -- | State parameter (must match stored state)
+    ocrState :: Text
+  }
+  deriving (Eq, Show, Generic)
+
+instance ToJSON OAuthCallbackRequest where
+  toJSON ocr =
+    object
+      [ "code" .= ocrCode ocr,
+        "state" .= ocrState ocr
+      ]
+
+instance FromJSON OAuthCallbackRequest where
+  parseJSON = withObject "OAuthCallbackRequest" $ \obj ->
+    OAuthCallbackRequest
+      <$> obj .: "code"
+      <*> obj .: "state"
+
+-- | Response to logout
+data LogoutResponse = LogoutResponse
+  { -- | URL to redirect user to for Keycloak logout
+    lorLogoutUrl :: Maybe Text,
+    -- | Whether logout was successful
+    lorSuccess :: Bool
+  }
+  deriving (Eq, Show, Generic)
+
+instance ToJSON LogoutResponse where
+  toJSON lor =
+    object
+      [ "logoutUrl" .= lorLogoutUrl lor,
+        "success" .= lorSuccess lor
+      ]
+
+instance FromJSON LogoutResponse where
+  parseJSON = withObject "LogoutResponse" $ \obj ->
+    LogoutResponse
+      <$> obj .:? "logoutUrl"
+      <*> obj .: "success"
+
+-- | Response to token refresh
+data TokenRefreshResponse = TokenRefreshResponse
+  { -- | New expiration time
+    trrExpiresAt :: UTCTime,
+    -- | Whether refresh was successful
+    trrSuccess :: Bool
+  }
+  deriving (Eq, Show, Generic)
+
+instance ToJSON TokenRefreshResponse where
+  toJSON trr =
+    object
+      [ "expiresAt" .= trrExpiresAt trr,
+        "success" .= trrSuccess trr
+      ]
+
+instance FromJSON TokenRefreshResponse where
+  parseJSON = withObject "TokenRefreshResponse" $ \obj ->
+    TokenRefreshResponse
+      <$> obj .: "expiresAt"
+      <*> obj .: "success"

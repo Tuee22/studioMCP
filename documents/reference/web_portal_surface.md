@@ -5,145 +5,84 @@
 **Supersedes**: N/A
 **Referenced by**: [../architecture/overview.md](../architecture/overview.md#canonical-follow-on-documents), [../architecture/multi_tenant_saas_mcp_auth_architecture.md](../architecture/multi_tenant_saas_mcp_auth_architecture.md#cross-references), [../engineering/security_model.md](../engineering/security_model.md#cross-references), [../../STUDIOMCP_DEVELOPMENT_PLAN.md](../../STUDIOMCP_DEVELOPMENT_PLAN.md#documentation-governance)
 
-> **Purpose**: Canonical reference for the current browser-facing BFF surface in `studioMCP`, including the implemented HTTP routes, session contract, and MCP mediation model.
+> **Purpose**: Canonical reference for the target browser-facing product surface and the BFF contract that mediates upload, download, render, and chat workflows.
 
 ## Summary
 
-The current browser-facing surface in this repository is the Haskell BFF HTTP service. It serves a same-origin browser control room and provides login, logout, profile, upload, download, chat, workflow, SSE progress, and artifact-governance routes on top of tenant-scoped storage and the MCP server.
+The web portal is the human-facing product surface for `studioMCP`.
+
+It provides:
+
+- raw footage upload
+- artifact download
+- render and run inspection
+- chat and workflow assistance
+
+The BFF is the browser-facing mediator that translates these product workflows into authenticated MCP interactions and storage actions.
 
 ## Current Repo Note
 
-Implemented today:
+The current repository now implements the BFF service and WAI handlers for upload, download, run submission, run status, and chat. Browser UX, Keycloak login UX, and live BFF-to-MCP orchestration remain follow-on work.
 
-- browser login route
-- browser logout route
-- browser profile route
-- browser shell routes at `/` and `/app`
-- upload intent request
-- upload confirmation
-- download intent request
-- advisory chat
-- advisory chat SSE route
-- workflow submission
-- workflow list
-- workflow status lookup
-- workflow run SSE route
-- workflow cancel
-- artifact hide
-- artifact archive
-- cookie-backed browser session auth
-- Redis-backed shared browser-session state across BFF replicas
-- live BFF-to-MCP mediation for workflow and governance operations
+## Top-Level Browser Workflows
 
-Still intentionally bounded:
+- sign in through Keycloak
+- upload source media
+- browse tenant artifacts and runs
+- request renders or workflow execution
+- follow run progress
+- chat with the system about workflows, failures, and outputs
+- download rendered artifacts
 
-- advanced editing or timeline UI
-- collaborative multi-user browser editing
-- token-level advisory-model streaming
+## BFF Responsibilities
 
-## Current BFF Responsibilities
-
-- maintain web-session state
-- maintain shared browser-session state in Redis for multi-instance deployment
-- serve the built-in browser control-room UI
+- maintain browser session state
 - authorize upload and download intents
-- shape browser-facing JSON payloads
-- enforce tenant scoping at the BFF boundary
-- open and reuse MCP sessions on behalf of the browser session
-- submit, list, inspect, and cancel workflows through `/mcp`
-- expose chat and run updates through SSE-friendly browser routes
-- forward artifact-governance actions through `/mcp`
+- call MCP on behalf of the authenticated user
+- shape browser-friendly payloads
+- avoid leaking raw infrastructure topology or storage credentials to the browser
 
-Upload and download intent generation remain direct tenant-storage operations inside the BFF because the browser-facing contract is presigned-storage oriented.
-
-## Current Flow
+## Target Browser Flows
 
 ```mermaid
 flowchart TB
-  Browser[Browser Or Test Client] --> BFF[BFF]
-  BFF --> Sessions[Shared Web Sessions]
+  Browser[Browser] --> BFF[BFF]
+  BFF --> Keycloak[Keycloak]
+  BFF --> MCP[MCP]
   BFF --> Storage[Presigned Storage Flow]
-  BFF --> MCP[HTTP MCP Client]
-  MCP --> Runtime[Shared Runtime Services]
-  BFF --> Inference[Advisory Inference]
 ```
-
-## Implemented Routes
-
-| Method | Path | Behavior |
-|--------|------|----------|
-| `GET` | `/` | Serve built-in browser shell |
-| `GET` | `/app` | Serve built-in browser shell |
-| `GET` | `/healthz` | BFF health check |
-| `GET` | `/health/live` | Liveness check |
-| `GET` | `/health/ready` | Readiness check |
-| `POST` | `/api/v1/auth/login` | Create browser session and set cookie |
-| `POST` | `/api/v1/auth/logout` | Invalidate browser session and clear cookie |
-| `GET` | `/api/v1/profile` | Return active browser session profile |
-| `POST` | `/api/v1/upload/request` | Create artifact and return upload URL |
-| `POST` | `/api/v1/upload/confirm/{artifactId}` | Confirm a pending upload |
-| `POST` | `/api/v1/download` | Return a presigned download URL |
-| `POST` | `/api/v1/chat` | Return one advisory chat response |
-| `POST` | `/api/v1/chat/stream` | Return advisory chat over `text/event-stream` |
-| `POST` | `/api/v1/runs` | Submit a workflow run |
-| `GET` | `/api/v1/runs` | List visible workflow runs |
-| `GET` | `/api/v1/runs/{runId}/events` | Return run-status updates over `text/event-stream` |
-| `GET` | `/api/v1/runs/{runId}/status` | Fetch run status |
-| `POST` | `/api/v1/runs/{runId}/cancel` | Cancel a workflow run |
-| `POST` | `/api/v1/artifacts/{artifactId}/hide` | Hide an artifact through MCP governance |
-| `POST` | `/api/v1/artifacts/{artifactId}/archive` | Archive an artifact through MCP governance |
-
-## Authentication
-
-The primary browser contract is a cookie-backed session:
-
-```http
-Set-Cookie: studiomcp_session={web_session_id}; Path=/; HttpOnly; SameSite=Lax
-```
-
-Protected requests then carry:
-
-```http
-Cookie: studiomcp_session={web_session_id}
-```
-
-Compatibility note:
-
-- the handler layer still accepts `Authorization: Bearer {web_session_id}` as a fallback for non-browser clients
-- the BFF session id is distinct from the MCP session id
-- when MCP auth is enabled, login validates the presented access token before minting the browser session
-- when MCP auth is disabled for local development, the BFF aligns browser sessions with the server’s dev-bypass subject and tenant
-- validated local flows now alternate requests across two BFF instances sharing Redis-backed browser state
-
-## Browser Shell
-
-`GET /` and `GET /app` serve the built-in browser control-room UI. The shipped UI is same-origin with the BFF routes and uses the same cookie-backed browser session as the JSON and SSE surfaces.
 
 ## Upload Contract
 
-### Request
+- browser requests upload intent from BFF
+- BFF validates tenant and subject rights
+- BFF issues short-lived upload authorization
+- browser uploads media directly to storage where possible
+- BFF or MCP records metadata after upload completion
+
+### Upload API
+
+**Request upload URL:**
 
 ```http
 POST /api/v1/upload/request
-Cookie: studiomcp_session={web_session_id}
+Authorization: Bearer {session_token}
 Content-Type: application/json
 
 {
-  "artifactId": null,
   "fileName": "raw-footage.mp4",
   "contentType": "video/mp4",
-  "fileSize": 1073741824,
-  "metadata": [["source", "camera-a"]]
+  "fileSize": 1073741824
 }
 ```
 
-### Response
+**Response:**
 
 ```json
 {
   "artifactId": "artifact-xyz789",
   "presignedUrl": {
-    "url": "http://localhost:9000/...",
+    "url": "http://localhost:9000/studiomcp-tenant-acme/artifact-xyz789?operation=upload&version=1&signature=abc123",
     "method": "PUT",
     "headers": [
       ["Content-Type", "video/mp4"]
@@ -154,38 +93,51 @@ Content-Type: application/json
 }
 ```
 
-`artifactId` is optional on the upload request. When omitted, the BFF creates a new artifact. When provided, the BFF creates a new immutable version for that existing artifact and returns a fresh presigned upload URL for the new version.
-
-### Confirm Upload
+**Confirm upload:**
 
 ```http
 POST /api/v1/upload/confirm/{artifactId}
-Cookie: studiomcp_session={web_session_id}
+Authorization: Bearer {session_token}
 ```
+
+### Presigned URL Expiration
+
+| Operation | Default TTL | Max TTL |
+|-----------|-------------|---------|
+| Upload | 15 minutes | 60 minutes |
+| Download | 15 minutes | 60 minutes |
+| Multipart upload part | 60 minutes | 4 hours |
 
 ## Download Contract
 
-### Request
+- browser requests download intent from BFF
+- BFF validates tenant and subject rights
+- BFF issues short-lived download authorization
+- browser downloads directly from storage where possible
+
+### Download API
+
+**Request download URL:**
 
 ```http
 POST /api/v1/download
-Cookie: studiomcp_session={web_session_id}
+Authorization: Bearer {session_token}
 Content-Type: application/json
 
 {
   "artifactId": "artifact-xyz789",
-  "version": null
+  "version": "1"
 }
 ```
 
-### Response
+**Response:**
 
 ```json
 {
   "artifactId": "artifact-xyz789",
   "fileName": "output-render.mp4",
   "presignedUrl": {
-    "url": "http://localhost:9000/...",
+    "url": "http://localhost:9000/studiomcp-tenant-acme/artifact-xyz789?operation=download&version=1&signature=def456",
     "expiresAt": "2024-01-15T12:00:00Z",
     "contentType": "video/mp4",
     "fileSize": 536870912
@@ -195,131 +147,178 @@ Content-Type: application/json
 
 ## Chat Contract
 
-### Request
+- browser sends chat messages to the BFF
+- BFF uses MCP tools, resources, or prompts to fulfill the request
+- chat may be advisory or operational depending on authorized capability
+- chat may not bypass the typed DAG and artifact governance rules
+
+### Chat API
+
+**Send message:**
 
 ```http
 POST /api/v1/chat
-Cookie: studiomcp_session={web_session_id}
+Authorization: Bearer {session_token}
 Content-Type: application/json
 
 {
   "messages": [
     {
       "role": "user",
-      "content": "Help me submit this workflow",
-      "timestamp": null
+      "content": "Transcode my raw footage to 1080p"
     }
   ],
-  "context": "optional context"
+  "context": "artifact-abc123"
 }
 ```
 
-### Response
+**Response:**
 
 ```json
 {
   "message": {
     "role": "assistant",
-    "content": "ADVISORY: ...",
-    "timestamp": "2024-01-15T11:30:00Z"
+    "content": "Tenant tenant-acme: I can help you prepare uploads, submit DAG runs, inspect workflow state, and fetch artifacts."
   },
   "conversationId": "conv-abc123"
 }
 ```
 
-### Stream
+## Render And Run Contract
+
+- browser initiates workflow execution through the BFF
+- BFF calls the MCP workflow tools on behalf of the user
+- BFF displays progress and summaries using MCP responses and resources
+
+### Workflow API
+
+**List runs:**
 
 ```http
-POST /api/v1/chat/stream
-Cookie: studiomcp_session={web_session_id}
-Content-Type: application/json
-Accept: text/event-stream
+GET /api/v1/runs
+Authorization: Bearer {session_token}
 ```
 
-The SSE route emits:
+**Response:**
 
-- `conversation.started`
-- `message.delta`
-- `message.completed`
-- `done`
-
-The current implementation chunks the completed advisory response into assistant-message deltas for browser consumption.
-
-## Run Contract
-
-### Submit Run
-
-```http
-POST /api/v1/runs
-Cookie: studiomcp_session={web_session_id}
-Content-Type: application/json
-
+```json
 {
-  "dagSpec": {
-    "name": "example",
-    "nodes": []
-  },
-  "inputArtifacts": [["input", "artifact-xyz789"]]
+  "runs": [
+    {
+      "runId": "run-xyz789",
+      "status": "Running",
+      "submittedAt": "2024-01-15T10:00:00Z",
+      "progress": 45
+    }
+  ],
+  "pagination": {
+    "total": 25,
+    "page": 1,
+    "pageSize": 20
+  }
 }
 ```
 
-### Get Run Status
+**Get run details:**
 
 ```http
-GET /api/v1/runs/{runId}/status
-Cookie: studiomcp_session={web_session_id}
+GET /api/v1/runs/{runId}
+Authorization: Bearer {session_token}
 ```
 
-### Stream Run Events
+**Submit workflow:**
 
 ```http
-GET /api/v1/runs/{runId}/events
-Cookie: studiomcp_session={web_session_id}
-Accept: text/event-stream
+POST /api/v1/runs
+Authorization: Bearer {session_token}
+Content-Type: application/json
+
+{
+  "dag": {
+    "nodes": [
+      {
+        "id": "transcode",
+        "kind": "ffmpeg.transcode",
+        "inputs": { "source": "artifact:abc123" },
+        "params": { "resolution": "1920x1080" }
+      }
+    ]
+  }
+}
 ```
 
-The SSE route emits short-lived reconnectable status windows with:
+**Cancel run:**
 
-- `run.snapshot`
-- `run.status`
-- `run.completed`
-- `run.window.closed`
+```http
+POST /api/v1/runs/{runId}/cancel
+Authorization: Bearer {session_token}
+```
 
-Additional implemented routes:
+## BFF API Summary
 
-- `GET /api/v1/runs?status={status}&limit={n}`
-- `POST /api/v1/runs/{runId}/cancel`
-- `POST /api/v1/artifacts/{artifactId}/hide`
-- `POST /api/v1/artifacts/{artifactId}/archive`
+### Endpoints
 
-Workflow and artifact-governance routes are mediated through a real MCP HTTP client path. The BFF opens `/mcp` sessions, caches the returned `Mcp-Session-Id` inside the browser session record, and reuses that MCP session across subsequent tool calls.
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/v1/uploads` | Request upload presigned URL |
+| `POST` | `/api/v1/uploads/{id}/complete` | Confirm upload completion |
+| `POST` | `/api/v1/artifacts/{id}/download` | Request download presigned URL |
+| `GET` | `/api/v1/artifacts` | List tenant artifacts |
+| `GET` | `/api/v1/artifacts/{id}` | Get artifact details |
+| `POST` | `/api/v1/artifacts/{id}/hide` | Hide artifact |
+| `POST` | `/api/v1/artifacts/{id}/archive` | Archive artifact |
+| `GET` | `/api/v1/runs` | List runs |
+| `GET` | `/api/v1/runs/{id}` | Get run details |
+| `POST` | `/api/v1/runs` | Submit workflow |
+| `POST` | `/api/v1/runs/{id}/cancel` | Cancel run |
+| `POST` | `/api/v1/chat` | Send chat message (SSE response) |
+| `GET` | `/api/v1/me` | Get current user info |
 
-## Error Shape
+### Authentication
 
-Errors are serialized from the typed `BFFError` values. The response body is the JSON encoding of that error type, not a wrapped `{ "error": ... }` envelope.
+All BFF endpoints require a valid session cookie or Bearer token:
 
-Representative statuses:
+```http
+Authorization: Bearer {access_token}
+```
 
-| HTTP Status | Condition |
-|-------------|-----------|
-| `400` | Invalid request payload |
-| `401` | Missing, unknown, or expired web session |
-| `403` | Forbidden request |
-| `404` | Artifact not found |
-| `500` | Internal BFF failure |
-| `502` | Runtime or inference dependency failure |
+Or:
 
-## Known Bounds
+```http
+Cookie: session={session_id}
+```
 
-The implemented BFF surface is intentionally bounded:
+### Error Responses
 
-- chat SSE is assistant-message chunking over a completed advisory response rather than token-level model streaming
-- run progress SSE is exposed through reconnectable status-polling windows rather than a per-node runtime event bus
-- the shipped browser UI is a control-room/workbench surface, not an advanced editor or collaborative timeline
+```json
+{
+  "error": {
+    "code": "ARTIFACT_NOT_FOUND",
+    "message": "Artifact not found or not accessible",
+    "details": {}
+  }
+}
+```
+
+| HTTP Status | Error Code | Description |
+|-------------|------------|-------------|
+| 400 | `INVALID_REQUEST` | Malformed request |
+| 401 | `UNAUTHORIZED` | Authentication required |
+| 403 | `FORBIDDEN` | Insufficient permissions |
+| 404 | `NOT_FOUND` | Resource not found |
+| 409 | `CONFLICT` | Operation conflict |
+| 429 | `RATE_LIMITED` | Too many requests |
+| 500 | `INTERNAL_ERROR` | Server error |
+
+## Security Rules
+
+- the browser does not receive tenant-scoped long-lived infrastructure secrets
+- the BFF does not invent independent authorization semantics
+- BFF-mediated actions remain tenant-scoped and auditable
 
 ## Cross-References
 
-- [BFF Architecture](../architecture/bff_architecture.md#bff-architecture)
 - [Multi-Tenant SaaS MCP Auth Architecture](../architecture/multi_tenant_saas_mcp_auth_architecture.md#multi-tenant-saas-mcp-auth-architecture)
+- [Artifact Storage Architecture](../architecture/artifact_storage_architecture.md#artifact-storage-architecture)
 - [MCP Surface Reference](mcp_surface.md#mcp-surface-reference)
 - [MCP Tool Catalog](mcp_tool_catalog.md#mcp-tool-catalog)

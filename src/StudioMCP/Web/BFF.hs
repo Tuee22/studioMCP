@@ -9,18 +9,13 @@ module StudioMCP.Web.BFF
     defaultBFFConfig,
     newBFFService,
     newBFFServiceWithRuntime,
-    newBFFServiceWithMcpClient,
-    newBFFServiceWithMcpClientAndRedis,
+    newBFFServiceWithAuth,
 
     -- * Session Management
-    loginWebSession,
-    logoutWebSession,
     createWebSession,
     getWebSession,
     refreshWebSession,
     invalidateWebSession,
-    getProfile,
-    profileFromSession,
 
     -- * Upload Operations
     requestUpload,
@@ -35,12 +30,12 @@ module StudioMCP.Web.BFF
     -- * Run Operations
     submitRun,
     getRunStatus,
-    listRuns,
-    cancelRun,
 
-    -- * Artifact Governance
-    hideArtifact,
-    archiveArtifact,
+    -- * OAuth Operations
+    initiateLogin,
+    handleOAuthCallback,
+    handleLogout,
+    handleTokenRefresh,
 
     -- * Errors
     BFFError (..),
@@ -48,95 +43,44 @@ module StudioMCP.Web.BFF
   )
 where
 
-import Control.Concurrent.MVar (putMVar, takeMVar)
-import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO, readTVarIO)
-import Control.Exception (bracket_)
-import Data.Aeson
-  ( FromJSON,
-    Result (Error, Success),
-    ToJSON,
-    Value,
-    encode,
-    fromJSON,
-    object,
-    withObject,
-    (.:),
-    (.:?),
-    (.=),
-  )
+import Control.Concurrent.STM (TVar, atomically, newTVarIO, readTVarIO, writeTVar)
+import Data.Aeson (FromJSON, ToJSON, object, withObject, (.:), (.:?), (.=))
 import qualified Data.Aeson as Aeson
-import qualified Data.Aeson.Key as Key
-import qualified Data.Aeson.KeyMap as KeyMap
-import qualified Data.ByteString as BS
-import qualified Data.ByteString.Lazy as LBS
-import qualified Data.CaseInsensitive as CI
+import qualified Data.Aeson.Key as AesonKey
+import qualified Data.Aeson.KeyMap as AesonKeyMap
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
-import Data.Time (UTCTime, addUTCTime, diffUTCTime, getCurrentTime)
-import Database.Redis (del, get, runRedis, setex)
-import qualified Database.Redis as Redis
+import Data.Time (UTCTime, addUTCTime, getCurrentTime)
 import qualified Data.UUID as UUID
 import qualified Data.UUID.V4 as UUID
 import GHC.Generics (Generic)
-import Network.HTTP.Client
-  ( Manager,
-    Request (method, requestBody, requestHeaders),
-    RequestBody (RequestBodyLBS),
-    defaultManagerSettings,
-    httpLbs,
-    newManager,
-    parseRequest,
-    responseBody,
-    responseHeaders,
-    responseStatus,
+import Network.HTTP.Client (Manager, defaultManagerSettings, newManager)
+import Network.HTTP.Types (Status, status400, status401, status403, status404, status500, status502)
+import StudioMCP.Auth.Config (AuthConfig (..), KeycloakConfig (..), defaultAuthConfig)
+import StudioMCP.Auth.PKCE
+  ( AuthorizationParams (..),
+    PKCEChallenge (..),
+    RefreshParams (..),
+    TokenExchangeParams (..),
+    TokenResponse (..),
+    buildAuthorizationUrl,
+    exchangeCodeForTokens,
+    generatePKCEChallenge,
+    pkceErrorToText,
+    refreshAccessToken,
   )
-import Network.HTTP.Types
-  ( Header,
-    hAuthorization,
-    hContentType,
-    methodDelete,
-    methodPost,
-    Status,
-    status400,
-    status401,
-    status403,
-    status404,
-    status500,
-    status502,
-  )
-import Network.HTTP.Types.Status (statusCode)
-import StudioMCP.Auth.Config (AuthConfig (acEnabled))
-import StudioMCP.Auth.Middleware (AuthService (..), buildAuthContext, validateToken)
-import StudioMCP.Auth.Types
-  ( AuthContext (..),
-    RawJwt (..),
-    SubjectId (..),
-    TenantId (..),
-    authErrorToText,
-    subjectId,
-    tenantId,
-  )
+import StudioMCP.Auth.Types (SubjectId (..), TenantId (..))
 import StudioMCP.DAG.Summary (RunId (..))
+import StudioMCP.DAG.Types ()
 import StudioMCP.Inference.Guardrails (applyGuardrails)
 import StudioMCP.Inference.ReferenceModel
   ( ReferenceModelConfig,
     requestReferenceAdvice,
   )
-import StudioMCP.MCP.Protocol.Types
-  ( CallToolParams (..),
-    CallToolResult (..),
-    ToolContent (..),
-  )
-import StudioMCP.MCP.Session.RedisConfig (RedisConfig (..))
-import StudioMCP.MCP.Session.RedisStore
-  ( RedisSessionStore (..),
-    newRedisSessionStore,
-    withRedisConnection,
-  )
+import StudioMCP.MCP.Protocol.Types (CallToolParams (..), CallToolResult (..), ToolContent (..))
 import StudioMCP.MCP.Tools
   ( ToolCatalog,
     ToolError (..),
@@ -148,7 +92,6 @@ import StudioMCP.Storage.TenantStorage
   ( TenantArtifact (..),
     TenantStorageService,
     createTenantArtifact,
-    createTenantArtifactVersion,
     defaultTenantStorageConfig,
     generateDownloadUrl,
     generateUploadUrl,
@@ -158,27 +101,39 @@ import StudioMCP.Storage.TenantStorage
 import qualified StudioMCP.Storage.TenantStorage as TenantStorage
 import StudioMCP.Web.Types
 
+-- | BFF configuration
 data BFFConfig = BFFConfig
   { bffMcpEndpoint :: Text,
     bffSessionTtlSeconds :: Int,
     bffUploadTtlSeconds :: Int,
     bffDownloadTtlSeconds :: Int,
     bffMaxUploadSize :: Integer,
-    bffAllowedContentTypes :: [Text]
+    bffAllowedContentTypes :: [Text],
+    -- | OAuth configuration
+    bffAuthConfig :: AuthConfig,
+    -- | OAuth redirect URI (where Keycloak sends auth code)
+    bffOAuthRedirectUri :: Text,
+    -- | OAuth scopes to request
+    bffOAuthScopes :: [Text],
+    -- | OAuth state TTL in seconds (how long to remember pending logins)
+    bffOAuthStateTtlSeconds :: Int,
+    -- | Post-logout redirect URI
+    bffPostLogoutRedirectUri :: Text
   }
   deriving (Eq, Show, Generic)
 
 instance ToJSON BFFConfig
 instance FromJSON BFFConfig
 
+-- | Default BFF configuration
 defaultBFFConfig :: BFFConfig
 defaultBFFConfig =
   BFFConfig
     { bffMcpEndpoint = "http://localhost:3000",
-      bffSessionTtlSeconds = 3600,
-      bffUploadTtlSeconds = 900,
-      bffDownloadTtlSeconds = 300,
-      bffMaxUploadSize = 10 * 1024 * 1024 * 1024,
+      bffSessionTtlSeconds = 3600, -- 1 hour
+      bffUploadTtlSeconds = 900, -- 15 minutes
+      bffDownloadTtlSeconds = 300, -- 5 minutes
+      bffMaxUploadSize = 10 * 1024 * 1024 * 1024, -- 10 GB
       bffAllowedContentTypes =
         [ "video/mp4",
           "video/quicktime",
@@ -190,23 +145,39 @@ defaultBFFConfig =
           "image/jpeg",
           "image/png",
           "image/tiff"
-        ]
+        ],
+      bffAuthConfig = defaultAuthConfig,
+      bffOAuthRedirectUri = "http://localhost:8081/auth/callback",
+      bffOAuthScopes = ["openid", "profile", "email", "offline_access"],
+      bffOAuthStateTtlSeconds = 300, -- 5 minutes
+      bffPostLogoutRedirectUri = "http://localhost:8081"
     }
 
+-- | BFF service errors
 data BFFError
-  = SessionNotFound WebSessionId
-  | SessionExpired WebSessionId
-  | InvalidCredentials Text
-  | Unauthorized Text
-  | Forbidden Text
-  | ArtifactNotFound Text
-  | InvalidRequest Text
-  | McpServiceError Text
-  | InternalError Text
+  = -- | Session not found
+    SessionNotFound WebSessionId
+  | -- | Session expired
+    SessionExpired WebSessionId
+  | -- | Invalid credentials
+    InvalidCredentials Text
+  | -- | Unauthorized
+    Unauthorized Text
+  | -- | Forbidden
+    Forbidden Text
+  | -- | Artifact not found
+    ArtifactNotFound Text
+  | -- | Invalid request
+    InvalidRequest Text
+  | -- | MCP service error
+    McpServiceError Text
+  | -- | Internal error
+    InternalError Text
   deriving (Eq, Show, Generic)
 
 instance ToJSON BFFError
 
+-- | Map BFF error to HTTP status
 bffErrorToHttpStatus :: BFFError -> Status
 bffErrorToHttpStatus (SessionNotFound _) = status401
 bffErrorToHttpStatus (SessionExpired _) = status401
@@ -218,20 +189,38 @@ bffErrorToHttpStatus (InvalidRequest _) = status400
 bffErrorToHttpStatus (McpServiceError _) = status502
 bffErrorToHttpStatus (InternalError _) = status500
 
+-- | Pending OAuth state for CSRF protection
+data PendingOAuthState = PendingOAuthState
+  { posState :: OAuthState,
+    posPkceChallenge :: PKCEChallenge,
+    posCreatedAt :: UTCTime,
+    posExpiresAt :: UTCTime
+  }
+  deriving (Eq, Show, Generic)
+
+-- | BFF service state
 data BFFService = BFFService
   { bffConfig :: BFFConfig,
+    -- | In-memory session store (for development)
     bffSessions :: TVar (Map WebSessionId WebSession),
+    -- | Pending uploads tracking
     bffPendingUploads :: TVar (Map Text PendingUpload),
+    -- | Run status cache
     bffRunCache :: TVar (Map RunId RunStatusResponse),
-    bffRedisStateStore :: Maybe RedisSessionStore,
+    -- | Tenant-scoped artifact store backing upload/download flows
     bffTenantStorage :: TenantStorageService,
+    -- | Shared workflow tool catalog used for MCP-backed run orchestration.
     bffToolCatalog :: Maybe ToolCatalog,
-    bffMcpHttpManager :: Maybe Manager,
-    bffAuthService :: Maybe AuthService,
+    -- | Inference manager + model config for chat.
     bffInferenceManager :: Maybe Manager,
-    bffReferenceModelConfig :: Maybe ReferenceModelConfig
+    bffReferenceModelConfig :: Maybe ReferenceModelConfig,
+    -- | HTTP manager for OAuth token exchange
+    bffHttpManager :: Maybe Manager,
+    -- | Pending OAuth states (for CSRF protection during login)
+    bffPendingOAuthStates :: TVar (Map Text PendingOAuthState)
   }
 
+-- | Pending upload record
 data PendingUpload = PendingUpload
   { puArtifactId :: Text,
     puTenantId :: Text,
@@ -243,16 +232,12 @@ data PendingUpload = PendingUpload
   }
   deriving (Eq, Show, Generic)
 
-instance ToJSON PendingUpload
-instance FromJSON PendingUpload
-
 data WorkflowToolPayload = WorkflowToolPayload
   { wtpRunId :: RunId,
     wtpStatus :: Text,
     wtpSubmittedAt :: UTCTime,
     wtpCompletedAt :: Maybe UTCTime
   }
-  deriving (Eq, Show, Generic)
 
 instance FromJSON WorkflowToolPayload where
   parseJSON = withObject "WorkflowToolPayload" $ \obj ->
@@ -262,11 +247,13 @@ instance FromJSON WorkflowToolPayload where
       <*> obj .: "submittedAt"
       <*> obj .:? "completedAt"
 
+-- | Create a new BFF service
 newBFFService :: BFFConfig -> IO BFFService
 newBFFService config = do
   sessionsVar <- newTVarIO Map.empty
   uploadsVar <- newTVarIO Map.empty
   runCacheVar <- newTVarIO Map.empty
+  oauthStatesVar <- newTVarIO Map.empty
   tenantStorage <- newTenantStorageService defaultTenantStorageConfig
   pure
     BFFService
@@ -274,13 +261,12 @@ newBFFService config = do
         bffSessions = sessionsVar,
         bffPendingUploads = uploadsVar,
         bffRunCache = runCacheVar,
-        bffRedisStateStore = Nothing,
         bffTenantStorage = tenantStorage,
         bffToolCatalog = Nothing,
-        bffMcpHttpManager = Nothing,
-        bffAuthService = Nothing,
         bffInferenceManager = Nothing,
-        bffReferenceModelConfig = Nothing
+        bffReferenceModelConfig = Nothing,
+        bffHttpManager = Nothing,
+        bffPendingOAuthStates = oauthStatesVar
       }
 
 newBFFServiceWithRuntime ::
@@ -293,102 +279,56 @@ newBFFServiceWithRuntime config toolCatalog tenantStorage referenceModelConfig =
   sessionsVar <- newTVarIO Map.empty
   uploadsVar <- newTVarIO Map.empty
   runCacheVar <- newTVarIO Map.empty
-  manager <- newManager defaultManagerSettings
+  oauthStatesVar <- newTVarIO Map.empty
+  inferenceManager <- newManager defaultManagerSettings
   pure
     BFFService
       { bffConfig = config,
         bffSessions = sessionsVar,
         bffPendingUploads = uploadsVar,
         bffRunCache = runCacheVar,
-        bffRedisStateStore = Nothing,
         bffTenantStorage = tenantStorage,
         bffToolCatalog = Just toolCatalog,
-        bffMcpHttpManager = Nothing,
-        bffAuthService = Nothing,
-        bffInferenceManager = Just manager,
-        bffReferenceModelConfig = Just referenceModelConfig
+        bffInferenceManager = Just inferenceManager,
+        bffReferenceModelConfig = Just referenceModelConfig,
+        bffHttpManager = Just inferenceManager, -- Reuse same manager
+        bffPendingOAuthStates = oauthStatesVar
       }
 
-newBFFServiceWithMcpClient ::
+-- | Create a new BFF service with OAuth support
+newBFFServiceWithAuth ::
   BFFConfig ->
   TenantStorageService ->
-  Maybe AuthService ->
-  ReferenceModelConfig ->
   IO BFFService
-newBFFServiceWithMcpClient config tenantStorage maybeAuthService referenceModelConfig = do
+newBFFServiceWithAuth config tenantStorage = do
   sessionsVar <- newTVarIO Map.empty
   uploadsVar <- newTVarIO Map.empty
   runCacheVar <- newTVarIO Map.empty
-  manager <- newManager defaultManagerSettings
+  oauthStatesVar <- newTVarIO Map.empty
+  httpManager <- newManager defaultManagerSettings
   pure
     BFFService
       { bffConfig = config,
         bffSessions = sessionsVar,
         bffPendingUploads = uploadsVar,
         bffRunCache = runCacheVar,
-        bffRedisStateStore = Nothing,
         bffTenantStorage = tenantStorage,
         bffToolCatalog = Nothing,
-        bffMcpHttpManager = Just manager,
-        bffAuthService = maybeAuthService,
-        bffInferenceManager = Just manager,
-        bffReferenceModelConfig = Just referenceModelConfig
+        bffInferenceManager = Nothing,
+        bffReferenceModelConfig = Nothing,
+        bffHttpManager = Just httpManager,
+        bffPendingOAuthStates = oauthStatesVar
       }
 
-newBFFServiceWithMcpClientAndRedis ::
-  BFFConfig ->
-  RedisConfig ->
-  TenantStorageService ->
-  Maybe AuthService ->
-  ReferenceModelConfig ->
-  IO BFFService
-newBFFServiceWithMcpClientAndRedis config redisConfig tenantStorage maybeAuthService referenceModelConfig = do
-  sessionsVar <- newTVarIO Map.empty
-  uploadsVar <- newTVarIO Map.empty
-  runCacheVar <- newTVarIO Map.empty
-  redisStore <- newRedisSessionStore redisConfig
-  manager <- newManager defaultManagerSettings
-  pure
-    BFFService
-      { bffConfig = config,
-        bffSessions = sessionsVar,
-        bffPendingUploads = uploadsVar,
-        bffRunCache = runCacheVar,
-        bffRedisStateStore = Just redisStore,
-        bffTenantStorage = tenantStorage,
-        bffToolCatalog = Nothing,
-        bffMcpHttpManager = Just manager,
-        bffAuthService = maybeAuthService,
-        bffInferenceManager = Just manager,
-        bffReferenceModelConfig = Just referenceModelConfig
-      }
-
-loginWebSession :: BFFService -> LoginRequest -> IO (Either BFFError WebSession)
-loginWebSession service loginRequest = do
-  identityResult <- resolveLoginIdentity service loginRequest
-  case identityResult of
-    Left err -> pure (Left err)
-    Right (subjectIdText, tenantIdText) ->
-      createWebSession
-        service
-        subjectIdText
-        tenantIdText
-        (lrAccessToken loginRequest)
-        (lrRefreshToken loginRequest)
-
-logoutWebSession :: BFFService -> WebSessionId -> IO (Either BFFError LogoutResponse)
-logoutWebSession service sessionId = do
-  invalidateResult <- invalidateWebSession service sessionId
-  pure $ fmap (const (LogoutResponse True)) invalidateResult
-
+-- | Create a new web session
 createWebSession ::
   BFFService ->
-  Text ->
-  Text ->
-  Text ->
-  Maybe Text ->
+  Text -> -- Subject ID
+  Text -> -- Tenant ID
+  Text -> -- Access token
+  Maybe Text -> -- Refresh token
   IO (Either BFFError WebSession)
-createWebSession service subjectIdText tenantIdText accessToken refreshToken = do
+createWebSession service subjectId tenantId accessToken refreshToken = do
   sessionId <- newWebSessionId
   now <- getCurrentTime
   let ttl = fromIntegral (bffSessionTtlSeconds (bffConfig service))
@@ -396,73 +336,75 @@ createWebSession service subjectIdText tenantIdText accessToken refreshToken = d
       session =
         WebSession
           { wsSessionId = sessionId,
-            wsSubjectId = subjectIdText,
-            wsTenantId = tenantIdText,
+            wsSubjectId = subjectId,
+            wsTenantId = tenantId,
             wsAccessToken = accessToken,
             wsRefreshToken = refreshToken,
-            wsMcpSessionId = Nothing,
             wsExpiresAt = expiresAt,
             wsCreatedAt = now,
             wsLastActiveAt = now
           }
-  persistResult <- upsertSession service session
-  pure (session <$ persistResult)
 
+  sessions <- readTVarIO (bffSessions service)
+  atomically $ writeTVar (bffSessions service) (Map.insert sessionId session sessions)
+  pure (Right session)
+
+-- | Get a web session
 getWebSession :: BFFService -> WebSessionId -> IO (Either BFFError WebSession)
 getWebSession service sessionId = do
-  sessionResult <- lookupStoredSession service sessionId
+  sessions <- readTVarIO (bffSessions service)
   now <- getCurrentTime
-  case sessionResult of
-    Left err -> pure (Left err)
-    Right Nothing -> pure $ Left $ SessionNotFound sessionId
-    Right (Just session)
-      | wsExpiresAt session < now -> do
-          _ <- deleteStoredSession service sessionId
+  case Map.lookup sessionId sessions of
+    Nothing -> pure $ Left $ SessionNotFound sessionId
+    Just session ->
+      if wsExpiresAt session < now
+        then do
+          -- Remove expired session
+          atomically $ writeTVar (bffSessions service) (Map.delete sessionId sessions)
           pure $ Left $ SessionExpired sessionId
-      | otherwise -> do
+        else do
+          -- Update last active time
           let updatedSession = session {wsLastActiveAt = now}
-          persistResult <- upsertSession service updatedSession
-          pure (updatedSession <$ persistResult)
+          atomically $ writeTVar (bffSessions service) (Map.insert sessionId updatedSession sessions)
+          pure (Right updatedSession)
 
+-- | Refresh a web session
 refreshWebSession ::
   BFFService ->
   WebSessionId ->
-  Text ->
-  Maybe Text ->
+  Text -> -- New access token
+  Maybe Text -> -- New refresh token
   IO (Either BFFError WebSession)
 refreshWebSession service sessionId newAccessToken newRefreshToken = do
   sessionResult <- getWebSession service sessionId
   case sessionResult of
     Left err -> pure (Left err)
     Right session -> do
-      terminateMcpSession service session
       now <- getCurrentTime
       let ttl = fromIntegral (bffSessionTtlSeconds (bffConfig service))
+          newExpiresAt = addUTCTime ttl now
           updatedSession =
             session
               { wsAccessToken = newAccessToken,
                 wsRefreshToken = newRefreshToken,
-                wsMcpSessionId = Nothing,
-                wsExpiresAt = addUTCTime ttl now,
+                wsExpiresAt = newExpiresAt,
                 wsLastActiveAt = now
               }
-      persistResult <- upsertSession service updatedSession
-      pure (updatedSession <$ persistResult)
+      sessions <- readTVarIO (bffSessions service)
+      atomically $ writeTVar (bffSessions service) (Map.insert sessionId updatedSession sessions)
+      pure (Right updatedSession)
 
+-- | Invalidate a web session
 invalidateWebSession :: BFFService -> WebSessionId -> IO (Either BFFError ())
 invalidateWebSession service sessionId = do
-  sessionResult <- lookupStoredSession service sessionId
-  case sessionResult of
-    Left err -> pure (Left err)
-    Right Nothing -> pure $ Left $ SessionNotFound sessionId
-    Right (Just session) -> do
-      terminateMcpSession service session
-      deleteStoredSession service sessionId
+  sessions <- readTVarIO (bffSessions service)
+  if Map.member sessionId sessions
+    then do
+      atomically $ writeTVar (bffSessions service) (Map.delete sessionId sessions)
+      pure (Right ())
+    else pure $ Left $ SessionNotFound sessionId
 
-getProfile :: BFFService -> WebSessionId -> IO (Either BFFError ProfileResponse)
-getProfile service sessionId =
-  fmap profileFromSession <$> getWebSession service sessionId
-
+-- | Request an upload URL
 requestUpload ::
   BFFService ->
   WebSessionId ->
@@ -473,6 +415,7 @@ requestUpload service sessionId req = do
   case sessionResult of
     Left err -> pure (Left err)
     Right session -> do
+      -- Validate content type
       let config = bffConfig service
       if urContentType req `notElem` bffAllowedContentTypes config
         then pure $ Left $ InvalidRequest "Content type not allowed"
@@ -481,24 +424,13 @@ requestUpload service sessionId req = do
             then pure $ Left $ InvalidRequest "File size exceeds maximum"
             else do
               artifactResult <-
-                case urArtifactId req of
-                  Nothing ->
-                    createTenantArtifact
-                      (bffTenantStorage service)
-                      (TenantId (wsTenantId session))
-                      (urContentType req)
-                      (urFileName req)
-                      (urFileSize req)
-                      (Map.fromList (fromMaybe [] (urMetadata req)))
-                  Just artifactId ->
-                    createTenantArtifactVersion
-                      (bffTenantStorage service)
-                      (TenantId (wsTenantId session))
-                      artifactId
-                      (urContentType req)
-                      (urFileName req)
-                      (urFileSize req)
-                      (Map.fromList (fromMaybe [] (urMetadata req)))
+                createTenantArtifact
+                  (bffTenantStorage service)
+                  (TenantId (wsTenantId session))
+                  (urContentType req)
+                  (urFileName req)
+                  (urFileSize req)
+                  (Map.fromList (maybe [] id (urMetadata req)))
               case artifactResult of
                 Left storageErr ->
                   pure (Left (tenantStorageErrorToBffError storageErr))
@@ -523,46 +455,42 @@ requestUpload service sessionId req = do
                                 puCreatedAt = taCreatedAt artifact,
                                 puExpiresAt = TenantStorage.puExpiresAt presigned
                               }
-                      persistPendingResult <- upsertPendingUpload service pending
-                      case persistPendingResult of
-                        Left err ->
-                          pure (Left err)
-                        Right () ->
-                          pure $
-                            Right
-                              UploadResponse
-                                { urpPresignedUrl =
-                                    PresignedUploadUrl
-                                      { puuUrl = TenantStorage.puUrl presigned,
-                                        puuMethod = TenantStorage.puMethod presigned,
-                                        puuHeaders = Map.toList (TenantStorage.puHeaders presigned),
-                                        puuExpiresAt = TenantStorage.puExpiresAt presigned,
-                                        puuArtifactId = taArtifactId artifact
-                                      },
-                                  urpArtifactId = taArtifactId artifact
-                                }
+                      uploads <- readTVarIO (bffPendingUploads service)
+                      atomically $ writeTVar (bffPendingUploads service) (Map.insert (taArtifactId artifact) pending uploads)
 
+                      pure $
+                        Right
+                          UploadResponse
+                            { urpPresignedUrl =
+                                PresignedUploadUrl
+                                  { puuUrl = TenantStorage.puUrl presigned,
+                                    puuMethod = TenantStorage.puMethod presigned,
+                                    puuHeaders = Map.toList (TenantStorage.puHeaders presigned),
+                                    puuExpiresAt = TenantStorage.puExpiresAt presigned,
+                                    puuArtifactId = taArtifactId artifact
+                                  },
+                              urpArtifactId = taArtifactId artifact
+                            }
+
+-- | Confirm an upload completed
 confirmUpload :: BFFService -> WebSessionId -> Text -> IO (Either BFFError ())
 confirmUpload service sessionId artifactId = do
   sessionResult <- getWebSession service sessionId
   case sessionResult of
     Left err -> pure (Left err)
     Right session -> do
-      now <- getCurrentTime
-      pendingResult <- lookupPendingUpload service artifactId
-      case pendingResult of
-        Left err -> pure (Left err)
-        Right Nothing -> pure $ Left $ ArtifactNotFound artifactId
-        Right (Just pending)
-          | puExpiresAt pending < now -> do
-              _ <- deletePendingUpload service artifactId
-              pure $ Left $ ArtifactNotFound artifactId
-        Right (Just pending)
-          | puTenantId pending /= wsTenantId session ->
-              pure $ Left $ Forbidden "Artifact belongs to different tenant"
-          | otherwise -> do
-              deletePendingUpload service artifactId
+      uploads <- readTVarIO (bffPendingUploads service)
+      case Map.lookup artifactId uploads of
+        Nothing -> pure $ Left $ ArtifactNotFound artifactId
+        Just pending ->
+          if puTenantId pending /= wsTenantId session
+            then pure $ Left $ Forbidden "Artifact belongs to different tenant"
+            else do
+              -- Remove from pending
+              atomically $ writeTVar (bffPendingUploads service) (Map.delete artifactId uploads)
+              pure (Right ())
 
+-- | Request a download URL
 requestDownload ::
   BFFService ->
   WebSessionId ->
@@ -606,6 +534,7 @@ requestDownload service sessionId req = do
                       drpFileName = taFileName artifact
                     }
 
+-- | Send a chat message
 sendChatMessage ::
   BFFService ->
   WebSessionId ->
@@ -615,7 +544,7 @@ sendChatMessage service sessionId req = do
   sessionResult <- getWebSession service sessionId
   case sessionResult of
     Left err -> pure (Left err)
-    Right session ->
+    Right session -> do
       case latestUserMessage (crMessages req) of
         Nothing ->
           pure $ Left $ InvalidRequest "At least one user message is required"
@@ -649,6 +578,7 @@ sendChatMessage service sessionId req = do
                       crpConversationId = conversationId
                     }
 
+-- | Submit a run
 submitRun ::
   BFFService ->
   WebSessionId ->
@@ -659,22 +589,44 @@ submitRun service sessionId req = do
   case sessionResult of
     Left err -> pure (Left err)
     Right session ->
-      if hasMcpBackend service
-        then do
+      case bffToolCatalog service of
+        Just toolCatalog -> do
           toolResult <-
-            callSessionTool
-              service
-              session
-              "workflow.submit"
-              ( Just $
-                  object
-                    [ "dag_spec" .= rsrDagSpec req,
-                      "input_artifacts" .= rsrInputArtifacts req
-                    ]
-              )
-          pure (toolResult >>= decodeRunStatusResponse)
-        else cacheSubmittedRun service
+            callTool
+              toolCatalog
+              (TenantId (wsTenantId session))
+              (SubjectId (wsSubjectId session))
+              CallToolParams
+                { ctpName = "workflow.submit",
+                  ctpArguments =
+                    Just $
+                      object
+                        [ "dag_spec" .= rsrDagSpec req,
+                          "input_artifacts" .= rsrInputArtifacts req
+                        ]
+                }
+          case toolResult of
+            ToolFailure err -> pure $ Left $ McpServiceError (renderToolError err)
+            ToolSuccess callResult ->
+              case decodeRunStatusResponse callResult of
+                Left err -> pure (Left err)
+                Right status -> pure (Right status)
+        Nothing -> do
+          runId <- generateRunId
+          now <- getCurrentTime
+          let status =
+                RunStatusResponse
+                  { rsrRunId = runId,
+                    rsrStatus = "submitted",
+                    rsrProgress = Just 0,
+                    rsrStartedAt = Just now,
+                    rsrCompletedAt = Nothing
+                  }
+          cache <- readTVarIO (bffRunCache service)
+          atomically $ writeTVar (bffRunCache service) (Map.insert runId status cache)
+          pure (Right status)
 
+-- | Get run status
 getRunStatus ::
   BFFService ->
   WebSessionId ->
@@ -685,666 +637,304 @@ getRunStatus service sessionId runId = do
   case sessionResult of
     Left err -> pure (Left err)
     Right session ->
-      if hasMcpBackend service
-        then do
+      case bffToolCatalog service of
+        Just toolCatalog -> do
           toolResult <-
-            callSessionTool
-              service
-              session
-              "workflow.status"
-              (Just (object ["run_id" .= runId]))
-          pure (toolResult >>= decodeRunStatusResponse)
-        else do
-          cache <- readTVarIO (bffRunCache service)
-          pure $
-            maybe
-              (Left (InvalidRequest "Run not found"))
-              Right
-              (Map.lookup runId cache)
-
-listRuns ::
-  BFFService ->
-  WebSessionId ->
-  RunListRequest ->
-  IO (Either BFFError RunListResponse)
-listRuns service sessionId req = do
-  sessionResult <- getWebSession service sessionId
-  case sessionResult of
-    Left err -> pure (Left err)
-    Right session ->
-      if hasMcpBackend service
-        then do
-          toolResult <-
-            callSessionTool
-              service
-              session
-              "workflow.list"
-              (Just (object ["status" .= rlrStatus req, "limit" .= rlrLimit req]))
-          pure (toolResult >>= decodeRunListResponse)
-        else do
-          cache <- readTVarIO (bffRunCache service)
-          let runs =
-                take (fromMaybe maxBound (rlrLimit req))
-                  . filter (\runStatus -> maybe True (== rsrStatus runStatus) (rlrStatus req))
-                  $ Map.elems cache
-          pure (Right (RunListResponse runs))
-
-cancelRun ::
-  BFFService ->
-  WebSessionId ->
-  RunId ->
-  Maybe Text ->
-  IO (Either BFFError RunStatusResponse)
-cancelRun service sessionId runId maybeReason = do
-  sessionResult <- getWebSession service sessionId
-  case sessionResult of
-    Left err -> pure (Left err)
-    Right session ->
-      if hasMcpBackend service
-        then do
-          toolResult <-
-            callSessionTool
-              service
-              session
-              "workflow.cancel"
-              (Just (object ["run_id" .= runId, "reason" .= maybeReason]))
-          pure (toolResult >>= decodeRunStatusResponse)
-        else do
+            callTool
+              toolCatalog
+              (TenantId (wsTenantId session))
+              (SubjectId (wsSubjectId session))
+              CallToolParams
+                { ctpName = "workflow.status",
+                  ctpArguments = Just (object ["run_id" .= runId])
+                }
+          case toolResult of
+            ToolFailure err -> pure $ Left $ McpServiceError (renderToolError err)
+            ToolSuccess callResult ->
+              case decodeRunStatusResponse callResult of
+                Left err -> pure (Left err)
+                Right status -> pure (Right status)
+        Nothing -> do
           cache <- readTVarIO (bffRunCache service)
           case Map.lookup runId cache of
+            Just status -> pure (Right status)
             Nothing -> pure $ Left $ InvalidRequest "Run not found"
-            Just runStatus -> do
-              now <- getCurrentTime
-              let updatedStatus =
-                    runStatus
-                      { rsrStatus = "cancelled",
-                        rsrProgress = Just 100,
-                        rsrCompletedAt = Just now
+
+-- | Initiate OAuth login flow
+--
+-- Generates PKCE challenge and OAuth state, stores them for later verification,
+-- and returns the authorization URL to redirect the user to.
+initiateLogin ::
+  BFFService ->
+  Maybe Text -> -- Optional redirect URI after login
+  IO (Either BFFError LoginInitiateResponse)
+initiateLogin service mRedirectUri = do
+  case bffHttpManager service of
+    Nothing -> pure $ Left $ InternalError "OAuth not configured (no HTTP manager)"
+    Just _ -> do
+      now <- getCurrentTime
+      let config = bffConfig service
+          keycloakConfig = acKeycloak (bffAuthConfig config)
+          ttl = fromIntegral (bffOAuthStateTtlSeconds config)
+          expiresAt = addUTCTime ttl now
+
+      -- Generate OAuth state and PKCE challenge
+      oauthState <- newOAuthState mRedirectUri
+      pkceChallenge <- generatePKCEChallenge
+
+      let pendingState =
+            PendingOAuthState
+              { posState = oauthState,
+                posPkceChallenge = pkceChallenge,
+                posCreatedAt = now,
+                posExpiresAt = expiresAt
+              }
+
+      -- Store pending state
+      states <- readTVarIO (bffPendingOAuthStates service)
+      atomically $ writeTVar (bffPendingOAuthStates service) (Map.insert (osState oauthState) pendingState states)
+
+      -- Build authorization URL
+      let authParams =
+            AuthorizationParams
+              { apClientId = kcClientId keycloakConfig,
+                apRedirectUri = bffOAuthRedirectUri config,
+                apScope = bffOAuthScopes config,
+                apState = osState oauthState,
+                apPkceChallenge = pkceChallenge
+              }
+          authUrl = buildAuthorizationUrl keycloakConfig authParams
+
+      pure $
+        Right
+          LoginInitiateResponse
+            { lirAuthorizationUrl = authUrl,
+              lirState = osState oauthState
+            }
+
+-- | Handle OAuth callback after user authenticates with Keycloak
+--
+-- Verifies the state parameter matches a pending login, exchanges the auth code
+-- for tokens using PKCE, extracts claims, and creates a web session.
+handleOAuthCallback ::
+  BFFService ->
+  OAuthCallbackRequest ->
+  IO (Either BFFError WebSession)
+handleOAuthCallback service req = do
+  case bffHttpManager service of
+    Nothing -> pure $ Left $ InternalError "OAuth not configured (no HTTP manager)"
+    Just manager -> do
+      now <- getCurrentTime
+      let config = bffConfig service
+          keycloakConfig = acKeycloak (bffAuthConfig config)
+
+      -- Look up and validate pending state
+      states <- readTVarIO (bffPendingOAuthStates service)
+      case Map.lookup (ocrState req) states of
+        Nothing -> pure $ Left $ InvalidCredentials "Invalid or expired OAuth state"
+        Just pendingState -> do
+          -- Remove used state
+          atomically $ writeTVar (bffPendingOAuthStates service) (Map.delete (ocrState req) states)
+
+          -- Check if state expired
+          if posExpiresAt pendingState < now
+            then pure $ Left $ InvalidCredentials "OAuth state expired"
+            else do
+              -- Exchange code for tokens
+              let exchangeParams =
+                    TokenExchangeParams
+                      { teClientId = kcClientId keycloakConfig,
+                        teCode = ocrCode req,
+                        teRedirectUri = bffOAuthRedirectUri config,
+                        teCodeVerifier = pcVerifier (posPkceChallenge pendingState)
                       }
-              atomically $
-                modifyTVar' (bffRunCache service) (Map.insert runId updatedStatus)
-              pure (Right updatedStatus)
 
-hideArtifact ::
+              tokenResult <- exchangeCodeForTokens keycloakConfig manager exchangeParams
+              case tokenResult of
+                Left pkceError ->
+                  pure $ Left $ InvalidCredentials (pkceErrorToText pkceError)
+                Right tokenResponse -> do
+                  -- Extract claims from access token (basic parsing)
+                  let subjectId = extractSubjectFromToken (trAccessToken tokenResponse)
+                      tenantId = extractTenantFromToken (trAccessToken tokenResponse)
+
+                  -- Create web session
+                  createWebSession
+                    service
+                    subjectId
+                    tenantId
+                    (trAccessToken tokenResponse)
+                    (trRefreshToken tokenResponse)
+
+-- | Handle logout
+handleLogout ::
   BFFService ->
   WebSessionId ->
-  Text ->
-  ArtifactActionRequest ->
-  IO (Either BFFError ArtifactGovernanceResponse)
-hideArtifact service sessionId artifactId actionRequest =
-  runArtifactGovernanceAction service sessionId "artifact.hide" artifactId actionRequest
-
-archiveArtifact ::
-  BFFService ->
-  WebSessionId ->
-  Text ->
-  ArtifactActionRequest ->
-  IO (Either BFFError ArtifactGovernanceResponse)
-archiveArtifact service sessionId artifactId actionRequest =
-  runArtifactGovernanceAction service sessionId "artifact.archive" artifactId actionRequest
-
-runArtifactGovernanceAction ::
-  BFFService ->
-  WebSessionId ->
-  Text ->
-  Text ->
-  ArtifactActionRequest ->
-  IO (Either BFFError ArtifactGovernanceResponse)
-runArtifactGovernanceAction service sessionId toolName artifactId actionRequest = do
+  IO (Either BFFError LogoutResponse)
+handleLogout service sessionId = do
   sessionResult <- getWebSession service sessionId
   case sessionResult of
     Left err -> pure (Left err)
-    Right session -> do
-      toolResult <-
-        callSessionTool
-          service
-          session
-          toolName
-          (Just (object ["artifact_id" .= artifactId, "reason" .= aarReason actionRequest]))
-      pure (toolResult >>= decodeArtifactGovernanceResponse)
+    Right _ -> do
+      -- Invalidate the session
+      _ <- invalidateWebSession service sessionId
 
-resolveLoginIdentity :: BFFService -> LoginRequest -> IO (Either BFFError (Text, Text))
-resolveLoginIdentity service loginRequest =
-  case bffAuthService service of
-    Just authService
-      | acEnabled (asConfig authService) -> do
-          tokenResult <- validateToken authService (RawJwt (lrAccessToken loginRequest))
-          case tokenResult of
-            Left authErr ->
-              pure $ Left $ InvalidCredentials (authErrorToText authErr)
-            Right claims -> do
-              correlationId <- freshIdentifier "corr"
-              authContextResult <- buildAuthContext (asConfig authService) claims correlationId
-              pure $
-                case authContextResult of
-                  Left authErr -> Left $ InvalidCredentials (authErrorToText authErr)
-                  Right authContext ->
-                    let SubjectId subjectIdText = subjectId (acSubject authContext)
-                        TenantId tenantIdText = tenantId (acTenant authContext)
-                     in Right (subjectIdText, tenantIdText)
-      | otherwise ->
-          pure (Right ("dev-user", "dev-tenant"))
-    _ ->
+      -- Build Keycloak logout URL if configured
+      let config = bffConfig service
+          keycloakConfig = acKeycloak (bffAuthConfig config)
+          logoutUrl =
+            Just $
+              kcIssuer keycloakConfig
+                <> "/protocol/openid-connect/logout"
+                <> "?post_logout_redirect_uri="
+                <> urlEncode (bffPostLogoutRedirectUri config)
+                <> "&client_id="
+                <> urlEncode (kcClientId keycloakConfig)
+
       pure $
-        case (lrSubjectId loginRequest, lrTenantId loginRequest) of
-          (Just subjectIdText, Just tenantIdText) -> Right (subjectIdText, tenantIdText)
-          (Nothing, Nothing) -> Right ("dev-user", "dev-tenant")
-          _ ->
-            Left $
-              InvalidRequest
-                "subjectId and tenantId must both be provided when auth validation is disabled"
+        Right
+          LogoutResponse
+            { lorLogoutUrl = logoutUrl,
+              lorSuccess = True
+            }
 
-profileFromSession :: WebSession -> ProfileResponse
-profileFromSession session =
-  ProfileResponse
-    { prSubjectId = wsSubjectId session,
-      prTenantId = wsTenantId session,
-      prExpiresAt = wsExpiresAt session,
-      prCreatedAt = wsCreatedAt session,
-      prLastActiveAt = wsLastActiveAt session
-    }
-
-upsertSession :: BFFService -> WebSession -> IO (Either BFFError ())
-upsertSession service session =
-  case bffRedisStateStore service of
-    Just redisStore ->
-      storeRedisValue redisStore (webSessionRedisKey redisStore (wsSessionId session)) (wsExpiresAt session) session
-    Nothing -> do
-      atomically $
-        modifyTVar'
-          (bffSessions service)
-          (Map.insert (wsSessionId session) session)
-      pure (Right ())
-
-lookupStoredSession :: BFFService -> WebSessionId -> IO (Either BFFError (Maybe WebSession))
-lookupStoredSession service sessionId =
-  case bffRedisStateStore service of
-    Just redisStore ->
-      lookupRedisValue redisStore (webSessionRedisKey redisStore sessionId)
-    Nothing -> do
-      sessions <- readTVarIO (bffSessions service)
-      pure (Right (Map.lookup sessionId sessions))
-
-deleteStoredSession :: BFFService -> WebSessionId -> IO (Either BFFError ())
-deleteStoredSession service sessionId =
-  case bffRedisStateStore service of
-    Just redisStore ->
-      deleteRedisValue redisStore (webSessionRedisKey redisStore sessionId)
-    Nothing -> do
-      atomically $ modifyTVar' (bffSessions service) (Map.delete sessionId)
-      pure (Right ())
-
-upsertPendingUpload :: BFFService -> PendingUpload -> IO (Either BFFError ())
-upsertPendingUpload service pendingUpload =
-  case bffRedisStateStore service of
-    Just redisStore ->
-      storeRedisValue redisStore (pendingUploadRedisKey redisStore (puArtifactId pendingUpload)) (puExpiresAt pendingUpload) pendingUpload
-    Nothing -> do
-      atomically $
-        modifyTVar'
-          (bffPendingUploads service)
-          (Map.insert (puArtifactId pendingUpload) pendingUpload)
-      pure (Right ())
-
-lookupPendingUpload :: BFFService -> Text -> IO (Either BFFError (Maybe PendingUpload))
-lookupPendingUpload service artifactId =
-  case bffRedisStateStore service of
-    Just redisStore ->
-      lookupRedisValue redisStore (pendingUploadRedisKey redisStore artifactId)
-    Nothing -> do
-      uploads <- readTVarIO (bffPendingUploads service)
-      pure (Right (Map.lookup artifactId uploads))
-
-deletePendingUpload :: BFFService -> Text -> IO (Either BFFError ())
-deletePendingUpload service artifactId =
-  case bffRedisStateStore service of
-    Just redisStore ->
-      deleteRedisValue redisStore (pendingUploadRedisKey redisStore artifactId)
-    Nothing -> do
-      atomically $ modifyTVar' (bffPendingUploads service) (Map.delete artifactId)
-      pure (Right ())
-
-webSessionRedisKey :: RedisSessionStore -> WebSessionId -> Text
-webSessionRedisKey redisStore (WebSessionId sessionIdText) =
-  redisStateKeyPrefix redisStore <> "web-session:" <> sessionIdText
-
-pendingUploadRedisKey :: RedisSessionStore -> Text -> Text
-pendingUploadRedisKey redisStore artifactId =
-  redisStateKeyPrefix redisStore <> "pending-upload:" <> artifactId
-
-redisStateKeyPrefix :: RedisSessionStore -> Text
-redisStateKeyPrefix redisStore =
-  rcKeyPrefix (rssConfig redisStore) <> "bff:"
-
-storeRedisValue :: ToJSON a => RedisSessionStore -> Text -> UTCTime -> a -> IO (Either BFFError ())
-storeRedisValue redisStore key expiresAt value = do
-  now <- getCurrentTime
-  let ttlSeconds = remainingTtlSeconds now expiresAt
-  if ttlSeconds <= 0
-    then deleteRedisValue redisStore key
-    else
-      withRedisWriteLock redisStore $
-        fmap (const ()) <$>
-          execBffRedis
-            redisStore
-            (setex (redisKeyBytes key) (fromIntegral ttlSeconds) (encodeStrictJson value))
-
-lookupRedisValue :: FromJSON a => RedisSessionStore -> Text -> IO (Either BFFError (Maybe a))
-lookupRedisValue redisStore key = do
-  redisResult <- execBffRedis redisStore (get (redisKeyBytes key))
-  pure $
-    case redisResult of
-      Left err -> Left err
-      Right Nothing -> Right Nothing
-      Right (Just payload) ->
-        case decodeStrictJson payload of
-          Nothing -> Left $ InternalError "BFF state store returned invalid JSON"
-          Just value -> Right (Just value)
-
-deleteRedisValue :: RedisSessionStore -> Text -> IO (Either BFFError ())
-deleteRedisValue redisStore key =
-  withRedisWriteLock redisStore $
-    fmap (const ()) <$> execBffRedis redisStore (del [redisKeyBytes key])
-
-execBffRedis :: RedisSessionStore -> Redis.Redis (Either Redis.Reply a) -> IO (Either BFFError a)
-execBffRedis redisStore action = do
-  connectionResult <- withRedisConnection redisStore (runRedis (rssConnection redisStore) action)
-  pure $
-    case connectionResult of
-      Left err -> Left $ InternalError ("BFF state store error: " <> T.pack (show err))
-      Right (Left reply) -> Left $ InternalError ("BFF state store error: " <> T.pack (show reply))
-      Right (Right value) -> Right value
-
-withRedisWriteLock :: RedisSessionStore -> IO a -> IO a
-withRedisWriteLock redisStore =
-  bracket_
-    (takeMVar (rssWriteLock redisStore))
-    (putMVar (rssWriteLock redisStore) ())
-
-remainingTtlSeconds :: UTCTime -> UTCTime -> Int
-remainingTtlSeconds now expiresAt
-  | expiresAt <= now = 0
-  | otherwise = max 1 (ceiling (diffUTCTime expiresAt now))
-
-encodeStrictJson :: ToJSON a => a -> BS.ByteString
-encodeStrictJson = LBS.toStrict . encode
-
-decodeStrictJson :: FromJSON a => BS.ByteString -> Maybe a
-decodeStrictJson = Aeson.decode . LBS.fromStrict
-
-redisKeyBytes :: Text -> BS.ByteString
-redisKeyBytes = TE.encodeUtf8
-
-hasMcpBackend :: BFFService -> Bool
-hasMcpBackend service =
-  maybe False (const True) (bffToolCatalog service)
-    || maybe False (const True) (bffMcpHttpManager service)
-
-cacheSubmittedRun :: BFFService -> IO (Either BFFError RunStatusResponse)
-cacheSubmittedRun service = do
-  runId <- generateRunId
-  now <- getCurrentTime
-  let status =
-        RunStatusResponse
-          { rsrRunId = runId,
-            rsrStatus = "submitted",
-            rsrProgress = Just 0,
-            rsrStartedAt = Just now,
-            rsrCompletedAt = Nothing
-          }
-  atomically $ modifyTVar' (bffRunCache service) (Map.insert runId status)
-  pure (Right status)
-
-callSessionTool ::
+-- | Handle token refresh
+handleTokenRefresh ::
   BFFService ->
-  WebSession ->
-  Text ->
-  Maybe Value ->
-  IO (Either BFFError CallToolResult)
-callSessionTool service session toolName arguments =
-  case bffToolCatalog service of
-    Just toolCatalog ->
-      callToolDirectly toolCatalog session toolName arguments
-    Nothing ->
-      case bffMcpHttpManager service of
-        Just manager ->
-          callToolOverHttp service manager session toolName arguments
-        Nothing ->
-          pure $ Left $ McpServiceError "BFF MCP backend is not configured"
-
-callToolDirectly ::
-  ToolCatalog ->
-  WebSession ->
-  Text ->
-  Maybe Value ->
-  IO (Either BFFError CallToolResult)
-callToolDirectly toolCatalog session toolName arguments = do
-  toolResult <-
-    callTool
-      toolCatalog
-      (TenantId (wsTenantId session))
-      (SubjectId (wsSubjectId session))
-      CallToolParams
-        { ctpName = toolName,
-          ctpArguments = arguments
-        }
-  pure $
-    case toolResult of
-      ToolFailure err -> Left $ McpServiceError (renderToolError err)
-      ToolSuccess callResult -> Right callResult
-
-callToolOverHttp ::
-  BFFService ->
-  Manager ->
-  WebSession ->
-  Text ->
-  Maybe Value ->
-  IO (Either BFFError CallToolResult)
-callToolOverHttp service manager session toolName arguments = do
-  firstResult <- callToolOverHttpOnce service manager session toolName arguments
-  case firstResult of
-    Left (McpServiceError message)
-      | isExpiredMcpSessionError message,
-        wsMcpSessionId session /= Nothing -> do
-          let clearedSession = session {wsMcpSessionId = Nothing}
-          persistResult <- upsertSession service clearedSession
-          case persistResult of
-            Left err -> pure (Left err)
-            Right () ->
-              callToolOverHttpOnce service manager clearedSession toolName arguments
-    _ -> pure firstResult
-
-callToolOverHttpOnce ::
-  BFFService ->
-  Manager ->
-  WebSession ->
-  Text ->
-  Maybe Value ->
-  IO (Either BFFError CallToolResult)
-callToolOverHttpOnce service manager session toolName arguments = do
-  sessionWithMcp <- ensureMcpSession service manager session
-  case sessionWithMcp of
-    Left err -> pure (Left err)
-    Right activeSession -> do
-      let requestPayload =
-            object
-              [ "jsonrpc" .= ("2.0" :: Text),
-                "id" .= (1 :: Int),
-                "method" .= ("tools/call" :: Text),
-                "params" .= object ["name" .= toolName, "arguments" .= arguments]
-              ]
-      responseResult <-
-        postMcpRequest
-          manager
-          (bffConfig service)
-          activeSession
-          True
-          (encode requestPayload)
-      pure $
-        responseResult >>= \rpcResponse ->
-          decodeRpcToolResult (mhrBody rpcResponse)
-
-ensureMcpSession ::
-  BFFService ->
-  Manager ->
-  WebSession ->
-  IO (Either BFFError WebSession)
-ensureMcpSession service manager session =
-  case wsMcpSessionId session of
-    Just _ -> pure (Right session)
-    Nothing -> do
-      let initializePayload =
-            object
-              [ "jsonrpc" .= ("2.0" :: Text),
-                "id" .= (1 :: Int),
-                "method" .= ("initialize" :: Text),
-                "params" .=
-                  object
-                    [ "protocolVersion" .= ("2024-11-05" :: Text),
-                      "capabilities" .= object [],
-                      "clientInfo" .= object ["name" .= ("studiomcp-bff" :: Text), "version" .= ("0.1.0" :: Text)]
-                    ]
-              ]
-      initResult <-
-        postMcpRequest
-          manager
-          (bffConfig service)
-          session
-          False
-          (encode initializePayload)
-      case initResult of
+  WebSessionId ->
+  IO (Either BFFError TokenRefreshResponse)
+handleTokenRefresh service sessionId = do
+  case bffHttpManager service of
+    Nothing -> pure $ Left $ InternalError "OAuth not configured (no HTTP manager)"
+    Just manager -> do
+      sessionResult <- getWebSession service sessionId
+      case sessionResult of
         Left err -> pure (Left err)
-        Right initResponse ->
-          case lookupResponseHeader "Mcp-Session-Id" (mhrHeaders initResponse) of
-            Nothing ->
-              pure $ Left $ McpServiceError "MCP initialize response did not include Mcp-Session-Id"
-            Just mcpSessionId -> do
-              let initializedSession = session {wsMcpSessionId = Just mcpSessionId}
-                  initializedNotification =
-                    object
-                      [ "jsonrpc" .= ("2.0" :: Text),
-                        "method" .= ("notifications/initialized" :: Text)
-                      ]
-              initializedResult <-
-                postMcpRequest
-                  manager
-                  (bffConfig service)
-                  initializedSession
-                  True
-                  (encode initializedNotification)
-              case initializedResult of
-                Left err -> pure (Left err)
-                Right _ -> do
-                  persistResult <- upsertSession service initializedSession
-                  pure (initializedSession <$ persistResult)
+        Right session -> do
+          case wsRefreshToken session of
+            Nothing -> pure $ Left $ InvalidCredentials "No refresh token available"
+            Just refreshToken -> do
+              let config = bffConfig service
+                  keycloakConfig = acKeycloak (bffAuthConfig config)
+                  refreshParams =
+                    RefreshParams
+                      { rpClientId = kcClientId keycloakConfig,
+                        rpRefreshToken = refreshToken,
+                        rpClientSecret = kcClientSecret keycloakConfig
+                      }
 
-terminateMcpSession :: BFFService -> WebSession -> IO ()
-terminateMcpSession service session =
-  case (bffMcpHttpManager service, wsMcpSessionId session) of
-    (Just manager, Just _) -> do
-      deleteResult <- deleteMcpSession manager (bffConfig service) session
-      case deleteResult of
-        Left _ -> pure ()
-        Right _ -> pure ()
-    _ -> pure ()
+              tokenResult <- refreshAccessToken keycloakConfig manager refreshParams
+              case tokenResult of
+                Left pkceError ->
+                  pure $ Left $ InvalidCredentials (pkceErrorToText pkceError)
+                Right tokenResponse -> do
+                  -- Update session with new tokens
+                  updatedSession <-
+                    refreshWebSession
+                      service
+                      sessionId
+                      (trAccessToken tokenResponse)
+                      (trRefreshToken tokenResponse)
+                  case updatedSession of
+                    Left err -> pure (Left err)
+                    Right sess ->
+                      pure $
+                        Right
+                          TokenRefreshResponse
+                            { trrExpiresAt = wsExpiresAt sess,
+                              trrSuccess = True
+                            }
 
-data McpHttpResponse = McpHttpResponse
-  { mhrStatus :: Int,
-    mhrHeaders :: [Header],
-    mhrBody :: LBS.ByteString
-  }
-
-postMcpRequest ::
-  Manager ->
-  BFFConfig ->
-  WebSession ->
-  Bool ->
-  LBS.ByteString ->
-  IO (Either BFFError McpHttpResponse)
-postMcpRequest manager config session includeSessionHeader requestPayload = do
-  request <- parseRequest (mcpEndpointUrl config)
-  response <-
-    httpLbs
-      request
-        { method = methodPost,
-          requestHeaders =
-            [(hContentType, "application/json")] <> authHeadersForSession session <> sessionHeaders includeSessionHeader session,
-          requestBody = RequestBodyLBS requestPayload
-        }
-      manager
-  let statusValue = statusCode (responseStatus response)
-      httpResponse =
-        McpHttpResponse
-          { mhrStatus = statusValue,
-            mhrHeaders = responseHeaders response,
-            mhrBody = responseBody response
-          }
-  pure $
-    if statusValue == 200
-      then Right httpResponse
-      else Left $ McpServiceError (extractMcpErrorMessage (responseBody response))
-
-deleteMcpSession ::
-  Manager ->
-  BFFConfig ->
-  WebSession ->
-  IO (Either BFFError ())
-deleteMcpSession manager config session = do
-  request <- parseRequest (mcpEndpointUrl config)
-  response <-
-    httpLbs
-      request
-        { method = methodDelete,
-          requestHeaders = authHeadersForSession session <> sessionHeaders True session
-        }
-      manager
-  pure $
-    if statusCode (responseStatus response) `elem` [200, 400]
-      then Right ()
-      else Left $ McpServiceError (extractMcpErrorMessage (responseBody response))
-
-authHeadersForSession :: WebSession -> [Header]
-authHeadersForSession session =
-  if T.null (wsAccessToken session)
-    then []
-    else [(hAuthorization, "Bearer " <> TE.encodeUtf8 (wsAccessToken session))]
-
-sessionHeaders :: Bool -> WebSession -> [Header]
-sessionHeaders includeSessionHeader session =
-  if includeSessionHeader
-    then maybe [] (\sid -> [("Mcp-Session-Id", TE.encodeUtf8 sid)]) (wsMcpSessionId session)
-    else []
-
-mcpEndpointUrl :: BFFConfig -> String
-mcpEndpointUrl config =
-  T.unpack (T.dropWhileEnd (== '/') (bffMcpEndpoint config) <> "/mcp")
-
-lookupResponseHeader :: Text -> [Header] -> Maybe Text
-lookupResponseHeader headerName headers =
-  TE.decodeUtf8 <$> lookup (CI.mk (TE.encodeUtf8 headerName)) headers
-
-decodeRpcToolResult :: LBS.ByteString -> Either BFFError CallToolResult
-decodeRpcToolResult responseBodyBytes =
-  case Aeson.decode responseBodyBytes :: Maybe Value of
-    Nothing ->
-      Left $ McpServiceError "MCP tools/call response was not valid JSON"
-    Just responseValue ->
-      case lookupPath ["error", "message"] responseValue of
-        Just messageValue ->
-          case fromJSON messageValue of
-            Success messageText -> Left $ McpServiceError messageText
-            Error _ -> Left $ McpServiceError "MCP tools/call returned an error"
-        Nothing ->
-          case lookupPath ["result"] responseValue of
-            Nothing -> Left $ McpServiceError "MCP tools/call response was missing a result"
-            Just resultValue ->
-              case fromJSON resultValue of
-                Success toolResult -> Right toolResult
-                Error err -> Left $ McpServiceError ("MCP tools/call returned an invalid result payload: " <> T.pack err)
-
-extractMcpErrorMessage :: LBS.ByteString -> Text
-extractMcpErrorMessage body =
-  case Aeson.decode body :: Maybe Value of
-    Just responseValue ->
-      fromMaybe fallbackMessage $
-        decodeTextAtPath ["error", "message"] responseValue
-          <> decodeTextAtPath ["error"] responseValue
-    Nothing -> fallbackMessage
+-- | URL encode a text value
+urlEncode :: Text -> Text
+urlEncode = T.concatMap encodeChar
   where
-    fallbackMessage =
-      let rawBody = T.strip (TE.decodeUtf8 (LBS.toStrict body))
-       in if T.null rawBody then "MCP request failed" else rawBody
+    encodeChar c
+      | isUnreserved c = T.singleton c
+      | otherwise = T.pack $ "%" <> hexEncode c
+    isUnreserved c =
+      (c >= 'A' && c <= 'Z')
+        || (c >= 'a' && c <= 'z')
+        || (c >= '0' && c <= '9')
+        || c == '-'
+        || c == '_'
+        || c == '.'
+        || c == '~'
+    hexEncode c =
+      let byte = fromEnum c
+          hi = byte `div` 16
+          lo = byte `mod` 16
+       in [hexDigit hi, hexDigit lo]
+    hexDigit n
+      | n < 10 = toEnum (n + fromEnum '0')
+      | otherwise = toEnum (n - 10 + fromEnum 'A')
 
-isExpiredMcpSessionError :: Text -> Bool
-isExpiredMcpSessionError message =
-  "Unknown or expired MCP session" `T.isInfixOf` message
+-- | Extract subject ID from JWT access token (basic parsing)
+-- In production this should use proper JWT parsing and validation
+extractSubjectFromToken :: Text -> Text
+extractSubjectFromToken token =
+  case T.splitOn "." token of
+    [_, payload, _] ->
+      case decodeBase64UrlPayload payload of
+        Just obj -> maybe "unknown" id (extractClaim "sub" obj)
+        Nothing -> "unknown"
+    _ -> "unknown"
 
-decodeRunStatusResponse :: CallToolResult -> Either BFFError RunStatusResponse
-decodeRunStatusResponse callResult =
-  case decodeToolPayload callResult of
-    Left err -> Left err
-    Right payload ->
-      Right $
-        RunStatusResponse
-          { rsrRunId = wtpRunId payload,
-            rsrStatus = wtpStatus payload,
-            rsrProgress = Just (progressForStatus (wtpStatus payload)),
-            rsrStartedAt = Just (wtpSubmittedAt payload),
-            rsrCompletedAt = wtpCompletedAt payload
-          }
+-- | Extract tenant ID from JWT access token
+-- Looks for tenant_id claim or falls back to default
+extractTenantFromToken :: Text -> Text
+extractTenantFromToken token =
+  case T.splitOn "." token of
+    [_, payload, _] ->
+      case decodeBase64UrlPayload payload of
+        Just obj ->
+          maybe "default" id $
+            extractClaim "tenant_id" obj
+              <|> extractClaim "tenantId" obj
+              <|> extractClaim "organization_id" obj
+        Nothing -> "default"
+    _ -> "default"
 
-decodeRunListResponse :: CallToolResult -> Either BFFError RunListResponse
-decodeRunListResponse callResult =
-  case decodeToolPayloadList callResult of
-    Left err -> Left err
-    Right payloads ->
-      Right $
-        RunListResponse
-          { rlrRuns = map workflowPayloadToRunStatus payloads
-          }
+-- | Decode base64url encoded JWT payload
+decodeBase64UrlPayload :: Text -> Maybe Aeson.Object
+decodeBase64UrlPayload payload =
+  case Aeson.eitherDecodeStrict' (TE.encodeUtf8 (addPadding (base64UrlToBase64 payload))) of
+    Right (Aeson.Object obj) -> Just obj
+    _ -> Nothing
+  where
+    -- Convert base64url to standard base64
+    base64UrlToBase64 = T.map (\c -> case c of '-' -> '+'; '_' -> '/'; x -> x)
+    -- Add padding if needed
+    addPadding t =
+      let pad = case T.length t `mod` 4 of
+            2 -> "=="
+            3 -> "="
+            _ -> ""
+       in t <> pad
 
-decodeArtifactGovernanceResponse :: CallToolResult -> Either BFFError ArtifactGovernanceResponse
-decodeArtifactGovernanceResponse callResult =
-  case firstToolPayload callResult of
-    Nothing -> Left $ McpServiceError "governance tool did not return machine-readable JSON data"
-    Just payloadText ->
-      case Aeson.eitherDecodeStrict' (TE.encodeUtf8 payloadText) of
-        Left err -> Left $ McpServiceError ("governance tool returned invalid JSON payload: " <> T.pack err)
-        Right payload -> Right payload
+-- | Extract a text claim from a JSON object
+extractClaim :: Text -> Aeson.Object -> Maybe Text
+extractClaim key obj =
+  case AesonKeyMap.lookup (AesonKey.fromText key) obj of
+    Just (Aeson.String s) -> Just s
+    _ -> Nothing
 
-decodeToolPayload :: FromJSON a => CallToolResult -> Either BFFError a
-decodeToolPayload callResult =
-  case firstToolPayload callResult of
-    Nothing -> Left $ McpServiceError "workflow tool did not return machine-readable JSON data"
-    Just payloadText ->
-      case Aeson.eitherDecodeStrict' (TE.encodeUtf8 payloadText) of
-        Left err -> Left $ McpServiceError ("workflow tool returned invalid JSON payload: " <> T.pack err)
-        Right payload -> Right payload
+-- | Alternative operator for Maybe
+(<|>) :: Maybe a -> Maybe a -> Maybe a
+(<|>) (Just x) _ = Just x
+(<|>) Nothing y = y
 
-decodeToolPayloadList :: FromJSON a => CallToolResult -> Either BFFError [a]
-decodeToolPayloadList = decodeToolPayload
-
-workflowPayloadToRunStatus :: WorkflowToolPayload -> RunStatusResponse
-workflowPayloadToRunStatus payload =
-  RunStatusResponse
-    { rsrRunId = wtpRunId payload,
-      rsrStatus = wtpStatus payload,
-      rsrProgress = Just (progressForStatus (wtpStatus payload)),
-      rsrStartedAt = Just (wtpSubmittedAt payload),
-      rsrCompletedAt = wtpCompletedAt payload
-    }
-
-progressForStatus :: Text -> Int
-progressForStatus statusText =
-  case T.toLower statusText of
-    "running" -> 0
-    "accepted" -> 0
-    "submitted" -> 0
-    _ -> 100
-
-lookupPath :: [Text] -> Value -> Maybe Value
-lookupPath [] currentValue = Just currentValue
-lookupPath (segment : remaining) (Aeson.Object objectValue) =
-  KeyMap.lookup (Key.fromText segment) objectValue >>= lookupPath remaining
-lookupPath _ _ = Nothing
-
-decodeTextAtPath :: [Text] -> Value -> Maybe Text
-decodeTextAtPath path responseValue = do
-  value <- lookupPath path responseValue
-  case fromJSON value of
-    Success textValue -> Just textValue
-    Error _ -> Nothing
-
+-- | Generate a conversation ID
 generateConversationId :: IO Text
-generateConversationId = freshIdentifier "conv"
-
-generateRunId :: IO RunId
-generateRunId = RunId <$> freshIdentifier "run"
-
-freshIdentifier :: Text -> IO Text
-freshIdentifier prefix = do
+generateConversationId = do
   uuid <- UUID.nextRandom
-  pure (prefix <> "-" <> UUID.toText uuid)
+  pure $ "conv-" <> UUID.toText uuid
+
+-- | Generate a run ID
+generateRunId :: IO RunId
+generateRunId = do
+  uuid <- UUID.nextRandom
+  pure $ RunId $ "run-" <> UUID.toText uuid
 
 tenantStorageErrorToBffError :: TenantStorage.TenantStorageError -> BFFError
 tenantStorageErrorToBffError err =
@@ -1369,12 +959,12 @@ safeLast [] = Nothing
 safeLast xs = Just (last xs)
 
 renderChatReply :: Text -> Text -> Maybe Text -> Text
-renderChatReply tenantIdText userMessage maybeContext =
+renderChatReply tenantId userMessage maybeContext =
   T.intercalate
     " "
     ( filter
         (not . T.null)
-        [ "Tenant " <> tenantIdText <> ":",
+        [ "Tenant " <> tenantId <> ":",
           "I can help you prepare uploads, submit DAG runs, inspect workflow state, and fetch artifacts.",
           "Latest request: \"" <> userMessage <> "\".",
           maybe "" (\ctx -> "Context: " <> ctx <> ".") maybeContext,
@@ -1386,9 +976,9 @@ renderChatPrompt :: WebSession -> ChatRequest -> Text -> Text
 renderChatPrompt session req latestMessage =
   T.intercalate
     "\n"
-    ( [ "You are the studioMCP assistant for tenant " <> wsTenantId session <> ".",
-        "Help with uploads, workflow execution, artifacts, and MCP operations.",
-        "Latest user message: " <> latestMessage
+    ( [ "You are the studioMCP assistant for tenant " <> wsTenantId session <> "."
+      , "Help with uploads, workflow execution, artifacts, and MCP operations."
+      , "Latest user message: " <> latestMessage
       ]
         <> maybe [] (\ctx -> ["Context: " <> ctx]) (crContext req)
     )
@@ -1404,8 +994,33 @@ renderToolError toolErr =
     RateLimited -> "Rate limit exceeded"
 
 renderFailureDetail :: FailureDetail -> Text
-renderFailureDetail = failureMessage
+renderFailureDetail failureDetail =
+  failureMessage failureDetail
+
+decodeRunStatusResponse :: CallToolResult -> Either BFFError RunStatusResponse
+decodeRunStatusResponse callResult =
+  case firstToolPayload callResult of
+    Nothing -> Left $ McpServiceError "workflow tool did not return machine-readable JSON data"
+    Just payloadText ->
+      case Aeson.eitherDecodeStrict' (TE.encodeUtf8 payloadText) of
+        Left err ->
+          Left $ McpServiceError ("workflow tool returned invalid JSON payload: " <> T.pack err)
+        Right payload ->
+          Right $
+            RunStatusResponse
+              { rsrRunId = wtpRunId payload,
+                rsrStatus = wtpStatus payload,
+                rsrProgress =
+                  Just $
+                    case T.toLower (wtpStatus payload) of
+                      "running" -> 0
+                      "accepted" -> 0
+                      "submitted" -> 0
+                      _ -> 100,
+                rsrStartedAt = Just (wtpSubmittedAt payload),
+                rsrCompletedAt = wtpCompletedAt payload
+              }
 
 firstToolPayload :: CallToolResult -> Maybe Text
 firstToolPayload callResult =
-  listToMaybe (mapMaybe tcData (ctrContent callResult))
+  tcData =<< safeLast (ctrContent callResult)

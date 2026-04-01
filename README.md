@@ -1,7 +1,7 @@
 # studioMCP
 
 ## Project Vision
-`studioMCP` is a Haskell-first MCP platform for DAG-based studio workflows. The current public automation surface is the runtime-backed MCP server on `/mcp`, with a typed DAG execution runtime, tenant-scoped artifact services, and a browser-facing BFF layer in the same codebase.
+`studioMCP` is a Haskell-first MCP platform for DAG-based studio workflows. The repository already contains the typed execution foundations, but the current public server surface is still being migrated from a custom DAG HTTP API to a standards-compliant MCP server.
 
 ## Why This Could Replace Large Parts of DAW / Photo / Video Toolchains
 Most studio workflows are long chains of deterministic transforms wrapped around a smaller number of impure boundaries. `studioMCP` treats those chains as typed DAGs instead of opaque editor sessions. That creates room for repeatability, memoization, better summaries, and safer automation.
@@ -69,14 +69,13 @@ Current documentation categories:
 - `domain/`
 - `engineering/` for engineering standards such as Kubernetes-native development policy
 - `operations/`
-- `research/` for reference-only source material
 - `reference/`
 - `tools/`
 
 The governed suite is current-state declarative documentation. Historical decision trails live in git history, not an ADR folder.
 
 ## Server Mode
-`server` mode owns the MCP listener, JSON-RPC lifecycle, authn/authz enforcement, tool/resource/prompt dispatch, and the authoritative execution path behind `/mcp`.
+`server` mode owns DAG submission, validation, execution orchestration, run-state progression, and summary retrieval. This is the authoritative execution path.
 
 ## Inference Mode
 `inference` mode is a local reference-LLM path for DAG drafting, repair suggestions, documentation Q&A, and operator assistance. It is advisory only. It must not bypass typed validation or mutate persisted results directly.
@@ -102,7 +101,7 @@ The project leans on existing tools instead of rebuilding them:
 - a local LLM host such as Ollama or `llama.cpp` for inference mode
 
 ## Development Roadmap
-The implementation plan lives in [STUDIOMCP_DEVELOPMENT_PLAN.md](/Users/matthewnowak/studioMCP/STUDIOMCP_DEVELOPMENT_PLAN.md). It tracks the completed delivery phases, validation surface, and the authoritative current-state architecture for the repo.
+The implementation plan lives in [STUDIOMCP_DEVELOPMENT_PLAN.md](/Users/matthewnowak/studioMCP/STUDIOMCP_DEVELOPMENT_PLAN.md). The current phase plan is complete through Phase 17. Remaining work now belongs to the next planning pass rather than to unfinished work inside the current roadmap.
 
 ## Status / Current Maturity
 Current state:
@@ -110,12 +109,16 @@ Current state:
 - Repository policy and development plan are in place.
 - The `documents/` suite now has an explicit standards SSoT and index.
 - Kubernetes-forward repo scaffolding is in place: one Dockerfile, one Helm chart, Skaffold config, and kind config.
-- The no-scripts policy, outer development-container model, and local storage doctrine are documented and materially embodied in code.
-- The MCP-first server transition is implemented: `/mcp` is the live automation surface, and the legacy `validate mcp` alias is retired.
-- Signed JWT validation, tenant resolution, Redis-backed MCP session state, artifact governance, observability, and Helm packaging are all present in the repository.
-- The browser-facing BFF now exposes login, logout, profile, upload, download, chat, run submit/list/status/cancel, and artifact hide/archive routes, with cookie-backed browser sessions and live HTTP MCP mediation for workflow and governance calls.
-- The CLI now includes `studiomcp stdio`, `studiomcp cluster reset`, and `studiomcp cluster storage delete <name>`, and the integration harness covers `validate web-bff`.
-- Commands verified in this review are `cabal build all`, `cabal test unit-tests`, `cabal run studiomcp -- validate docs`, `cabal run studiomcp -- validate web-bff`, and `cabal run studiomcp -- validate mcp-conformance`.
+- The no-scripts policy, outer development-container model, and local storage doctrine are now documented and materially embodied in code.
+- All phases in the current development plan are complete through Phase 17.
+- The `studiomcp` CLI now includes native `dag validate ...`, `dag validate-fixtures`, `validate docs`, `validate cluster`, `validate pulsar`, `validate minio`, `validate boundary`, `validate ffmpeg-adapter`, `validate executor`, `validate e2e`, `validate worker`, `validate mcp`, `validate inference`, `validate observability`, `cluster up`, `cluster down`, `cluster status`, `cluster deploy ...`, and `cluster storage reconcile` commands.
+- `docker/docker-compose.yaml` now launches `studiomcp-env` as the outer development container instead of a local sidecar topology.
+- A real Haskell MinIO adapter now round-trips memo objects, manifests, and summaries through the deployed MinIO sidecar and maps missing-object lookups to a stable storage failure contract.
+- A real boundary runtime now executes deterministic helper processes with stdout/stderr capture, non-zero exit projection, and enforced timeout failure mapping, and `studiomcp validate boundary` exercises that contract.
+- A real FFmpeg adapter now runs on top of the boundary runtime, seeds a deterministic WAV fixture under `examples/assets/audio/`, validates one successful transcode, and asserts structured failure output for a missing input.
+- The server, inference, and worker entrypoints are all real HTTP runtimes with live validation coverage. The current `server` runtime still exposes a legacy custom DAG HTTP surface and is planned to migrate to a proper MCP protocol surface under the revised development plan.
+- Verified commands now include `cabal build all`, `cabal test unit-tests`, `cabal test integration-tests` (requires outer container and cluster), `cabal run studiomcp -- validate docs`, `docker compose -f docker/docker-compose.yaml exec -T studiomcp-env studiomcp validate cluster`, `... validate pulsar`, `... validate minio`, `... validate boundary`, `... validate ffmpeg-adapter`, `... validate executor`, `... validate e2e`, `... validate worker`, `... validate mcp`, `... validate inference`, `... validate observability`, plus `helm lint`, `skaffold diagnose`, and `skaffold render`.
+- The basic outer-container cluster workflow is now verified on this machine. Persistence-backed Helm releases remain a non-default local workflow, and the shipped `values-kind.yaml` keeps MinIO and Pulsar persistence disabled, so `cluster storage reconcile` is currently a no-op under the default local values.
 
 ## Contribution Guidance
 The repo treats documentation, architecture notes, and tests as first-class artifacts. Follow the suite index at [documents/README.md](/Users/matthewnowak/studioMCP/documents/README.md) and the documentation rules at [documents/documentation_standards.md](/Users/matthewnowak/studioMCP/documents/documentation_standards.md). LLM agents may edit files and run local validation, but commits and pushes are reserved for the human user. See [AGENTS.md](/Users/matthewnowak/studioMCP/AGENTS.md) and [CLAUDE.md](/Users/matthewnowak/studioMCP/CLAUDE.md).

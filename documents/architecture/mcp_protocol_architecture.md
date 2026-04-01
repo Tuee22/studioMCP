@@ -9,7 +9,7 @@
 
 ## Summary
 
-`studioMCP` implements MCP as MCP and must not regress from that contract.
+`studioMCP` must implement MCP as MCP.
 
 That means:
 
@@ -49,7 +49,7 @@ The MCP layer is not responsible for:
 `studioMCP` targets two transports:
 
 - `stdio` for local development, local operators, and Inspector-driven debugging
-- Streamable HTTP for remote SaaS access and the BFF mediation path
+- Streamable HTTP for remote SaaS access and BFF mediation
 
 Remote MCP traffic must terminate at a single coherent Streamable HTTP MCP endpoint rather than a family of business-specific REST routes.
 

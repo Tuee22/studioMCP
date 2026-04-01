@@ -25,6 +25,7 @@ module StudioMCP.MCP.Tools
     toolErrorCode,
 
     -- * Tool Definitions
+    allToolDefinitions,
     workflowSubmitTool,
     workflowStatusTool,
     workflowCancelTool,
@@ -38,6 +39,7 @@ module StudioMCP.MCP.Tools
 
     -- * Tool Authorization
     toolRequiredScopes,
+    toolDefinitionForName,
   )
 where
 
@@ -70,7 +72,7 @@ import qualified Data.Text.Encoding as TE
 import Data.Time (UTCTime, getCurrentTime)
 import Data.Time.Clock (diffUTCTime)
 import StudioMCP.Auth.Types (SubjectId (..), TenantId (..))
-import StudioMCP.DAG.Executor (ExecutorAdapters, ExecutionReport (..), executeParallel)
+import StudioMCP.DAG.Executor (ExecutorAdapters, ExecutionReport (..), executeSequential)
 import StudioMCP.DAG.Parser (decodeDagBytes)
 import StudioMCP.DAG.Runtime (PersistedRun (..), RuntimeConfig (..), runDagSpecEndToEnd)
 import StudioMCP.DAG.Summary (RunId (..), summaryFinishedAt, summaryStartedAt, summaryStatus)
@@ -111,15 +113,12 @@ import StudioMCP.Storage.Keys (summaryRefForRun)
 import StudioMCP.Storage.MinIO (MinIOConfig, readSummary)
 import StudioMCP.Storage.TenantStorage
   ( TenantArtifact (..),
-    TenantStorageBackend (..),
     TenantStorageError (..),
     TenantStorageService,
     createTenantArtifact,
-    createTenantArtifactVersion,
     defaultTenantStorageConfig,
     generateDownloadUrl,
     generateUploadUrl,
-    getTenantBackend,
     getTenantArtifact,
     listTenantArtifacts,
     newTenantStorageService,
@@ -320,19 +319,7 @@ newToolCatalogWithRuntimeAndAudit runtimeConfig tenantStorage governance auditTr
 
 -- | List all available tools
 listTools :: ToolCatalog -> IO [ToolDefinition]
-listTools _catalog =
-  pure
-    [ workflowSubmitTool,
-      workflowStatusTool,
-      workflowCancelTool,
-      workflowListTool,
-      artifactGetTool,
-      artifactDownloadUrlTool,
-      artifactUploadUrlTool,
-      artifactHideTool,
-      artifactArchiveTool,
-      tenantInfoTool
-    ]
+listTools _catalog = pure allToolDefinitions
 
 -- | Call a tool with given parameters
 callTool ::
@@ -483,7 +470,7 @@ executeWorkflowSubmit catalog executor =
                   ("Workflow accepted for tenant " <> tenantIdText <> ". Run ID: " <> unRunId runId <> ". Status: accepted")
                   (workflowRunRecordToJson runRecord)
             Just adapters -> do
-              result <- executeParallel adapters runId now dagSpec
+              result <- executeSequential adapters runId now dagSpec
               case result of
                 Left failureDetail -> do
                   let runRecord =
@@ -678,26 +665,14 @@ executeArtifactUploadUrl catalog executor =
         Just contentType -> do
           let fileName = maybe "upload.bin" id (extractStringArg "file_name" args)
               fileSize = maybe 0 id (extractIntArg "file_size" args)
-              maybeArtifactId = extractStringArg "artifact_id" args
           artifactResult <-
-            case maybeArtifactId of
-              Nothing ->
-                createTenantArtifact
-                  (tcTenantStorage catalog)
-                  (teTenantId executor)
-                  contentType
-                  fileName
-                  (fromIntegral fileSize)
-                  Map.empty
-              Just artifactId ->
-                createTenantArtifactVersion
-                  (tcTenantStorage catalog)
-                  (teTenantId executor)
-                  artifactId
-                  contentType
-                  fileName
-                  (fromIntegral fileSize)
-                  Map.empty
+            createTenantArtifact
+              (tcTenantStorage catalog)
+              (teTenantId executor)
+              contentType
+              fileName
+              (fromIntegral fileSize)
+              Map.empty
           case artifactResult of
             Left err ->
               pure $ ToolFailure (tenantStorageErrorToToolError err)
@@ -711,15 +686,10 @@ executeArtifactUploadUrl catalog executor =
                     catalog
                     executor
                     (taArtifactId artifact)
-                    (Just ("v" <> T.pack (show (taVersion artifact))))
-                    (if taVersion artifact > 1 then AuditVersionCreated else AuditCreate)
+                    Nothing
+                    AuditCreate
                     OutcomeSuccess
-                    ( Map.fromList
-                        [ ("contentType", contentType),
-                          ("fileName", fileName),
-                          ("version", T.pack (show (taVersion artifact)))
-                        ]
-                    )
+                    (Map.fromList [("contentType", contentType), ("fileName", fileName)])
                   recordAuditEntryIfConfigured
                     catalog
                     executor
@@ -765,15 +735,7 @@ executeArtifactHide catalog executor =
                   pure $ ToolFailure $ ExecutionFailed $ T.pack (show err)
                 Right _ -> do
                   recordGovernanceAudit catalog executor artifactId ActionHide Hidden
-                  pure $
-                    toolResultWithData
-                      ("Artifact " <> artifactId <> " hidden successfully. State: hidden")
-                      ( object
-                          [ "artifactId" .= artifactId,
-                            "action" .= ("hide" :: Text),
-                            "status" .= ("hidden" :: Text)
-                          ]
-                      )
+                  pure $ plainTextResult $ "Artifact " <> artifactId <> " hidden successfully. State: hidden"
 
 -- | Execute artifact.archive tool
 executeArtifactArchive :: ToolCatalog -> ToolExecutor -> IO ToolResult
@@ -801,15 +763,7 @@ executeArtifactArchive catalog executor =
                   pure $ ToolFailure $ ExecutionFailed $ T.pack (show err)
                 Right _ -> do
                   recordGovernanceAudit catalog executor artifactId ActionArchive Archived
-                  pure $
-                    toolResultWithData
-                      ("Artifact " <> artifactId <> " archived successfully. State: archived")
-                      ( object
-                          [ "artifactId" .= artifactId,
-                            "action" .= ("archive" :: Text),
-                            "status" .= ("archived" :: Text)
-                          ]
-                      )
+                  pure $ plainTextResult $ "Artifact " <> artifactId <> " archived successfully. State: archived"
 
 -- | Execute tenant.info tool
 executeTenantInfo :: ToolCatalog -> ToolExecutor -> IO ToolResult
@@ -817,7 +771,6 @@ executeTenantInfo catalog executor = do
   let TenantId tenantIdText = teTenantId executor
       SubjectId subjectIdText = teSubjectId executor
   artifacts <- listTenantArtifacts (tcTenantStorage catalog) (teTenantId executor)
-  storageBackend <- getTenantBackend (tcTenantStorage catalog) (teTenantId executor)
   let usedBytes = sum (map taFileSize artifacts)
   pure $
     plainTextResult $
@@ -828,9 +781,7 @@ executeTenantInfo catalog executor = do
         <> "  Subject ID: "
         <> subjectIdText
         <> "\n"
-        <> "  Storage Backend: "
-        <> renderTenantStorageBackend storageBackend
-        <> "\n"
+        <> "  Storage Backend: platform-minio\n"
         <> "  Artifact Count: "
         <> T.pack (show (length artifacts))
         <> "\n"
@@ -981,10 +932,6 @@ renderArtifactState Hidden = "hidden"
 renderArtifactState Archived = "archived"
 renderArtifactState (Superseded newArtifactId) = "superseded by " <> newArtifactId
 
-renderTenantStorageBackend :: TenantStorageBackend -> Text
-renderTenantStorageBackend PlatformMinIO = "platform-minio"
-renderTenantStorageBackend TenantOwnedS3 {} = "tenant-s3"
-
 tenantStorageErrorToToolError :: TenantStorageError -> ToolError
 tenantStorageErrorToToolError err =
   case err of
@@ -1042,18 +989,39 @@ workflowRunRecordToJson runRecord =
       "completedAt" .= wrrCompletedAt runRecord
     ]
 
--- | Get required scopes for a tool
+-- | All tool definitions in the catalog (single source of truth)
+allToolDefinitions :: [ToolDefinition]
+allToolDefinitions =
+  [ workflowSubmitTool,
+    workflowStatusTool,
+    workflowCancelTool,
+    workflowListTool,
+    artifactGetTool,
+    artifactDownloadUrlTool,
+    artifactUploadUrlTool,
+    artifactHideTool,
+    artifactArchiveTool,
+    tenantInfoTool
+  ]
+
+-- | Get tool definition by tool name (derives from catalog)
+toolDefinitionForName :: ToolName -> ToolDefinition
+toolDefinitionForName name =
+  case name of
+    WorkflowSubmit -> workflowSubmitTool
+    WorkflowStatus -> workflowStatusTool
+    WorkflowCancel -> workflowCancelTool
+    WorkflowList -> workflowListTool
+    ArtifactGet -> artifactGetTool
+    ArtifactDownloadUrl -> artifactDownloadUrlTool
+    ArtifactUploadUrl -> artifactUploadUrlTool
+    ArtifactHide -> artifactHideTool
+    ArtifactArchive -> artifactArchiveTool
+    TenantInfo -> tenantInfoTool
+
+-- | Get required scopes for a tool (derives from catalog definitions)
 toolRequiredScopes :: ToolName -> [Text]
-toolRequiredScopes WorkflowSubmit = ["workflow:write"]
-toolRequiredScopes WorkflowStatus = ["workflow:read"]
-toolRequiredScopes WorkflowCancel = ["workflow:write"]
-toolRequiredScopes WorkflowList = ["workflow:read"]
-toolRequiredScopes ArtifactGet = ["artifact:read"]
-toolRequiredScopes ArtifactDownloadUrl = ["artifact:read"]
-toolRequiredScopes ArtifactUploadUrl = ["artifact:write"]
-toolRequiredScopes ArtifactHide = ["artifact:manage"]
-toolRequiredScopes ArtifactArchive = ["artifact:manage"]
-toolRequiredScopes TenantInfo = ["tenant:read"]
+toolRequiredScopes = tdRequiredScopes . toolDefinitionForName
 
 -- | Tool definitions
 
@@ -1081,7 +1049,8 @@ workflowSubmitTool =
                         ]
                   ],
             tisRequired = Just ["dag_spec"]
-          }
+          },
+      tdRequiredScopes = ["workflow:write"]
     }
 
 workflowStatusTool :: ToolDefinition
@@ -1102,7 +1071,8 @@ workflowStatusTool =
                         ]
                   ],
             tisRequired = Just ["run_id"]
-          }
+          },
+      tdRequiredScopes = ["workflow:read"]
     }
 
 workflowCancelTool :: ToolDefinition
@@ -1128,7 +1098,8 @@ workflowCancelTool =
                         ]
                   ],
             tisRequired = Just ["run_id"]
-          }
+          },
+      tdRequiredScopes = ["workflow:write"]
     }
 
 workflowListTool :: ToolDefinition
@@ -1156,7 +1127,8 @@ workflowListTool =
                         ]
                   ],
             tisRequired = Nothing
-          }
+          },
+      tdRequiredScopes = ["workflow:read"]
     }
 
 artifactGetTool :: ToolDefinition
@@ -1182,7 +1154,8 @@ artifactGetTool =
                         ]
                   ],
             tisRequired = Just ["artifact_id"]
-          }
+          },
+      tdRequiredScopes = ["artifact:read"]
     }
 
 artifactDownloadUrlTool :: ToolDefinition
@@ -1208,14 +1181,15 @@ artifactDownloadUrlTool =
                         ]
                   ],
             tisRequired = Just ["artifact_id"]
-          }
+          },
+      tdRequiredScopes = ["artifact:read"]
     }
 
 artifactUploadUrlTool :: ToolDefinition
 artifactUploadUrlTool =
   ToolDefinition
     { tdName = "artifact.upload_url",
-      tdDescription = Just "Generate a presigned upload URL for a new artifact or a new version of an existing artifact",
+      tdDescription = Just "Generate a presigned upload URL for a new artifact",
       tdInputSchema =
         ToolInputSchema
           { tisType = "object",
@@ -1236,15 +1210,11 @@ artifactUploadUrlTool =
                       .= object
                         [ "type" .= ("integer" :: Text),
                           "description" .= ("File size in bytes" :: Text)
-                        ],
-                    "artifact_id"
-                      .= object
-                        [ "type" .= ("string" :: Text),
-                          "description" .= ("Existing artifact ID when uploading a new version" :: Text)
                         ]
                   ],
             tisRequired = Just ["content_type"]
-          }
+          },
+      tdRequiredScopes = ["artifact:write"]
     }
 
 artifactHideTool :: ToolDefinition
@@ -1270,7 +1240,8 @@ artifactHideTool =
                         ]
                   ],
             tisRequired = Just ["artifact_id"]
-          }
+          },
+      tdRequiredScopes = ["artifact:manage"]
     }
 
 artifactArchiveTool :: ToolDefinition
@@ -1296,7 +1267,8 @@ artifactArchiveTool =
                         ]
                   ],
             tisRequired = Just ["artifact_id"]
-          }
+          },
+      tdRequiredScopes = ["artifact:manage"]
     }
 
 tenantInfoTool :: ToolDefinition
@@ -1309,5 +1281,6 @@ tenantInfoTool =
           { tisType = "object",
             tisProperties = Nothing,
             tisRequired = Nothing
-          }
+          },
+      tdRequiredScopes = ["tenant:read"]
     }

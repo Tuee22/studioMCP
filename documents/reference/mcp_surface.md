@@ -21,14 +21,14 @@ Implemented today:
 Current note:
 
 - the legacy `validate mcp` alias has been retired
-- the stdio transport is exposed directly through `studiomcp stdio`
+- the stdio transport is validated and supported by the protocol core, but a first-class `studiomcp stdio` convenience entry point remains future CLI ergonomics
 
-## Public MCP Surface
+## Target Public MCP Surface
 
-The current public MCP surface is:
+The target public MCP surface is:
 
 - `stdio` for local development and local tooling
-- Streamable HTTP for remote clients and the BFF mediation path
+- Streamable HTTP for remote clients and BFF mediation
 - a single MCP endpoint for remote protocol traffic
 - separate operational endpoints for `/healthz`, `/version`, and `/metrics`
 
@@ -77,15 +77,14 @@ Each message is a complete JSON-RPC 2.0 object on a single line. No length prefi
 ### CLI Invocation
 
 ```bash
-studiomcp stdio                     # Start stdio MCP server
 studiomcp validate mcp-stdio       # Validate stdio transport
 ```
 
-**Note**: `studiomcp stdio` and `validate mcp-stdio` exercise the same stdio transport implementation.
+**Note**: The stdio transport core exists and `validate mcp-stdio` passes locally. A first-class `studiomcp stdio` entry point is still future CLI work.
 
 ## Streamable HTTP Transport Specification
 
-The Streamable HTTP transport is used for remote SaaS access and is the current BFF mediation path for workflow and artifact-governance operations.
+The Streamable HTTP transport is used for remote SaaS access and BFF mediation.
 
 ### Endpoint
 

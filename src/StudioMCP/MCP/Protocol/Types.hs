@@ -277,7 +277,8 @@ instance FromJSON InitializeResult where
 data ToolDefinition = ToolDefinition
   { tdName :: Text,
     tdDescription :: Maybe Text,
-    tdInputSchema :: ToolInputSchema
+    tdInputSchema :: ToolInputSchema,
+    tdRequiredScopes :: [Text]
   }
   deriving (Eq, Show, Generic)
 
@@ -288,6 +289,7 @@ instance ToJSON ToolDefinition where
         "inputSchema" .= tdInputSchema td
       ]
         ++ maybe [] (\d -> ["description" .= d]) (tdDescription td)
+        ++ if null (tdRequiredScopes td) then [] else ["requiredScopes" .= tdRequiredScopes td]
 
 instance FromJSON ToolDefinition where
   parseJSON = withObject "ToolDefinition" $ \obj ->
@@ -295,6 +297,7 @@ instance FromJSON ToolDefinition where
       <$> obj .: "name"
       <*> obj .:? "description"
       <*> obj .: "inputSchema"
+      <*> (obj .:? "requiredScopes" >>= \case Nothing -> pure []; Just s -> pure s)
 
 -- | JSON Schema for tool input
 data ToolInputSchema = ToolInputSchema
@@ -405,7 +408,8 @@ data ResourceDefinition = ResourceDefinition
   { rdUri :: Text,
     rdName :: Text,
     rdDescription :: Maybe Text,
-    rdMimeType :: Maybe Text
+    rdMimeType :: Maybe Text,
+    rdRequiredScopes :: [Text]
   }
   deriving (Eq, Show, Generic)
 
@@ -417,6 +421,7 @@ instance ToJSON ResourceDefinition where
       ]
         ++ maybe [] (\d -> ["description" .= d]) (rdDescription rd)
         ++ maybe [] (\m -> ["mimeType" .= m]) (rdMimeType rd)
+        ++ if null (rdRequiredScopes rd) then [] else ["requiredScopes" .= rdRequiredScopes rd]
 
 instance FromJSON ResourceDefinition where
   parseJSON = withObject "ResourceDefinition" $ \obj ->
@@ -425,6 +430,7 @@ instance FromJSON ResourceDefinition where
       <*> obj .: "name"
       <*> obj .:? "description"
       <*> obj .:? "mimeType"
+      <*> (obj .:? "requiredScopes" >>= \case Nothing -> pure []; Just s -> pure s)
 
 -- | Read resource request parameters
 data ReadResourceParams = ReadResourceParams
@@ -481,7 +487,8 @@ instance FromJSON ReadResourceResult where
 data PromptDefinition = PromptDefinition
   { pdName :: Text,
     pdDescription :: Maybe Text,
-    pdArguments :: Maybe [PromptArgument]
+    pdArguments :: Maybe [PromptArgument],
+    pdRequiredScopes :: [Text]
   }
   deriving (Eq, Show, Generic)
 
@@ -491,6 +498,7 @@ instance ToJSON PromptDefinition where
       ["name" .= pdName pd]
         ++ maybe [] (\d -> ["description" .= d]) (pdDescription pd)
         ++ maybe [] (\a -> ["arguments" .= a]) (pdArguments pd)
+        ++ if null (pdRequiredScopes pd) then [] else ["requiredScopes" .= pdRequiredScopes pd]
 
 instance FromJSON PromptDefinition where
   parseJSON = withObject "PromptDefinition" $ \obj ->
@@ -498,6 +506,7 @@ instance FromJSON PromptDefinition where
       <$> obj .: "name"
       <*> obj .:? "description"
       <*> obj .:? "arguments"
+      <*> (obj .:? "requiredScopes" >>= \case Nothing -> pure []; Just s -> pure s)
 
 -- | Prompt argument
 data PromptArgument = PromptArgument

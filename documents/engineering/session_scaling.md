@@ -28,7 +28,7 @@ This design introduces Redis as a critical dependency. Network latency is added 
 
 ## Current Repo Note
 
-The current repository implements the Redis-backed MCP session store described here. Shared session metadata, subscriptions, cursors, and locks are modeled in Haskell and validated across multiple store instances plus alternating live listener nodes using the same `Mcp-Session-Id`. The browser-facing BFF now uses the same Redis deployment pattern to externalize browser sessions, pending uploads, and cached MCP session identifiers across BFF replicas.
+The current repository does not yet implement the remote session architecture described here. This document defines the target scaling contract.
 
 ## Non-Sticky Requirement
 

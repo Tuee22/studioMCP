@@ -54,11 +54,11 @@ redis:
     enabled: true
   master:
     persistence:
-      storageClass: ""
+      storageClass: "studiomcp-manual"
   replica:
     replicaCount: 3
     persistence:
-      storageClass: ""
+      storageClass: "studiomcp-manual"
 ```
 
 HA deployment is required in all environments including local kind development. See [../engineering/k8s_storage.md](../engineering/k8s_storage.md#ha-deployment-mode) for the full policy.

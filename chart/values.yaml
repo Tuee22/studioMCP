@@ -213,7 +213,6 @@ minio:
 # HA: 3+ per component
 pulsar:
   enabled: true
-  initialize: true
   components:
     zookeeper: true
     bookkeeper: true

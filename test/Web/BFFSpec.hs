@@ -2,20 +2,11 @@
 
 module Web.BFFSpec (spec) where
 
-import Control.Concurrent (threadDelay)
-import Control.Exception (SomeException, try)
-import StudioMCP.Auth.Types (TenantId (..))
 import Network.HTTP.Types (status400, status401, status403, status404, status500, status502)
 import qualified Data.Text as T
-import StudioMCP.Inference.ReferenceModel (ReferenceModelConfig (..))
 import StudioMCP.DAG.Types (DagSpec (..))
-import StudioMCP.MCP.Session.RedisConfig
-import StudioMCP.MCP.Session.RedisStore
-import StudioMCP.Storage.TenantStorage (TenantArtifact (..), defaultTenantStorageConfig, getTenantArtifact, newTenantStorageService)
 import StudioMCP.Web.BFF
 import StudioMCP.Web.Types
-import System.Exit (ExitCode (..))
-import System.Process (readProcessWithExitCode)
 import Test.Hspec
 
 spec :: Spec
@@ -128,8 +119,7 @@ spec = do
       service <- newBFFService defaultBFFConfig
       let req =
             UploadRequest
-              { urArtifactId = Nothing,
-                urFileName = "video.mp4",
+              { urFileName = "video.mp4",
                 urContentType = "video/mp4",
                 urFileSize = 1000,
                 urMetadata = Nothing
@@ -144,8 +134,7 @@ spec = do
       Right session <- createWebSession service "user-123" "tenant-456" "token" Nothing
       let req =
             UploadRequest
-              { urArtifactId = Nothing,
-                urFileName = "video.mp4",
+              { urFileName = "video.mp4",
                 urContentType = "video/mp4",
                 urFileSize = 1000,
                 urMetadata = Nothing
@@ -155,46 +144,12 @@ spec = do
         Right resp -> urpArtifactId resp `shouldSatisfy` not . T.null
         Left err -> expectationFailure $ "Failed to create upload: " ++ show err
 
-    it "creates a new version when upload targets an existing artifact" $ do
-      service <- newBFFService defaultBFFConfig
-      Right session <- createWebSession service "user-123" "tenant-456" "token" Nothing
-      Right firstUpload <-
-        requestUpload
-          service
-          (wsSessionId session)
-          UploadRequest
-            { urArtifactId = Nothing,
-              urFileName = "video.mp4",
-              urContentType = "video/mp4",
-              urFileSize = 1000,
-              urMetadata = Nothing
-            }
-      Right secondUpload <-
-        requestUpload
-          service
-          (wsSessionId session)
-          UploadRequest
-            { urArtifactId = Just (urpArtifactId firstUpload),
-              urFileName = "video-v2.mp4",
-              urContentType = "video/mp4",
-              urFileSize = 2000,
-              urMetadata = Nothing
-            }
-      urpArtifactId secondUpload `shouldBe` urpArtifactId firstUpload
-      Right latestArtifact <-
-        getTenantArtifact
-          (bffTenantStorage service)
-          (TenantId "tenant-456")
-          (urpArtifactId firstUpload)
-      taVersion latestArtifact `shouldBe` 2
-
     it "rejects disallowed content types" $ do
       service <- newBFFService defaultBFFConfig
       Right session <- createWebSession service "user-123" "tenant-456" "token" Nothing
       let req =
             UploadRequest
-              { urArtifactId = Nothing,
-                urFileName = "file.exe",
+              { urFileName = "file.exe",
                 urContentType = "application/x-msdownload",
                 urFileSize = 1000,
                 urMetadata = Nothing
@@ -209,8 +164,7 @@ spec = do
       Right session <- createWebSession service "user-123" "tenant-456" "token" Nothing
       let req =
             UploadRequest
-              { urArtifactId = Nothing,
-                urFileName = "huge.mp4",
+              { urFileName = "huge.mp4",
                 urContentType = "video/mp4",
                 urFileSize = 100 * 1024 * 1024 * 1024, -- 100 GB
                 urMetadata = Nothing
@@ -237,8 +191,7 @@ spec = do
           service
           (wsSessionId session)
           UploadRequest
-            { urArtifactId = Nothing
-            , urFileName = "video.mp4"
+            { urFileName = "video.mp4"
             , urContentType = "video/mp4"
             , urFileSize = 1000
             , urMetadata = Nothing
@@ -301,70 +254,6 @@ spec = do
               rsrStatus tracked `shouldBe` "submitted"
             Left err -> expectationFailure $ "Failed to fetch run status: " ++ show err
 
-  redisFixture <- runIO startRedisFixture
-  let (containerId, redisConfig) = redisFixture
-  afterAll_ (stopRedisFixture redisFixture) $
-    before_ (flushRedisFixture containerId) $
-      describe "Redis-backed browser session state" $ do
-        it "shares sessions, uploads, and invalidation across BFF services" $ do
-          tenantStorage <- newTenantStorageService defaultTenantStorageConfig
-          let referenceModelConfig = ReferenceModelConfig "http://127.0.0.1:11434/api/generate"
-          service1 <-
-            newBFFServiceWithMcpClientAndRedis
-              defaultBFFConfig
-              redisConfig
-              tenantStorage
-              Nothing
-              referenceModelConfig
-          service2 <-
-            newBFFServiceWithMcpClientAndRedis
-              defaultBFFConfig
-              redisConfig
-              tenantStorage
-              Nothing
-              referenceModelConfig
-
-          Right createdSession <-
-            createWebSession service1 "user-123" "tenant-456" "access-token" (Just "refresh-token")
-
-          sharedSession <- getWebSession service2 (wsSessionId createdSession)
-          case sharedSession of
-            Right retrieved -> do
-              wsSubjectId retrieved `shouldBe` "user-123"
-              wsTenantId retrieved `shouldBe` "tenant-456"
-            Left err -> expectationFailure $ "Failed to read session from second BFF service: " ++ show err
-
-          refreshedSession <- refreshWebSession service2 (wsSessionId createdSession) "new-token" (Just "new-refresh-token")
-          case refreshedSession of
-            Right refreshed -> wsAccessToken refreshed `shouldBe` "new-token"
-            Left err -> expectationFailure $ "Failed to refresh session from second BFF service: " ++ show err
-
-          reloadedSession <- getWebSession service1 (wsSessionId createdSession)
-          case reloadedSession of
-            Right retrieved -> wsAccessToken retrieved `shouldBe` "new-token"
-            Left err -> expectationFailure $ "Failed to reload refreshed session from first BFF service: " ++ show err
-
-          Right uploadResponse <-
-            requestUpload
-              service1
-              (wsSessionId createdSession)
-              UploadRequest
-                { urArtifactId = Nothing
-                , urFileName = "shared-video.mp4"
-                , urContentType = "video/mp4"
-                , urFileSize = 2048
-                , urMetadata = Nothing
-                }
-
-          confirmUpload service2 (wsSessionId createdSession) (urpArtifactId uploadResponse)
-            `shouldReturn` Right ()
-          confirmUpload service1 (wsSessionId createdSession) (urpArtifactId uploadResponse)
-            `shouldReturn` Left (ArtifactNotFound (urpArtifactId uploadResponse))
-
-          invalidateWebSession service2 (wsSessionId createdSession) `shouldReturn` Right ()
-          getWebSession service1 (wsSessionId createdSession)
-            `shouldReturn` Left (SessionNotFound (wsSessionId createdSession))
-
 sampleDagSpec :: DagSpec
 sampleDagSpec =
   DagSpec
@@ -379,68 +268,3 @@ sampleRunSubmitRequest =
     { rsrDagSpec = sampleDagSpec
     , rsrInputArtifacts = []
     }
-
-startRedisFixture :: IO (String, RedisConfig)
-startRedisFixture = do
-  (exitCode, stdoutText, stderrText) <-
-    readProcessWithExitCode "docker" ["run", "-d", "-P", "redis:7-alpine"] ""
-  case exitCode of
-    ExitFailure _ -> fail stderrText
-    ExitSuccess -> do
-      let containerId = trimLine stdoutText
-      portNumber <- resolvePublishedPort containerId
-      let redisConfig =
-            defaultRedisConfig
-              { rcHost = "127.0.0.1"
-              , rcPort = portNumber
-              }
-      waitForRedisReady redisConfig
-      pure (containerId, redisConfig)
-
-stopRedisFixture :: (String, RedisConfig) -> IO ()
-stopRedisFixture (containerId, _) = do
-  _ <- readProcessWithExitCode "docker" ["rm", "-f", containerId] ""
-  pure ()
-
-flushRedisFixture :: String -> IO ()
-flushRedisFixture containerId = do
-  (exitCode, _, stderrText) <-
-    readProcessWithExitCode "docker" ["exec", containerId, "redis-cli", "FLUSHDB"] ""
-  case exitCode of
-    ExitSuccess -> pure ()
-    ExitFailure _ -> fail stderrText
-
-resolvePublishedPort :: String -> IO Int
-resolvePublishedPort containerId = do
-  (exitCode, stdoutText, stderrText) <-
-    readProcessWithExitCode "docker" ["port", containerId, "6379/tcp"] ""
-  case exitCode of
-    ExitFailure _ -> fail stderrText
-    ExitSuccess ->
-      case reads (reverse (takeWhile (/= ':') (reverse (trimLine stdoutText)))) of
-        [(portNumber, "")] -> pure portNumber
-        _ -> fail ("Unable to parse Docker Redis port from: " <> stdoutText)
-
-waitForRedisReady :: RedisConfig -> IO ()
-waitForRedisReady redisConfig = loop (20 :: Int)
-  where
-    loop attemptsRemaining
-      | attemptsRemaining <= 0 =
-          fail "Timed out waiting for temporary Redis container to become ready"
-      | otherwise = do
-          storeResult <- (try (newRedisSessionStore redisConfig) :: IO (Either SomeException RedisSessionStore))
-          case storeResult of
-            Right store -> do
-              connectionResult <- testConnection store
-              closeRedisSessionStore store
-              case connectionResult of
-                Right () -> pure ()
-                Left _ -> retry
-            Left _ -> retry
-      where
-        retry = do
-          threadDelay 500000
-          loop (attemptsRemaining - 1)
-
-trimLine :: String -> String
-trimLine = reverse . dropWhile (`elem` ['\n', '\r']) . reverse

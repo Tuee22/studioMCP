@@ -75,8 +75,8 @@ import StudioMCP.Storage.TenantStorage
     TenantStorageBackend (..),
     TenantStorageService,
     defaultTenantStorageConfig,
-    getTenantBackend,
     getTenantArtifact,
+    tscDefaultBackend,
     tscMaxArtifactSize,
     tssConfig,
   )
@@ -211,37 +211,43 @@ listResources _catalog (TenantId tenantIdText) =
         { rdUri = "studiomcp://summaries/{run_id}",
           rdName = "Workflow Run Summary",
           rdDescription = Just "Summary of a completed or running workflow execution",
-          rdMimeType = Just "application/json"
+          rdMimeType = Just "application/json",
+          rdRequiredScopes = ["workflow:read"]
         },
       ResourceDefinition
         { rdUri = "studiomcp://manifests/{run_id}",
           rdName = "Workflow Run Manifest",
           rdDescription = Just "Full manifest with artifact references and memo keys",
-          rdMimeType = Just "application/json"
+          rdMimeType = Just "application/json",
+          rdRequiredScopes = ["workflow:read"]
         },
       ResourceDefinition
         { rdUri = "studiomcp://metadata/tenant/" <> tenantIdText,
           rdName = "Tenant Metadata",
           rdDescription = Just "Current tenant configuration and limits",
-          rdMimeType = Just "application/json"
+          rdMimeType = Just "application/json",
+          rdRequiredScopes = ["tenant:read"]
         },
       ResourceDefinition
         { rdUri = "studiomcp://metadata/quotas",
           rdName = "Quota Information",
           rdDescription = Just "Current resource quotas and usage",
-          rdMimeType = Just "application/json"
+          rdMimeType = Just "application/json",
+          rdRequiredScopes = ["tenant:read"]
         },
       ResourceDefinition
         { rdUri = "studiomcp://artifacts/{artifact_id}",
           rdName = "Artifact Metadata",
           rdDescription = Just "Metadata for a specific artifact",
-          rdMimeType = Just "application/json"
+          rdMimeType = Just "application/json",
+          rdRequiredScopes = ["artifact:read"]
         },
       ResourceDefinition
         { rdUri = "studiomcp://history/runs",
           rdName = "Run History",
           rdDescription = Just "History of workflow runs for the tenant",
-          rdMimeType = Just "application/json"
+          rdMimeType = Just "application/json",
+          rdRequiredScopes = ["workflow:read"]
         }
     ]
 
@@ -460,19 +466,16 @@ readManifestResource catalog (TenantId tenantIdText) (Just runIdText) = do
 -- | Read tenant metadata resource
 readTenantMetadataResource :: ResourceCatalog -> TenantId -> IO (Either ResourceError ReadResourceResult)
 readTenantMetadataResource catalog (TenantId tenantIdText) = do
-  (storageBackend, maxArtifactSize) <-
-    case rcTenantStorage catalog of
-      Just tenantStorage -> do
-        backend <- getTenantBackend tenantStorage (TenantId tenantIdText)
-        pure
-          ( showBackend backend,
-            tscMaxArtifactSize (tssConfig tenantStorage)
-          )
-      Nothing ->
-        pure
-          ( "platform-minio",
-            tscMaxArtifactSize defaultTenantStorageConfig
-          )
+  let (storageBackend, maxArtifactSize) =
+        case rcTenantStorage catalog of
+          Just tenantStorage ->
+            ( showBackend (tscDefaultBackend (tssConfig tenantStorage)),
+              tscMaxArtifactSize (tssConfig tenantStorage)
+            )
+          Nothing ->
+            ( "platform-minio",
+              tscMaxArtifactSize defaultTenantStorageConfig
+            )
   let content =
         Aeson.encode $
           object

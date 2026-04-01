@@ -6,9 +6,8 @@ module StudioMCP.CLI.Cluster
   )
 where
 
-import Control.Concurrent (forkIO, killThread, threadDelay)
-import Control.Concurrent.Async (forConcurrently_)
 import Control.Exception (SomeException, bracket, bracket_, try)
+import Control.Concurrent (forkIO, killThread, threadDelay)
 import Control.Monad (forM_, unless, when)
 import Data.Aeson (FromJSON, Value (..), decode, encode, fromJSON, object, (.=))
 import qualified Data.Aeson as Aeson
@@ -22,7 +21,7 @@ import Data.ByteString.Char8 qualified as BS
 import Data.ByteString.Lazy.Char8 qualified as LBS
 import qualified Data.CaseInsensitive as CI
 import Data.Char (isSpace, toLower)
-import Data.List (isInfixOf, sort)
+import Data.List (isInfixOf)
 import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import qualified Data.Set as Set
 import Data.Time (addUTCTime, getCurrentTime)
@@ -39,10 +38,8 @@ import Network.HTTP.Client
     RequestBody (RequestBodyLBS),
     defaultManagerSettings,
     httpLbs,
-    managerResponseTimeout,
     newManager,
     parseRequest,
-    responseTimeoutMicro,
     responseBody,
     responseHeaders,
     responseStatus,
@@ -73,6 +70,7 @@ import StudioMCP.CLI.Command
     ClusterStorageCommand (..),
     ValidateCommand (..),
   )
+-- Note: ClusterEnsureCommand is now part of ClusterCommand (..)
 import StudioMCP.CLI.Docs (validateDocsCommand)
 import StudioMCP.API.Health (DependencyHealth (..), HealthReport (..), HealthStatus (..))
 import StudioMCP.Auth.Config
@@ -80,9 +78,8 @@ import StudioMCP.Auth.Config
   , defaultAuthConfig
   , KeycloakConfig (..)
   , jwksEndpoint
-  , loadAuthConfigFromEnv
   )
-import StudioMCP.Auth.Middleware (AuthService, newAuthService, validateToken)
+import StudioMCP.Auth.Middleware (newAuthService, validateToken)
 import StudioMCP.Auth.Jwks (JwtHeader (..), parseJwt)
 import StudioMCP.Auth.Types
   ( AuthError (..)
@@ -109,9 +106,7 @@ import StudioMCP.DAG.Types
   )
 import StudioMCP.DAG.Validator (renderFailures, validateDag)
 import StudioMCP.MCP.JsonRpc (JsonRpcMessage (..), JsonRpcRequest (..), JsonRpcVersion (..), RequestId (..))
-import StudioMCP.MCP.Core (defaultServerConfig, newMcpServerWithCatalogs)
-import StudioMCP.MCP.Handlers (ServerEnv (..), createServerEnv)
-import qualified StudioMCP.MCP.Server as MCPServer
+import StudioMCP.MCP.Handlers (createServerEnv, serverTenantStorage, serverToolCatalog)
 import StudioMCP.MCP.Protocol.StateMachine
   ( ProtocolEvent (..)
   , ProtocolState (..)
@@ -171,32 +166,33 @@ import StudioMCP.MCP.Session.Types
   , sessionId
   )
 import StudioMCP.Web.BFF
-  ( BFFConfig (..)
-  , BFFService
-  , defaultBFFConfig
-  , newBFFServiceWithMcpClientAndRedis
+  ( defaultBFFConfig
+  , newBFFServiceWithRuntime
+  , createWebSession
+  , getWebSession
+  , refreshWebSession
+  , invalidateWebSession
+  , requestUpload
+  , confirmUpload
+  , requestDownload
+  , sendChatMessage
+  , submitRun
+  , getRunStatus
   )
-import StudioMCP.Web.Handlers (bffApplication, newBFFContextWithService)
 import StudioMCP.Web.Types
-  ( ArtifactActionRequest (..)
-  , ChatMessage (..)
+  ( ChatMessage (..)
   , ChatRequest (..)
   , ChatResponse (..)
   , ChatRole (..)
   , DownloadRequest (..)
   , DownloadResponse (..)
-  , LoginRequest (..)
-  , LoginResponse (..)
-  , LogoutResponse (..)
-  , ProfileResponse (..)
   , PresignedDownloadUrl (..)
   , PresignedUploadUrl (..)
-  , RunListResponse (..)
   , UploadRequest (..)
   , UploadResponse (..)
+  , WebSession (..)
   , RunSubmitRequest (..)
   , RunStatusResponse (..)
-  , ArtifactGovernanceResponse (..)
   )
 import StudioMCP.Storage.TenantStorage
   ( TenantArtifact (..)
@@ -331,7 +327,6 @@ import System.Directory
     getCurrentDirectory,
     getHomeDirectory,
     getTemporaryDirectory,
-    removePathForcibly,
     removeFile,
   )
 import System.Environment (lookupEnv, setEnv, unsetEnv)
@@ -355,11 +350,10 @@ runClusterCommand command =
   case command of
     ClusterUpCommand -> clusterUp
     ClusterDownCommand -> clusterDown
-    ClusterResetCommand -> clusterReset
     ClusterStatusCommand -> clusterStatus
+    ClusterEnsureCommand -> clusterEnsure
     ClusterDeployCommand target -> clusterDeploy target
     ClusterStorageCommand ClusterStorageReconcile -> clusterStorageReconcile
-    ClusterStorageCommand (ClusterStorageDelete volumeName) -> clusterStorageDelete volumeName
 
 runValidateCommand :: ValidateCommand -> IO ()
 runValidateCommand command =
@@ -419,15 +413,6 @@ clusterDown = do
     then callProcess "kind" ["delete", "cluster", "--name", clusterName]
     else putStrLn ("kind cluster '" <> clusterName <> "' does not exist.")
 
-clusterReset :: IO ()
-clusterReset = do
-  clusterDown
-  cliDataRoot <- resolveCliDataRoot
-  dataRootExists <- doesDirectoryExist cliDataRoot
-  when dataRootExists $
-    removePathForcibly cliDataRoot
-  clusterUp
-
 clusterStatus :: IO ()
 clusterStatus = do
   requireExecutables ["kind", "kubectl"]
@@ -440,11 +425,40 @@ clusterStatus = do
       let contextName = "kind-" <> clusterName
       callProcess "kubectl" ["cluster-info", "--context", contextName]
 
+-- | Idempotent cluster setup: brings up cluster, deploys sidecars, waits for all services.
+-- This is the recommended entry point for automation and integration tests.
+clusterEnsure :: IO ()
+clusterEnsure = do
+  putStrLn "cluster ensure: Starting idempotent cluster setup..."
+
+  -- Phase 1: Create/verify cluster and deploy sidecars (idempotent via clusterDeploy)
+  clusterDeploy DeploySidecars
+
+  -- Phase 2: Wait for all services to be ready (240s timeout each)
+  putStrLn "cluster ensure: Waiting for all services to be ready..."
+
+  -- Redis is already waited on by clusterDeploy/ensureRedisStatefulSetReady
+  -- Wait for PostgreSQL-HA
+  waitForWorkloadRollout "statefulset/studiomcp-postgresql-ha-postgresql" "240s"
+
+  -- Wait for MinIO
+  waitForWorkloadRollout "statefulset/studiomcp-minio" "240s"
+
+  -- Wait for Pulsar components
+  waitForWorkloadRollout "statefulset/studiomcp-pulsar-zookeeper" "240s"
+  waitForWorkloadRollout "statefulset/studiomcp-pulsar-bookie" "240s"
+  waitForWorkloadRollout "statefulset/studiomcp-pulsar-broker" "240s"
+
+  -- Wait for Keycloak
+  waitForWorkloadRollout "statefulset/studiomcp-keycloak" "240s"
+
+  putStrLn "cluster ensure: All services ready."
+
 clusterDeploy :: ClusterDeployTarget -> IO ()
 clusterDeploy target = do
   requireExecutables
     ( case target of
-        DeploySidecars -> ["kind", "helm", "kubectl"]
+        DeploySidecars -> ["kind", "helm"]
         DeployServer -> ["docker", "kind", "helm", "kubectl"]
     )
   clusterUp
@@ -466,115 +480,21 @@ clusterDeploy target = do
         ]
       args =
         case target of
-          DeploySidecars ->
-            baseArgs
-              <> upgradeCredentialArgs
-              <> [ "--set"
-                 , "studiomcp.replicas=0"
-                 , "--set"
-                 , "worker.enabled=false"
-                 , "--set"
-                 , "bff.enabled=false"
-                 ]
+          DeploySidecars -> baseArgs <> upgradeCredentialArgs <> ["--wait", "--set", "studiomcp.replicas=0"]
           DeployServer -> baseArgs <> upgradeCredentialArgs
   callProcess "helm" args
-  repairPulsarStatefulSetRollouts
-  restartWorkloadIfExists "statefulset/studiomcp-pulsar-recovery"
-  waitForClusterDeployWorkloads
+  ensureRedisStatefulSetReady
   when (target == DeployServer) $ do
     callProcess "kubectl" ["rollout", "restart", "deployment/studiomcp"]
     restartWorkloadIfExists "deployment/studiomcp-bff"
-    restartWorkloadIfExists "deployment/studiomcp-worker"
     waitForWorkloadRollout "deployment/studiomcp" "240s"
     waitForWorkloadRollout "deployment/studiomcp-bff" "240s"
-    waitForWorkloadRollout "deployment/studiomcp-worker" "240s"
 
-waitForClusterDeployWorkloads :: IO ()
-waitForClusterDeployWorkloads =
-  mapM_ (`waitForWorkloadRollout` "600s") clusterDeployWorkloads
-
-clusterDeployWorkloads :: [String]
-clusterDeployWorkloads =
-  [ "statefulset/studiomcp-keycloak"
-  , "statefulset/studiomcp-minio"
-  , "statefulset/studiomcp-postgresql-ha-postgresql"
-  , "statefulset/studiomcp-pulsar-bookie"
-  , "statefulset/studiomcp-pulsar-broker"
-  , "statefulset/studiomcp-pulsar-proxy"
-  , "statefulset/studiomcp-pulsar-recovery"
-  , "statefulset/studiomcp-pulsar-toolset"
-  , "statefulset/studiomcp-pulsar-zookeeper"
-  , "statefulset/studiomcp-redis-node"
-  , "statefulset/prometheus-studiomcp-kube-prometheus-prometheus"
-  , "deployment/studiomcp-grafana"
-  , "deployment/studiomcp-kube-prometheus-operator"
-  , "deployment/studiomcp-kube-state-metrics"
-  , "deployment/studiomcp-postgresql-ha-pgpool"
-  ]
-
-repairPulsarStatefulSetRollouts :: IO ()
-repairPulsarStatefulSetRollouts =
-  mapM_
-    repairStatefulSetRolloutIfNeeded
-    [ "studiomcp-pulsar-zookeeper"
-    , "studiomcp-pulsar-bookie"
-    , "studiomcp-pulsar-broker"
-    , "studiomcp-pulsar-proxy"
-    , "studiomcp-pulsar-recovery"
-    , "studiomcp-pulsar-toolset"
-    ]
-
-repairStatefulSetRolloutIfNeeded :: String -> IO ()
-repairStatefulSetRolloutIfNeeded statefulSetName = do
-  revisionInfo <- getStatefulSetRevisions statefulSetName
-  case revisionInfo of
-    Just (currentRevision, updateRevision)
-      | not (null currentRevision)
-          && not (null updateRevision)
-          && currentRevision /= updateRevision -> do
-          statefulSetPods <- listStatefulSetPods statefulSetName
-          when (not (null statefulSetPods)) $ do
-            putStrLn ("Refreshing pods for " <> statefulSetName <> " to unblock rollout.")
-            forM_ (reverse (sort statefulSetPods)) $ \podName ->
-              callProcess "kubectl" ["delete", "pod", podName, "--wait=true", "--ignore-not-found"]
-    _ -> pure ()
-
-getStatefulSetRevisions :: String -> IO (Maybe (String, String))
-getStatefulSetRevisions statefulSetName = do
-  (exitCode, stdoutText, _) <-
-    readProcessWithExitCode
-      "kubectl"
-      ["get", "statefulset", statefulSetName, "-o", "jsonpath={.status.currentRevision} {.status.updateRevision}"]
-      ""
-  case (exitCode, words stdoutText) of
-    (ExitSuccess, [currentRevision, updateRevision]) -> pure (Just (currentRevision, updateRevision))
-    _ -> pure Nothing
-
-listStatefulSetPods :: String -> IO [String]
-listStatefulSetPods statefulSetName = do
-  (exitCode, stdoutText, _) <-
-    readProcessWithExitCode
-      "kubectl"
-      ["get", "pods", "-o", "jsonpath={range .items[*]}{.metadata.name}:{.metadata.ownerReferences[0].kind}:{.metadata.ownerReferences[0].name}{\"\\n\"}{end}"]
-      ""
-  case exitCode of
-    ExitFailure _ -> pure []
-    ExitSuccess ->
-      pure
-        [ podName
-        | line <- lines stdoutText
-        , let fields = splitOnColon line
-        , [podName, ownerKind, ownerName] <- [fields]
-        , ownerKind == "StatefulSet"
-        , ownerName == statefulSetName
-        , not (null podName)
-        ]
-
-splitOnColon :: String -> [String]
-splitOnColon value =
-  case break (== ':') value of
-    (segment, ':' : rest) -> segment : splitOnColon rest
-    (segment, _) -> [segment]
+ensureRedisStatefulSetReady :: IO ()
+ensureRedisStatefulSetReady = do
+  let redisWorkload = "statefulset/studiomcp-redis-node"
+  restartWorkloadIfExists redisWorkload
+  waitForWorkloadRollout redisWorkload "240s"
 
 restartWorkloadIfExists :: String -> IO ()
 restartWorkloadIfExists workload = do
@@ -610,34 +530,6 @@ clusterStorageReconcile = do
         createDirectoryIfMissing True (cliDataRoot </> volumeDirectory volumeSpec)
         applyManifest (renderPersistentVolume volumeSpec)
       putStrLn $ "Persistent volume definitions applied (using StorageClass '" <> storageClassName <> "')."
-
-clusterStorageDelete :: String -> IO ()
-clusterStorageDelete volumeNameToDelete = do
-  requireExecutables ["kubectl"]
-  cliDataRoot <- resolveCliDataRoot
-  mergedValues <- loadMergedValues
-  let volumeSpecs = desiredPersistentVolumes mergedValues
-  targetSpec <-
-    case filter matchesRequestedName volumeSpecs of
-      [] ->
-        die
-          ( "Unknown storage resource '"
-              <> volumeNameToDelete
-              <> "'. Expected one of: "
-              <> unwords (map volumeName volumeSpecs)
-          )
-      spec : _ -> pure spec
-  callProcess "kubectl" ["delete", "pv", volumeName targetSpec, "--ignore-not-found"]
-  callProcess "kubectl" ["delete", "pvc", claimName targetSpec, "--ignore-not-found"]
-  let targetDirectory = cliDataRoot </> volumeDirectory targetSpec
-  directoryExists <- doesDirectoryExist targetDirectory
-  when directoryExists $
-    removePathForcibly targetDirectory
-  putStrLn ("Deleted storage resource '" <> volumeName targetSpec <> "'.")
-  where
-    matchesRequestedName volumeSpec =
-      volumeName volumeSpec == volumeNameToDelete
-        || claimName volumeSpec == volumeNameToDelete
 
 existingHelmUpgradeCredentialArgs :: IO [String]
 existingHelmUpgradeCredentialArgs = do
@@ -773,7 +665,7 @@ validateWorker = do
   requireMinioDeployment
   appConfig <- loadAppConfig
   validDag <- loadSubmissionDag "examples/dags/transcode-basic.yaml"
-  manager <- newManager defaultManagerSettings {managerResponseTimeout = responseTimeoutMicro (5 * 60 * 1000000)}
+  manager <- newManager defaultManagerSettings
   withLocalWorkerConfig appConfig $ \workerAppConfig ->
     withWorkerServer 39002 workerAppConfig $ \baseUrl -> do
       waitForHttpStatus manager (baseUrl <> "/version") [200]
@@ -1275,61 +1167,6 @@ withWorkerServer port appConfig action =
         action ("http://127.0.0.1:" <> show port)
     )
 
-withWaiServer :: Int -> String -> Application -> (String -> IO a) -> IO a
-withWaiServer port readinessPath waiApplication action =
-  bracket
-    (forkIO (runSettings (setHost "127.0.0.1" (setPort port defaultSettings)) waiApplication))
-    killThread
-    (\_ -> do
-        manager <- newManager defaultManagerSettings
-        let baseUrl = "http://127.0.0.1:" <> show port
-        waitForHttpStatus manager (baseUrl <> readinessPath) [200]
-        action baseUrl
-    )
-
-withLocalMcpServer :: Int -> (String -> ServerEnv -> AuthService -> IO a) -> IO a
-withLocalMcpServer port action = do
-  correlationId <- generateCorrelationId
-  tempDir <- getTemporaryDirectory
-  previousDataDir <- lookupEnv "STUDIOMCP_DATA_DIR"
-  let persistenceRoot =
-        tempDir </> "studiomcp-local-server-" <> Text.unpack (unCorrelationId correlationId)
-  createDirectoryIfMissing True persistenceRoot
-  bracket_
-    (setEnv "STUDIOMCP_DATA_DIR" persistenceRoot)
-    (do
-        restoreOptionalEnv "STUDIOMCP_DATA_DIR" previousDataDir
-        removePathForcibly persistenceRoot
-    )
-    (do
-        appConfig <- loadAppConfig
-        serverEnv <- createServerEnv appConfig
-        authConfig <- loadAuthConfigFromEnv
-        manager <- newManager defaultManagerSettings
-        authService <- newAuthService authConfig manager
-        promptCatalog <- newPromptCatalog
-        mcpServer <-
-          newMcpServerWithCatalogs
-            defaultServerConfig
-            (serverToolCatalog serverEnv)
-            (serverResourceCatalog serverEnv)
-            promptCatalog
-            (Just (serverRateLimiter serverEnv))
-            (Just (serverMcpMetrics serverEnv))
-        withWaiServer
-          port
-          "/version"
-          (MCPServer.application serverEnv mcpServer authConfig authService)
-          (\baseUrl -> action baseUrl serverEnv authService)
-    )
-
-withLocalBffServer :: Int -> BFFConfig -> BFFService -> (String -> IO a) -> IO a
-withLocalBffServer port bffConfig service =
-  withWaiServer
-    port
-    "/healthz"
-    (bffApplication (newBFFContextWithService bffConfig service))
-
 withFakeModelHost :: Int -> Text -> IO a -> IO a
 withFakeModelHost port adviceText action =
   bracket
@@ -1560,6 +1397,14 @@ removeFileIfExists path = do
   exists <- doesFileExist path
   when exists (removeFile path)
 
+-- | Fixed container name for validation Redis instances.
+-- Using a fixed name ensures idempotent container management:
+-- - No orphaned containers accumulate from interrupted tests
+-- - Re-running tests automatically cleans up previous instances
+-- - Container state is predictable and inspectable
+testRedisContainerName :: String
+testRedisContainerName = "studiomcp-test-redis"
+
 withTemporaryRedisConfig :: (RedisConfig -> IO a) -> IO a
 withTemporaryRedisConfig action =
   bracket
@@ -1569,27 +1414,15 @@ withTemporaryRedisConfig action =
   where
     startRedisContainer :: IO (String, RedisConfig)
     startRedisContainer = do
-      insideDocker <- doesFileExist "/.dockerenv"
-      launchArgs <-
-        if insideDocker
-          then do
-            maybeContainerId <- lookupEnv "HOSTNAME"
-            currentContainerId <-
-              case maybeContainerId of
-                Just containerId -> pure containerId
-                Nothing -> die "HOSTNAME must be set when launching a temporary Redis container inside Docker"
-            pure ["run", "-d", "--network", "container:" <> currentContainerId, "redis:7-alpine"]
-          else pure ["run", "-d", "-P", "redis:7-alpine"]
+      -- Cleanup any existing container with this name (idempotent start)
+      _ <- readProcessWithExitCode "docker" ["rm", "-f", testRedisContainerName] ""
       (exitCode, stdoutText, stderrText) <-
-        readProcessWithExitCode "docker" launchArgs ""
+        readProcessWithExitCode "docker" ["run", "-d", "-P", "--name", testRedisContainerName, "redis:7-alpine"] ""
       case exitCode of
         ExitFailure _ -> die stderrText
         ExitSuccess -> do
           let containerId = trimLine stdoutText
-          portNumber <-
-            if insideDocker
-              then pure 6379
-              else resolvePublishedPort containerId "6379/tcp"
+          portNumber <- resolvePublishedPort containerId "6379/tcp"
           let redisConfig =
                 defaultRedisConfig
                   { rcHost = "127.0.0.1"
@@ -1622,13 +1455,9 @@ withRedisConfigEnv redisConfig action = do
     action
   where
     restoreEnv (name, maybeValue) =
-      restoreOptionalEnv name maybeValue
-
-restoreOptionalEnv :: String -> Maybe String -> IO ()
-restoreOptionalEnv name maybeValue =
-  case maybeValue of
-    Just value -> setEnv name value
-    Nothing -> unsetEnv name
+      case maybeValue of
+        Just value -> setEnv name value
+        Nothing -> unsetEnv name
 
 resolvePublishedPort :: String -> String -> IO Int
 resolvePublishedPort containerId exposedPort = do
@@ -1714,7 +1543,7 @@ withMinioPortForwardConfig appConfig action =
 
 withLocalWorkerConfig :: AppConfig -> (AppConfig -> IO a) -> IO a
 withLocalWorkerConfig appConfig action =
-  withPortForward "service/studiomcp-pulsar-proxy" 39011 80 $ \pulsarHttpBaseUrl -> do
+  withPortForward "service/studiomcp-pulsar-proxy" 39011 8080 $ \pulsarHttpBaseUrl -> do
     manager <- newManager defaultManagerSettings
     waitForHttpStatus manager (pulsarHttpBaseUrl <> "/admin/v2/clusters") [200]
     withMinioPortForwardConfig
@@ -1822,14 +1651,6 @@ decodeResponseBody label httpResponse =
 lookupResponseHeader :: BS.ByteString -> HttpResponse -> Maybe BS.ByteString
 lookupResponseHeader headerName httpResponse =
   lookup (CI.mk headerName) (httpResponseHeaders httpResponse)
-
-extractCookieHeader :: BS.ByteString -> HttpResponse -> Maybe Header
-extractCookieHeader cookieName httpResponse = do
-  setCookieValue <- lookupResponseHeader "Set-Cookie" httpResponse
-  let cookiePair = BS.takeWhile (/= ';') setCookieValue
-  if (cookieName <> "=") `BS.isPrefixOf` cookiePair
-    then Just ("Cookie", cookiePair)
-    else Nothing
 
 initializeMcpSession :: Manager -> String -> IO [Header]
 initializeMcpSession manager baseUrl = do
@@ -2789,16 +2610,6 @@ validateHorizontalScale = do
     closeRedisSessionStore store2
     putStrLn "  ✓ Stores closed"
 
-    let liveListenerConfig =
-          sharedConfig
-            { rcKeyPrefix = rcKeyPrefix sharedConfig <> "listeners:"
-            }
-    withRedisConfigEnv liveListenerConfig $
-      withLocalMcpServer 38111 $ \primaryBaseUrl _ _ ->
-        withLocalMcpServer 38112 $ \secondaryBaseUrl _ _ -> do
-          manager <- newManager defaultManagerSettings
-          validateMcpSessionAcrossListeners "  " manager primaryBaseUrl secondaryBaseUrl
-
   putStrLn "validate horizontal-scale: PASS"
 
 validateWebBff :: IO ()
@@ -2806,380 +2617,137 @@ validateWebBff = do
   putStrLn "Validating Web BFF..."
   withTemporaryRedisConfig $ \redisConfig ->
     withRedisConfigEnv redisConfig $ do
+      appConfig <- loadAppConfig
+      serverEnv <- createServerEnv appConfig
       withFakeModelHost 38105 "Use workflow.submit and artifact tools to coordinate the run." $ do
-        withLocalMcpServer 38107 $ \mcpBaseUrl serverEnv authService -> do
-          let bffConfig =
-                defaultBFFConfig
-                  { bffMcpEndpoint = Text.pack mcpBaseUrl
-                  }
-              referenceModelConfig =
-                ReferenceModelConfig "http://127.0.0.1:38105/api/generate"
-          primaryService <-
-            newBFFServiceWithMcpClientAndRedis
-              bffConfig
-              redisConfig
-              (serverTenantStorage serverEnv)
-              (Just authService)
-              referenceModelConfig
-          secondaryService <-
-            newBFFServiceWithMcpClientAndRedis
-              bffConfig
-              redisConfig
-              (serverTenantStorage serverEnv)
-              (Just authService)
-              referenceModelConfig
-          putStrLn "  ✓ BFF services created with shared Redis-backed browser state"
-          withLocalBffServer 38108 bffConfig primaryService $ \primaryBaseUrl ->
-            withLocalBffServer 38109 bffConfig secondaryService $ \secondaryBaseUrl -> do
-              manager <- newManager defaultManagerSettings
-              dagSpec <- loadSubmissionDag "examples/dags/transcode-basic.yaml"
-              validateWebBffHttpFlow "  " manager primaryBaseUrl secondaryBaseUrl dagSpec
+        service <-
+          newBFFServiceWithRuntime
+            defaultBFFConfig
+            (serverToolCatalog serverEnv)
+            (serverTenantStorage serverEnv)
+            (ReferenceModelConfig "http://127.0.0.1:38105/api/generate")
+        putStrLn "  ✓ BFF service created with runtime-backed MCP and inference integrations"
+
+        sessionResult <- createWebSession service "user-123" "tenant-456" "test-token" (Just "refresh-token")
+        webSession <- case sessionResult of
+          Left err -> die ("Session creation failed: " <> show err)
+          Right session -> do
+            unless (wsSubjectId session == "user-123") $
+              die "Session has wrong subject ID"
+            unless (wsTenantId session == "tenant-456") $
+              die "Session has wrong tenant ID"
+            putStrLn "  ✓ Web session creation works"
+            pure session
+
+        getResult <- getWebSession service (wsSessionId webSession)
+        case getResult of
+          Left err -> die ("Session retrieval failed: " <> show err)
+          Right retrieved ->
+            unless (wsSubjectId retrieved == "user-123") $
+              die "Session retrieval returned wrong session"
+        putStrLn "  ✓ Web session retrieval works"
+
+        refreshResult <- refreshWebSession service (wsSessionId webSession) "new-token" (Just "new-refresh")
+        case refreshResult of
+          Left err -> die ("Session refresh failed: " <> show err)
+          Right refreshed ->
+            unless (wsAccessToken refreshed == "new-token") $
+              die "Session refresh did not update token"
+        putStrLn "  ✓ Web session refresh works"
+
+        let uploadReq = UploadRequest
+              { urFileName = "test-video.mp4"
+              , urContentType = "video/mp4"
+              , urFileSize = 1000000
+              , urMetadata = Nothing
+              }
+        uploadResult <- requestUpload service (wsSessionId webSession) uploadReq
+        uploadResponse <- case uploadResult of
+          Left err -> die ("Upload request failed: " <> show err)
+          Right resp -> do
+            unless (urpArtifactId resp /= "") $
+              die "Upload response has empty artifact ID"
+            unless (puuArtifactId (urpPresignedUrl resp) == urpArtifactId resp) $
+              die "Upload response presigned URL should be scoped to the created artifact"
+            unless ("X-Amz-Signature=" `Text.isInfixOf` puuUrl (urpPresignedUrl resp)) $
+              die "Upload response should contain a real SigV4 presigned signature"
+            putStrLn "  ✓ Upload request works with a real presigned URL"
+            pure resp
+
+        confirmResult <- confirmUpload service (wsSessionId webSession) (urpArtifactId uploadResponse)
+        case confirmResult of
+          Left err -> die ("Upload confirmation failed: " <> show err)
+          Right () -> putStrLn "  ✓ Upload confirmation works"
+
+        let downloadReq = DownloadRequest
+              { drArtifactId = urpArtifactId uploadResponse
+              , drVersion = Nothing
+              }
+        downloadResult <- requestDownload service (wsSessionId webSession) downloadReq
+        case downloadResult of
+          Left err -> die ("Download request failed: " <> show err)
+          Right resp -> do
+            unless (drpArtifactId resp == urpArtifactId uploadResponse) $
+              die "Download response returned the wrong artifact ID"
+            unless (drpFileName resp == "test-video.mp4") $
+              die "Download response returned the wrong file name"
+            unless (pduContentType (drpPresignedUrl resp) == "video/mp4") $
+              die "Download response returned the wrong content type"
+            unless ("X-Amz-Signature=" `Text.isInfixOf` pduUrl (drpPresignedUrl resp)) $
+              die "Download response should contain a real SigV4 presigned signature"
+            putStrLn "  ✓ Download request works with a real presigned URL"
+
+        let chatReq = ChatRequest
+              { crMessages = [ChatMessage ChatUser "Hello" Nothing]
+              , crContext = Nothing
+              }
+        chatResult <- sendChatMessage service (wsSessionId webSession) chatReq
+        case chatResult of
+          Left err -> die ("Chat request failed: " <> show err)
+          Right resp -> do
+            unless (cmRole (crpMessage resp) == ChatAssistant) $
+              die "Chat response has wrong role"
+            unless ("ADVISORY:" `Text.isPrefixOf` cmContent (crpMessage resp)) $
+              die "Chat response should come from the inference-backed advisory path"
+        putStrLn "  ✓ Chat request works through the inference path"
+
+        dagSpec <- loadSubmissionDag "examples/dags/transcode-basic.yaml"
+        submitResult <-
+          submitRun
+            service
+            (wsSessionId webSession)
+            RunSubmitRequest
+              { rsrDagSpec = dagSpec
+              , rsrInputArtifacts = [("input", urpArtifactId uploadResponse)]
+              }
+        runStatus <- case submitResult of
+          Left err -> die ("Run submission failed: " <> show err)
+          Right status -> do
+            unless (rsrRunId status /= RunId "") $
+              die "Run submission returned an empty run id"
+            putStrLn "  ✓ Run submission is forwarded through the MCP tool path"
+            pure status
+
+        statusResult <- getRunStatus service (wsSessionId webSession) (rsrRunId runStatus)
+        case statusResult of
+          Left err -> die ("Run status failed: " <> show err)
+          Right status ->
+            unless (rsrRunId status == rsrRunId runStatus) $
+              die "Run status returned the wrong run id"
+        putStrLn "  ✓ Run status is read through the MCP tool path"
+
+        invalidResult <- invalidateWebSession service (wsSessionId webSession)
+        case invalidResult of
+          Left err -> die ("Session invalidation failed: " <> show err)
+          Right () -> pure ()
+        putStrLn "  ✓ Web session invalidation works"
+
+        checkResult <- getWebSession service (wsSessionId webSession)
+        case checkResult of
+          Left _ -> putStrLn "  ✓ Invalidated session no longer accessible"
+          Right _ -> die "Invalidated session should not be accessible"
 
   putStrLn "validate web-bff: PASS"
-
-validateWebBffHttpFlow :: String -> Manager -> String -> String -> DagSpec -> IO ()
-validateWebBffHttpFlow indent manager primaryBaseUrl secondaryBaseUrl dagSpec = do
-  browserUiResponse <-
-    httpJsonRequest
-      manager
-      "GET"
-      (primaryBaseUrl <> "/")
-      Nothing
-  unless (httpResponseStatus browserUiResponse == 200) $
-    die ("Expected BFF browser shell to return HTTP 200, got " <> show (httpResponseStatus browserUiResponse))
-  unless
-    ( maybe False ("text/html" `BS.isPrefixOf`) (lookupResponseHeader "Content-Type" browserUiResponse)
-        && "studioMCP Control Room" `BS.isInfixOf` LBS.toStrict (httpResponseBody browserUiResponse)
-        && "/api/v1/chat/stream" `BS.isInfixOf` LBS.toStrict (httpResponseBody browserUiResponse)
-    ) $
-    die "BFF browser shell did not return the expected HTML workbench"
-  putStrLn (indent <> "✓ BFF serves the built-in browser control-room UI")
-
-  loginResponse <-
-    httpJsonRequest
-      manager
-      "POST"
-      (primaryBaseUrl <> "/api/v1/auth/login")
-      ( Just
-          ( encode
-              LoginRequest
-                { lrAccessToken = "browser-token"
-                , lrRefreshToken = Just "refresh-token"
-                , lrSubjectId = Just "user-123"
-                , lrTenantId = Just "tenant-456"
-                }
-          )
-      )
-  unless (httpResponseStatus loginResponse == 200) $
-    die ("Expected BFF login to return HTTP 200, got " <> show (httpResponseStatus loginResponse))
-  cookieHeader <-
-    case extractCookieHeader "studiomcp_session" loginResponse of
-      Just headerValue -> pure headerValue
-      Nothing -> die "BFF login did not return a studiomcp_session cookie"
-  loginPayload <- decodeResponseBody "BFF login response" loginResponse :: IO LoginResponse
-  unless (prSubjectId (lrpProfile loginPayload) == "dev-user") $
-    die "BFF login returned the wrong subject"
-  unless (prTenantId (lrpProfile loginPayload) == "dev-tenant") $
-    die "BFF login returned the wrong tenant"
-  putStrLn (indent <> "✓ BFF login establishes a cookie-backed browser session")
-
-  profileResponse <-
-    httpJsonRequestWithHeaders
-      manager
-      "GET"
-      (secondaryBaseUrl <> "/api/v1/profile")
-      [cookieHeader]
-      Nothing
-  unless (httpResponseStatus profileResponse == 200) $
-    die ("Expected BFF profile to return HTTP 200, got " <> show (httpResponseStatus profileResponse))
-  profilePayload <- decodeResponseBody "BFF profile response" profileResponse :: IO ProfileResponse
-  unless (prTenantId profilePayload == "dev-tenant") $
-    die "BFF profile returned the wrong tenant"
-  putStrLn (indent <> "✓ BFF profile reads the active browser session across BFF instances")
-
-  uploadResponseHttp <-
-    httpJsonRequestWithHeaders
-      manager
-      "POST"
-      (primaryBaseUrl <> "/api/v1/upload/request")
-      [cookieHeader]
-      ( Just
-          ( encode
-              UploadRequest
-                { urArtifactId = Nothing
-                , urFileName = "test-video.mp4"
-                , urContentType = "video/mp4"
-                , urFileSize = 1000000
-                , urMetadata = Nothing
-                }
-          )
-      )
-  unless (httpResponseStatus uploadResponseHttp == 200) $
-    die ("Expected BFF upload request to return HTTP 200, got " <> show (httpResponseStatus uploadResponseHttp))
-  uploadResponse <- decodeResponseBody "BFF upload response" uploadResponseHttp :: IO UploadResponse
-  unless (puuArtifactId (urpPresignedUrl uploadResponse) == urpArtifactId uploadResponse) $
-    die "BFF upload response returned mismatched artifact identifiers"
-  unless ("X-Amz-Signature=" `Text.isInfixOf` puuUrl (urpPresignedUrl uploadResponse)) $
-    die "BFF upload response should contain a real SigV4 presigned URL"
-  putStrLn (indent <> "✓ BFF upload intent returns a real presigned URL")
-
-  confirmResponse <-
-    httpJsonRequestWithHeaders
-      manager
-      "POST"
-      (secondaryBaseUrl <> "/api/v1/upload/confirm/" <> Text.unpack (urpArtifactId uploadResponse))
-      [cookieHeader]
-      Nothing
-  unless (httpResponseStatus confirmResponse == 200) $
-    die ("Expected BFF upload confirm to return HTTP 200, got " <> show (httpResponseStatus confirmResponse))
-  putStrLn (indent <> "✓ BFF upload confirmation clears pending upload state across instances")
-
-  downloadResponseHttp <-
-    httpJsonRequestWithHeaders
-      manager
-      "POST"
-      (primaryBaseUrl <> "/api/v1/download")
-      [cookieHeader]
-      ( Just
-          ( encode
-              DownloadRequest
-                { drArtifactId = urpArtifactId uploadResponse
-                , drVersion = Nothing
-                }
-          )
-      )
-  unless (httpResponseStatus downloadResponseHttp == 200) $
-    die ("Expected BFF download request to return HTTP 200, got " <> show (httpResponseStatus downloadResponseHttp))
-  downloadResponse <- decodeResponseBody "BFF download response" downloadResponseHttp :: IO DownloadResponse
-  unless ("X-Amz-Signature=" `Text.isInfixOf` pduUrl (drpPresignedUrl downloadResponse)) $
-    die "BFF download response should contain a real SigV4 presigned URL"
-  putStrLn (indent <> "✓ BFF download intent returns a real presigned URL")
-
-  chatResponseHttp <-
-    httpJsonRequestWithHeaders
-      manager
-      "POST"
-      (secondaryBaseUrl <> "/api/v1/chat")
-      [cookieHeader]
-      ( Just
-          ( encode
-              ChatRequest
-                { crMessages = [ChatMessage ChatUser "Hello" Nothing]
-                , crContext = Just "browser validation"
-                }
-          )
-      )
-  unless (httpResponseStatus chatResponseHttp == 200) $
-    die ("Expected BFF chat to return HTTP 200, got " <> show (httpResponseStatus chatResponseHttp))
-  chatResponse <- decodeResponseBody "BFF chat response" chatResponseHttp :: IO ChatResponse
-  unless ("ADVISORY:" `Text.isPrefixOf` cmContent (crpMessage chatResponse)) $
-    die "BFF chat should return an inference-backed advisory response"
-  putStrLn (indent <> "✓ BFF chat route remains inference-backed")
-
-  chatStreamResponseHttp <-
-    httpJsonRequestWithHeaders
-      manager
-      "POST"
-      (primaryBaseUrl <> "/api/v1/chat/stream")
-      [cookieHeader]
-      ( Just
-          ( encode
-              ChatRequest
-                { crMessages = [ChatMessage ChatUser "Stream the same advice" Nothing]
-                , crContext = Just "browser validation"
-                }
-          )
-      )
-  unless (httpResponseStatus chatStreamResponseHttp == 200) $
-    die ("Expected BFF chat stream to return HTTP 200, got " <> show (httpResponseStatus chatStreamResponseHttp))
-  unless
-    ( maybe False ("text/event-stream" `BS.isPrefixOf`) (lookupResponseHeader "Content-Type" chatStreamResponseHttp)
-        && "event: conversation.started" `BS.isInfixOf` LBS.toStrict (httpResponseBody chatStreamResponseHttp)
-        && "event: message.completed" `BS.isInfixOf` LBS.toStrict (httpResponseBody chatStreamResponseHttp)
-    ) $
-    die "BFF chat stream did not emit the expected SSE frames"
-  putStrLn (indent <> "✓ BFF chat stream emits SSE-framed assistant replies")
-
-  submitResponseHttp <-
-    httpJsonRequestWithHeaders
-      manager
-      "POST"
-      (primaryBaseUrl <> "/api/v1/runs")
-      [cookieHeader]
-      ( Just
-          ( encode
-              RunSubmitRequest
-                { rsrDagSpec = dagSpec
-                , rsrInputArtifacts = [("input", urpArtifactId uploadResponse)]
-                }
-          )
-      )
-  unless (httpResponseStatus submitResponseHttp == 200) $
-    die ("Expected BFF run submit to return HTTP 200, got " <> show (httpResponseStatus submitResponseHttp))
-  submittedRun <- decodeResponseBody "BFF run submit response" submitResponseHttp :: IO RunStatusResponse
-  unless (rsrRunId submittedRun /= RunId "") $
-    die "BFF run submission returned an empty run id"
-  putStrLn (indent <> "✓ BFF run submission traverses the MCP HTTP boundary")
-
-  listResponseHttp <-
-    httpJsonRequestWithHeaders
-      manager
-      "GET"
-      (secondaryBaseUrl <> "/api/v1/runs?limit=10")
-      [cookieHeader]
-      Nothing
-  unless (httpResponseStatus listResponseHttp == 200) $
-    die ("Expected BFF run list to return HTTP 200, got " <> show (httpResponseStatus listResponseHttp))
-  runListResponse <- decodeResponseBody "BFF run list response" listResponseHttp :: IO RunListResponse
-  unless (any ((== rsrRunId submittedRun) . rsrRunId) (rlrRuns runListResponse)) $
-    die "BFF run list should include the submitted run"
-  putStrLn (indent <> "✓ BFF run listing reuses the MCP session from another BFF instance")
-
-  statusResponseHttp <-
-    httpJsonRequestWithHeaders
-      manager
-      "GET"
-      (secondaryBaseUrl <> "/api/v1/runs/" <> Text.unpack (unRunId (rsrRunId submittedRun)) <> "/status")
-      [cookieHeader]
-      Nothing
-  unless (httpResponseStatus statusResponseHttp == 200) $
-    die ("Expected BFF run status to return HTTP 200, got " <> show (httpResponseStatus statusResponseHttp))
-  runStatusResponse <- decodeResponseBody "BFF run status response" statusResponseHttp :: IO RunStatusResponse
-  unless (rsrRunId runStatusResponse == rsrRunId submittedRun) $
-    die "BFF run status returned the wrong run id"
-  putStrLn (indent <> "✓ BFF run status reads back the submitted MCP run across instances")
-
-  runEventsResponseHttp <-
-    httpJsonRequestWithHeaders
-      manager
-      "GET"
-      (secondaryBaseUrl <> "/api/v1/runs/" <> Text.unpack (unRunId (rsrRunId submittedRun)) <> "/events")
-      [cookieHeader]
-      Nothing
-  unless (httpResponseStatus runEventsResponseHttp == 200) $
-    die ("Expected BFF run events to return HTTP 200, got " <> show (httpResponseStatus runEventsResponseHttp))
-  unless
-    ( maybe False ("text/event-stream" `BS.isPrefixOf`) (lookupResponseHeader "Content-Type" runEventsResponseHttp)
-        && "event: run.snapshot" `BS.isInfixOf` LBS.toStrict (httpResponseBody runEventsResponseHttp)
-        && ( "event: run.completed" `BS.isInfixOf` LBS.toStrict (httpResponseBody runEventsResponseHttp)
-               || "event: run.window.closed" `BS.isInfixOf` LBS.toStrict (httpResponseBody runEventsResponseHttp)
-           )
-    ) $
-    die "BFF run events did not emit the expected SSE frames"
-  putStrLn (indent <> "✓ BFF run progress is exposed through the SSE event window")
-
-  cancelResponseHttp <-
-    httpJsonRequestWithHeaders
-      manager
-      "POST"
-      (primaryBaseUrl <> "/api/v1/runs/" <> Text.unpack (unRunId (rsrRunId submittedRun)) <> "/cancel")
-      [cookieHeader]
-      (Just (encode (ArtifactActionRequest (Just "browser validation"))))
-  unless (httpResponseStatus cancelResponseHttp == 200) $
-    die ("Expected BFF run cancel to return HTTP 200, got " <> show (httpResponseStatus cancelResponseHttp))
-  cancelledRun <- decodeResponseBody "BFF run cancel response" cancelResponseHttp :: IO RunStatusResponse
-  unless (Text.toLower (rsrStatus cancelledRun) == "cancelled") $
-    die "BFF run cancel should report a cancelled status"
-  putStrLn (indent <> "✓ BFF run cancel mutates MCP-backed run state")
-
-  hideResponseHttp <-
-    httpJsonRequestWithHeaders
-      manager
-      "POST"
-      (secondaryBaseUrl <> "/api/v1/artifacts/" <> Text.unpack (urpArtifactId uploadResponse) <> "/hide")
-      [cookieHeader]
-      (Just (encode (ArtifactActionRequest (Just "browser validation"))))
-  unless (httpResponseStatus hideResponseHttp == 200) $
-    die ("Expected BFF artifact hide to return HTTP 200, got " <> show (httpResponseStatus hideResponseHttp))
-  hiddenArtifact <- decodeResponseBody "BFF artifact hide response" hideResponseHttp :: IO ArtifactGovernanceResponse
-  unless (agrStatus hiddenArtifact == "hidden") $
-    die "BFF artifact hide should return hidden status"
-
-  archiveResponseHttp <-
-    httpJsonRequestWithHeaders
-      manager
-      "POST"
-      (primaryBaseUrl <> "/api/v1/artifacts/" <> Text.unpack (urpArtifactId uploadResponse) <> "/archive")
-      [cookieHeader]
-      (Just (encode (ArtifactActionRequest (Just "browser validation"))))
-  unless (httpResponseStatus archiveResponseHttp == 200) $
-    die ("Expected BFF artifact archive to return HTTP 200, got " <> show (httpResponseStatus archiveResponseHttp))
-  archivedArtifact <- decodeResponseBody "BFF artifact archive response" archiveResponseHttp :: IO ArtifactGovernanceResponse
-  unless (agrStatus archivedArtifact == "archived") $
-    die "BFF artifact archive should return archived status"
-  putStrLn (indent <> "✓ BFF artifact governance routes proxy MCP governance tools")
-
-  logoutResponseHttp <-
-    httpJsonRequestWithHeaders
-      manager
-      "POST"
-      (secondaryBaseUrl <> "/api/v1/auth/logout")
-      [cookieHeader]
-      Nothing
-  unless (httpResponseStatus logoutResponseHttp == 200) $
-    die ("Expected BFF logout to return HTTP 200, got " <> show (httpResponseStatus logoutResponseHttp))
-  logoutPayload <- decodeResponseBody "BFF logout response" logoutResponseHttp :: IO LogoutResponse
-  unless (lorLoggedOut logoutPayload) $
-    die "BFF logout should report loggedOut=true"
-  postLogoutProfileResponse <-
-    httpJsonRequestWithHeaders
-      manager
-      "GET"
-      (primaryBaseUrl <> "/api/v1/profile")
-      [cookieHeader]
-      Nothing
-  unless (httpResponseStatus postLogoutProfileResponse == 401) $
-    die ("Expected BFF profile after logout to return HTTP 401, got " <> show (httpResponseStatus postLogoutProfileResponse))
-  putStrLn (indent <> "✓ BFF logout invalidates the shared browser session across instances")
-
-validateMcpSessionAcrossListeners :: String -> Manager -> String -> String -> IO ()
-validateMcpSessionAcrossListeners indent manager primaryBaseUrl secondaryBaseUrl = do
-  sessionHeaders <- initializeMcpSession manager primaryBaseUrl
-  putStrLn (indent <> "✓ MCP session initializes on one live listener")
-
-  assertMcpToolsList manager secondaryBaseUrl sessionHeaders 2
-  putStrLn (indent <> "✓ A second live listener accepts the shared MCP session")
-
-  forM_ (zip [3 .. 8] (cycle [primaryBaseUrl, secondaryBaseUrl])) $ \(requestId, baseUrl) ->
-    assertMcpToolsList manager baseUrl sessionHeaders requestId
-  putStrLn (indent <> "✓ Alternating requests stay valid without sticky listener routing")
-
-  forConcurrently_ (zip [100 .. 111] (take 12 (cycle [primaryBaseUrl, secondaryBaseUrl]))) $ \(requestId, baseUrl) ->
-    assertMcpToolsList manager baseUrl sessionHeaders requestId
-  putStrLn (indent <> "✓ Shared MCP sessions withstand a multi-listener request burst")
-
-  deleteResponse <-
-    httpJsonRequestWithHeaders
-      manager
-      "DELETE"
-      (secondaryBaseUrl <> "/mcp")
-      sessionHeaders
-      Nothing
-  unless (httpResponseStatus deleteResponse == 200) $
-    die ("Expected MCP session delete to return HTTP 200, got " <> show (httpResponseStatus deleteResponse))
-  staleSessionResponse <- mcpJsonRpcRequest manager primaryBaseUrl sessionHeaders (toolsListRequestPayload 999)
-  when (httpResponseStatus staleSessionResponse == 200) $
-    die "Deleted MCP session should not remain usable on another listener"
-  putStrLn (indent <> "✓ Session invalidation is visible across listeners")
-
-assertMcpToolsList :: Manager -> String -> [Header] -> Int -> IO ()
-assertMcpToolsList manager baseUrl sessionHeaders requestId = do
-  response <- mcpJsonRpcRequest manager baseUrl sessionHeaders (toolsListRequestPayload requestId)
-  unless (httpResponseStatus response == 200) $
-    die ("Expected tools/list to return HTTP 200, got " <> show (httpResponseStatus response))
-  responseValue <- decodeResponseBody "tools/list response" response :: IO Value
-  case lookupPath ["result", "tools"] responseValue of
-    Just (Array toolsArray)
-      | not (Vector.null toolsArray) -> pure ()
-    _ -> die "tools/list should return at least one advertised tool"
-
-toolsListRequestPayload :: Int -> Value
-toolsListRequestPayload requestId =
-  object
-    [ "jsonrpc" .= ("2.0" :: Text)
-    , "id" .= requestId
-    , "method" .= ("tools/list" :: Text)
-    ]
 
 validateArtifactStorage :: IO ()
 validateArtifactStorage = do
@@ -3564,29 +3132,6 @@ validateMcpTools = do
     die "artifact.upload_url should not return placeholder storage.example.com URLs"
   putStrLn "  ✓ artifact.upload_url execution works"
 
-  versionedUploadText <-
-    expectToolSuccessText
-      "artifact.upload_url"
-      =<< callTool
-        toolCatalog
-        tenantId
-        subjectId
-        CallToolParams
-          { ctpName = "artifact.upload_url"
-          , ctpArguments =
-              Just
-                ( object
-                    [ "artifact_id" .= artifactId
-                    , "content_type" .= ("video/mp4" :: Text)
-                    , "file_name" .= ("tool-test-video-v2.mp4" :: Text)
-                    , "file_size" .= (4096 :: Int)
-                    ]
-                )
-          }
-  unless (artifactId `Text.isInfixOf` versionedUploadText) $
-    die "artifact.upload_url should support creating a new version for an existing artifact"
-  putStrLn "  ✓ artifact.upload_url version creation works"
-
   artifactText <-
     expectToolSuccessText
       "artifact.get"
@@ -3600,8 +3145,6 @@ validateMcpTools = do
           }
   unless ("video/mp4" `Text.isInfixOf` artifactText) $
     die "artifact.get should return the stored content type"
-  unless ("Version: 2" `Text.isInfixOf` artifactText) $
-    die "artifact.get should return the latest artifact version"
   putStrLn "  ✓ artifact.get execution works"
 
   downloadText <-
@@ -4234,45 +3777,69 @@ validateMcpConformance = do
     closeRedisSessionStore sessionStore1
     closeRedisSessionStore sessionStore2
 
-    let liveListenerConfig =
-          sharedSessionConfig
-            { rcKeyPrefix = rcKeyPrefix sharedSessionConfig <> "listeners:"
-            }
-    withRedisConfigEnv liveListenerConfig $
-      withLocalMcpServer 38111 $ \primaryBaseUrl _ _ ->
-        withLocalMcpServer 38112 $ \secondaryBaseUrl _ _ -> do
-          liveManager <- newManager defaultManagerSettings
-          validateMcpSessionAcrossListeners "    " liveManager primaryBaseUrl secondaryBaseUrl
-
   -- Test 11: BFF layer conformance
   putStrLn "  Testing BFF layer conformance..."
   withTemporaryRedisConfig $ \redisConfig ->
     withRedisConfigEnv redisConfig $ do
+      appConfig <- loadAppConfig
+      serverEnv <- createServerEnv appConfig
       withFakeModelHost 38106 "Coordinate the upload, workflow submission, and status checks." $ do
-        withLocalMcpServer 38109 $ \mcpBaseUrl serverEnv authService -> do
-          let conformanceBffConfig =
-                defaultBFFConfig
-                  { bffMcpEndpoint = Text.pack mcpBaseUrl
-                  }
-              referenceModelConfig =
-                ReferenceModelConfig "http://127.0.0.1:38106/api/generate"
-          primaryBff <-
-            newBFFServiceWithMcpClientAndRedis
-              conformanceBffConfig
-              redisConfig
-              (serverTenantStorage serverEnv)
-              (Just authService)
-              referenceModelConfig
-          secondaryBff <-
-            newBFFServiceWithMcpClientAndRedis
-              conformanceBffConfig
-              redisConfig
-              (serverTenantStorage serverEnv)
-              (Just authService)
-              referenceModelConfig
-          withLocalBffServer 38110 conformanceBffConfig primaryBff $ \primaryBaseUrl ->
-            withLocalBffServer 38113 conformanceBffConfig secondaryBff $ \secondaryBaseUrl -> do
-              bffManager <- newManager defaultManagerSettings
-              validateWebBffHttpFlow "    " bffManager primaryBaseUrl secondaryBaseUrl validDag
+        conformanceBff <-
+          newBFFServiceWithRuntime
+            defaultBFFConfig
+            (serverToolCatalog serverEnv)
+            (serverTenantStorage serverEnv)
+            (ReferenceModelConfig "http://127.0.0.1:38106/api/generate")
+        conformanceWebSessionResult <-
+          createWebSession conformanceBff "conformance-user" "conformance-tenant" "access-token" Nothing
+        conformanceWebSession <-
+          case conformanceWebSessionResult of
+            Right session -> pure session
+            Left err -> die ("BFF session creation failed during conformance validation: " <> show err)
+        conformanceUploadResult <-
+          requestUpload
+            conformanceBff
+            (wsSessionId conformanceWebSession)
+            UploadRequest
+              { urFileName = "conformance.mp4"
+              , urContentType = "video/mp4"
+              , urFileSize = 4096
+              , urMetadata = Nothing
+              }
+        conformanceUpload <-
+          case conformanceUploadResult of
+            Right upload -> pure upload
+            Left err -> die ("BFF upload flow failed during conformance validation: " <> show err)
+        unless ("X-Amz-Signature=" `Text.isInfixOf` puuUrl (urpPresignedUrl conformanceUpload)) $
+          die "BFF upload flow should return a real SigV4 presigned URL"
+        conformanceDownloadResult <-
+          requestDownload
+            conformanceBff
+            (wsSessionId conformanceWebSession)
+            DownloadRequest
+              { drArtifactId = urpArtifactId conformanceUpload
+              , drVersion = Nothing
+              }
+        case conformanceDownloadResult of
+          Right downloadResponse
+            | "X-Amz-Signature=" `Text.isInfixOf` pduUrl (drpPresignedUrl downloadResponse) ->
+                pure ()
+          Right _ -> die "BFF download flow should return a real SigV4 presigned URL"
+          Left err -> die ("BFF download flow failed during conformance validation: " <> show err)
+        conformanceChatResult <-
+          sendChatMessage
+            conformanceBff
+            (wsSessionId conformanceWebSession)
+            ChatRequest
+              { crMessages = [ChatMessage ChatUser "Help me submit this run" Nothing]
+              , crContext = Just "conformance"
+              }
+        case conformanceChatResult of
+          Right response
+            | cmRole (crpMessage response) == ChatAssistant
+                && "ADVISORY:" `Text.isPrefixOf` cmContent (crpMessage response) ->
+                    putStrLn "    ✓ Runtime-backed BFF upload, download, and chat flows work"
+          Right _ -> die "BFF chat should return an inference-backed assistant response"
+          Left err -> die ("BFF chat flow failed during conformance validation: " <> show err)
 
   putStrLn "validate mcp-conformance: PASS"

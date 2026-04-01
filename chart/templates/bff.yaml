@@ -29,8 +29,6 @@ spec:
               value: "server"
             - name: STUDIO_MCP_BFF_PORT
               value: {{ .Values.bff.service.port | quote }}
-            - name: STUDIO_MCP_BFF_MCP_ENDPOINT
-              value: "http://{{ .Release.Name }}:{{ .Values.studiomcp.service.port }}"
             - name: STUDIO_MCP_MCP_ENDPOINT
               value: "http://{{ .Release.Name }}:{{ .Values.studiomcp.service.port }}"
             {{- if .Values.llmReference.enabled }}
@@ -38,7 +36,7 @@ spec:
               value: "http://{{ include "studiomcp.fullname" . }}-llm-reference:{{ .Values.llmReference.port }}/api/generate"
             {{- end }}
             - name: STUDIO_MCP_PULSAR_HTTP_URL
-              value: "http://{{ .Release.Name }}-pulsar-proxy"
+              value: "http://{{ .Release.Name }}-pulsar-proxy:8080"
             - name: STUDIO_MCP_PULSAR_BINARY_URL
               value: "pulsar://{{ .Release.Name }}-pulsar-proxy:6650"
             - name: STUDIO_MCP_MINIO_ENDPOINT

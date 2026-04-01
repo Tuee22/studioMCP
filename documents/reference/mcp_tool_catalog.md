@@ -5,15 +5,15 @@
 **Supersedes**: N/A
 **Referenced by**: [mcp_surface.md](mcp_surface.md#capability-scope), [../architecture/mcp_protocol_architecture.md](../architecture/mcp_protocol_architecture.md#cross-references), [../architecture/artifact_storage_architecture.md](../architecture/artifact_storage_architecture.md#cross-references), [../../STUDIOMCP_DEVELOPMENT_PLAN.md](../../STUDIOMCP_DEVELOPMENT_PLAN.md#documentation-governance)
 
-> **Purpose**: Canonical reference for the current `studioMCP` tool, resource, and prompt catalog exposed through MCP.
+> **Purpose**: Canonical reference for the target `studioMCP` tool, resource, and prompt catalog exposed through MCP.
 
 ## Summary
 
-This document defines the current release-priority MCP capability catalog. It is intentionally explicit because the repository implements MCP in Haskell without an official Haskell SDK.
+This document defines the target release-priority MCP capability catalog. It is intentionally explicit because the repository is implementing MCP in Haskell without an official Haskell SDK.
 
 ## Current Repo Note
 
-The repository now exposes this catalog through the MCP surface using the stable tool names below. Tool responses carry human-readable content plus structured `data` payloads where the client contract depends on typed fields.
+The repository now exposes this catalog through the MCP surface using the stable tool names below. The current implementation returns `CallToolResult` text content for tool responses, so the examples here describe the semantic payload rather than the exact wire wrapper.
 
 ## Tools
 
@@ -210,10 +210,6 @@ Generate a presigned URL for artifact upload.
     "file_size": {
       "type": "integer",
       "description": "File size in bytes"
-    },
-    "artifact_id": {
-      "type": "string",
-      "description": "Existing artifact ID when uploading a new immutable version"
     }
   },
   "required": ["content_type"]
@@ -234,8 +230,6 @@ Generate a presigned URL for artifact upload.
 ```
 
 **Required Scope:** `artifact:write`
-
-If `artifact_id` is omitted, the tool creates a new artifact at version `1`. If `artifact_id` is supplied, the tool creates a new immutable version for the existing artifact and returns a presigned upload URL for that new version key.
 
 ### artifact.download_url
 

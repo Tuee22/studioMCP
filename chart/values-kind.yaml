@@ -1,9 +1,14 @@
 # Kind (Kubernetes in Docker) development configuration
 # Use with: helm install studiomcp chart -f chart/values.yaml -f chart/values-kind.yaml
 #
-# NOTE: Per Third-Party Service Deployment Doctrine, full HA is required in ALL
-# environments including local kind development. This ensures local development
-# mirrors production deployment patterns and exercises HA failover semantics.
+# NOTE: Per Third-Party Service Deployment Doctrine, full HA replica counts are
+# maintained in local kind development. However, pod anti-affinity rules are
+# relaxed to allow all replicas to schedule on a single-node kind cluster.
+#
+# IMPORTANT: Production values files (values.yaml, values-prod.yaml, values-saas.yaml)
+# must retain hard anti-affinity to ensure proper HA pod distribution across nodes.
+# The soft anti-affinity below is DEVELOPMENT-ONLY.
+#
 # See documents/engineering/k8s_storage.md
 
 image:
@@ -43,22 +48,19 @@ minio:
 # Pulsar with persistence and full HA
 # 3 replicas per component
 # NOTE: Pulsar chart uses volumes.data/journal/ledgers structure, not persistence
+# Anti-affinity disabled for single-node kind cluster (DEVELOPMENT-ONLY)
 pulsar:
   enabled: true
+  affinity:
+    anti_affinity: false
   zookeeper:
     replicaCount: 3
-    affinity:
-      anti_affinity: true
-      type: preferredDuringSchedulingIgnoredDuringExecution
     volumes:
       data:
         size: 5Gi
         storageClassName: "studiomcp-manual"
   bookkeeper:
     replicaCount: 3
-    affinity:
-      anti_affinity: true
-      type: preferredDuringSchedulingIgnoredDuringExecution
     volumes:
       journal:
         size: 10Gi
@@ -70,45 +72,54 @@ pulsar:
     replicaCount: 3
   proxy:
     replicaCount: 2
-    affinity:
-      anti_affinity: true
-      type: preferredDuringSchedulingIgnoredDuringExecution
+    # CRITICAL: Must be ClusterIP for kind - LoadBalancer never gets external IP
+    # causing helm --wait to timeout after 5 minutes
+    service:
+      type: ClusterIP
 
 # PostgreSQL-HA with persistence
 # 3 replicas
+# Soft anti-affinity for single-node kind cluster (DEVELOPMENT-ONLY)
 postgresql-ha:
   enabled: true
   postgresql:
     replicaCount: 3
+    podAntiAffinityPreset: soft
   persistence:
     enabled: true
     storageClass: "studiomcp-manual"
     size: 5Gi
   pgpool:
     replicaCount: 2
+    podAntiAffinityPreset: soft
 
 # Redis with Sentinel mode for HA
+# Soft anti-affinity for single-node kind cluster (DEVELOPMENT-ONLY)
 redis:
   enabled: true
   architecture: replication
   sentinel:
     enabled: true
   master:
+    podAntiAffinityPreset: soft
     persistence:
       enabled: true
       storageClass: "studiomcp-manual"
       size: 2Gi
   replica:
     replicaCount: 3
+    podAntiAffinityPreset: soft
     persistence:
       enabled: true
       storageClass: "studiomcp-manual"
       size: 2Gi
 
 # Keycloak with HA
+# Soft anti-affinity for single-node kind cluster (DEVELOPMENT-ONLY)
 keycloak:
   enabled: true
   replicaCount: 2
+  podAntiAffinityPreset: soft
 
 # LLM reference disabled
 llmReference:

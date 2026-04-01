@@ -22,10 +22,6 @@ spec =
       parseCommand ["bff"]
         `shouldBe` Right BffCommand
 
-    it "parses stdio mode" $
-      parseCommand ["stdio"]
-        `shouldBe` Right StdioCommand
-
     it "parses validate docs" $
       parseCommand ["validate", "docs"]
         `shouldBe` Right (ValidateCommand ValidateDocsCommand)
@@ -82,10 +78,6 @@ spec =
       parseCommand ["cluster", "up"]
         `shouldBe` Right (ClusterCommand ClusterUpCommand)
 
-    it "parses cluster reset" $
-      parseCommand ["cluster", "reset"]
-        `shouldBe` Right (ClusterCommand ClusterResetCommand)
-
     it "parses cluster deploy sidecars" $
       parseCommand ["cluster", "deploy", "sidecars"]
         `shouldBe` Right (ClusterCommand (ClusterDeployCommand DeploySidecars))
@@ -97,10 +89,6 @@ spec =
     it "parses cluster storage reconcile" $
       parseCommand ["cluster", "storage", "reconcile"]
         `shouldBe` Right (ClusterCommand (ClusterStorageCommand ClusterStorageReconcile))
-
-    it "parses cluster storage delete" $
-      parseCommand ["cluster", "storage", "delete", "studiomcp-minio-pv-0"]
-        `shouldBe` Right (ClusterCommand (ClusterStorageCommand (ClusterStorageDelete "studiomcp-minio-pv-0")))
 
     it "parses dag validate path" $
       parseCommand ["dag", "validate", "examples/dags/transcode-basic.yaml"]

@@ -26,7 +26,7 @@ The current `studiomcp server` binary exposes the runtime-backed MCP HTTP surfac
 | SSE bootstrap | ✅ Implemented |
 | Auth middleware (Keycloak/JWKS) | ✅ Implemented |
 | Session externalization (Redis) | ✅ Implemented |
-| `studiomcp bff` CLI mode | ✅ Implemented |
+| BFF command | 📋 Planned CLI ergonomic follow-up |
 
 This document describes the authoritative server mode as implemented today.
 
@@ -108,20 +108,9 @@ Operational endpoints remain out of band from MCP:
 
 These routes exist for operators, load balancers, and observability systems. They are not part of the MCP business contract.
 
-## Startup Configuration Failure Handling
-
-Listener startup must follow the canonical [CLI startup failure semantics](cli_architecture.md#startup-failure-semantics).
-
-In practice:
-
-- invalid Redis, auth, storage, or tenant-backend configuration must fail before the listener accepts traffic
-- startup failure must be graceful, redacted, and actionable
-- raw exception output is not an acceptable operational contract
-
 ## Cross-References
 
 - [Architecture Overview](overview.md#architecture-overview)
-- [CLI Architecture](cli_architecture.md#cli-architecture)
 - [MCP Protocol Architecture](mcp_protocol_architecture.md#mcp-protocol-architecture)
 - [Multi-Tenant SaaS MCP Auth Architecture](multi_tenant_saas_mcp_auth_architecture.md#multi-tenant-saas-mcp-auth-architecture)
 - [Artifact Storage Architecture](artifact_storage_architecture.md#artifact-storage-architecture)

@@ -19,7 +19,7 @@ Scope boundary:
 
 ## Current Repo Note
 
-The current repository implements the MCP-side auth boundary described here: signed JWT validation, issuer and audience checks, JWKS-backed verification, tenant resolution, and scope enforcement are live in the Haskell server. The BFF also now validates browser-provided access tokens when auth is enabled, issues server-side browser sessions, serves the built-in browser control-room UI, and mediates workflow and governance requests over the live MCP HTTP surface.
+The current repository does not yet implement the full multi-tenant auth model described here. This document defines the target security contract that future code must satisfy.
 
 ## Trust Boundaries
 
@@ -38,7 +38,7 @@ Every boundary must validate identity explicitly. No boundary may rely on hidden
 - Keycloak is the trusted issuer for public authn
 - external identity providers are brokered through Keycloak, not trusted directly
 - external MCP clients use OAuth with PKCE
-- browser-facing login exchanges a Keycloak-issued access token for a BFF session cookie; the BFF never accepts raw passwords
+- browser login uses redirect-based auth through Keycloak
 - service accounts use confidential client flows with narrow scopes
 
 ## Authorization Rules
@@ -129,7 +129,7 @@ Token exchange is used when the MCP server needs to call downstream services tha
 | Scenario | Source Token | Target Token |
 |----------|--------------|--------------|
 | MCP → Storage service | User access token | Service account token |
-| BFF → MCP | Browser session cookie | Stored user access token |
+| BFF → MCP | User session token | MCP access token |
 | MCP → External API | User access token | Delegated token |
 
 ### Token Exchange Flow (RFC 8693)
@@ -212,7 +212,6 @@ logInfo msg = do
 ## Browser And BFF Rules
 
 - the BFF never asks the browser for a password to relay to Keycloak
-- the BFF login route validates the presented access token when auth is enabled and then issues a server-side `studiomcp_session` cookie
 - browser uploads and downloads prefer short-lived presigned URLs
 - browser sessions and MCP sessions are distinct concerns
 - the BFF may call MCP on behalf of the user, but it must do so through explicit auth rules rather than a hidden shared secret
@@ -261,9 +260,6 @@ Never log:
 
 ## Failure Handling Rules
 
-- invalid startup configuration must fail closed before the service accepts traffic
-- startup failure messages must be helpful, actionable, and redacted
-- raw exception output is forbidden as the user-facing startup error contract; follow [CLI Architecture](../architecture/cli_architecture.md#startup-failure-semantics)
 - invalid or missing credentials return `401`
 - authenticated but unauthorized requests return `403`
 - tenant-mismatch errors are denied without leaking cross-tenant existence details
@@ -272,7 +268,6 @@ Never log:
 ## Cross-References
 
 - [Multi-Tenant SaaS MCP Auth Architecture](../architecture/multi_tenant_saas_mcp_auth_architecture.md#multi-tenant-saas-mcp-auth-architecture)
-- [CLI Architecture](../architecture/cli_architecture.md#cli-architecture)
 - [Artifact Storage Architecture](../architecture/artifact_storage_architecture.md#artifact-storage-architecture)
 - [Session Scaling](session_scaling.md#session-scaling)
 - [Web Portal Surface](../reference/web_portal_surface.md#web-portal-surface)

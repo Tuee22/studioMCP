@@ -11,14 +11,13 @@ where
 
 import Control.Monad (forM, unless)
 import qualified Data.ByteString as BS
-import Data.List (isPrefixOf, nub, sort)
-import Data.Maybe (mapMaybe)
+import Data.List (isPrefixOf, sort)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Text.Encoding (decodeUtf8')
 import System.Directory (doesDirectoryExist, doesFileExist, listDirectory)
 import System.Exit (die)
-import System.FilePath ((</>), splitDirectories, takeExtension)
+import System.FilePath ((</>), takeExtension)
 
 type DocProblem = Text
 
@@ -35,37 +34,25 @@ validateDocsCommand = do
         [ "documents/README.md"
         , "documents/documentation_standards.md"
         , "documents/architecture/overview.md"
-        , "documents/architecture/bff_architecture.md"
-        , "documents/architecture/cli_architecture.md"
-        , "documents/architecture/inference_mode.md"
         , "documents/architecture/mcp_protocol_architecture.md"
+        , "documents/architecture/cli_architecture.md"
+        , "documents/architecture/server_mode.md"
         , "documents/architecture/multi_tenant_saas_mcp_auth_architecture.md"
         , "documents/architecture/artifact_storage_architecture.md"
-        , "documents/architecture/pulsar_vs_minio.md"
         , "documents/architecture/parallel_scheduling.md"
-        , "documents/architecture/server_mode.md"
-        , "documents/development/local_dev.md"
-        , "documents/development/testing_strategy.md"
-        , "documents/domain/dag_specification.md"
+        , "documents/engineering/security_model.md"
+        , "documents/engineering/session_scaling.md"
         , "documents/engineering/docker_policy.md"
         , "documents/engineering/k8s_native_dev_policy.md"
         , "documents/engineering/k8s_storage.md"
-        , "documents/engineering/security_model.md"
-        , "documents/engineering/session_scaling.md"
-        , "documents/engineering/timeout_policy.md"
-        , "documents/operations/keycloak_realm_bootstrap_runbook.md"
+        , "documents/development/testing_strategy.md"
         , "documents/operations/runbook_local_debugging.md"
+        , "documents/operations/keycloak_realm_bootstrap_runbook.md"
         , "documents/reference/cli_surface.md"
         , "documents/reference/mcp_surface.md"
         , "documents/reference/mcp_tool_catalog.md"
         , "documents/reference/web_portal_surface.md"
-        , "documents/tools/ffmpeg.md"
-        , "documents/tools/keycloak.md"
-        , "documents/tools/minio.md"
-        , "documents/tools/postgres.md"
-        , "documents/tools/pulsar.md"
-        , "documents/tools/redis.md"
-        , "documents/research/README.md"
+        -- ADR files removed per documentation_standards.md (no ADRs in documents/)
         ]
   requiredProblems <- fmap concat $
     forM requiredFiles $ \path -> do
@@ -74,21 +61,14 @@ validateDocsCommand = do
         [ "Missing required documentation file: " <> Text.pack path
         | not exists
         ]
-  docChecks <-
+  docProblems <- fmap concat $
     forM docFiles $ \path -> do
       fileBytes <- BS.readFile path
       case decodeUtf8' fileBytes of
         Left _ ->
-          pure
-            ( [ "Documentation file is not valid UTF-8: " <> Text.pack path
-              ]
-            , Nothing
-            )
+          pure ["Documentation file is not valid UTF-8: " <> Text.pack path]
         Right content ->
-          pure
-            ( validateDocText path content
-            , Just (path, content)
-            )
+          pure (validateDocText path content)
   rootProblems <- fmap concat $
     forM markdownFilesToCheck $ \path -> do
       exists <- doesFileExist path
@@ -96,10 +76,7 @@ validateDocsCommand = do
         [ "Missing expected root markdown file: " <> Text.pack path
         | not exists
         ]
-  let docProblems = concatMap fst docChecks
-      decodedDocs = mapMaybe snd docChecks
-      indexProblems = validateDocumentationIndex decodedDocs
-      problems = requiredProblems <> docProblems <> indexProblems <> rootProblems
+  let problems = requiredProblems <> docProblems <> rootProblems
   unless (null problems) $
     die (Text.unpack (renderProblems problems))
   putStrLn "Documentation checks passed."
@@ -203,57 +180,6 @@ validateMermaidBlock mermaidLines =
       ]
     forbiddenProblem (patternText, message) =
       [message | patternText `Text.isInfixOf` blockText]
-
-validateDocumentationIndex :: [(FilePath, Text)] -> [DocProblem]
-validateDocumentationIndex decodedDocs =
-  case lookup "documents/README.md" decodedDocs of
-    Nothing -> ["Missing required documentation file: documents/README.md"]
-    Just indexContent ->
-      missingCanonicalLinks <> missingSuiteDirs
-      where
-        authoritativeDocs =
-          [ path
-          | (path, content) <- decodedDocs
-          , docStatus content == Just "Authoritative source"
-          ]
-        missingCanonicalLinks =
-          [ "Documentation index missing canonical doc link: " <> Text.pack path
-          | path <- authoritativeDocs
-          , let relativePath = Text.pack (dropDocumentsPrefix path)
-          , not (relativePath `Text.isInfixOf` indexContent)
-          ]
-        suiteDirs =
-          sort . nub $
-            mapMaybe topLevelDocumentsDir (map fst decodedDocs)
-        missingSuiteDirs =
-          [ "Documentation index missing suite category: documents/" <> Text.pack dir <> "/"
-          | dir <- suiteDirs
-          , let marker = Text.pack ("`" <> dir <> "/`")
-          , not (marker `Text.isInfixOf` indexContent)
-          ]
-
-docStatus :: Text -> Maybe Text
-docStatus content =
-  case filter (Text.isPrefixOf "**Status**: ") (Text.lines content) of
-    [] -> Nothing
-    (match : _) -> Just (Text.drop (Text.length "**Status**: ") match)
-
-dropDocumentsPrefix :: FilePath -> FilePath
-dropDocumentsPrefix path =
-  case splitDirectories path of
-    ("documents" : rest) -> joinPathSegments rest
-    _ -> path
-
-topLevelDocumentsDir :: FilePath -> Maybe FilePath
-topLevelDocumentsDir path =
-  case splitDirectories (dropDocumentsPrefix path) of
-    (dir : _file : _) -> Just dir
-    _ -> Nothing
-
-joinPathSegments :: [FilePath] -> FilePath
-joinPathSegments [] = ""
-joinPathSegments [segment] = segment
-joinPathSegments (segment : rest) = segment <> "/" <> joinPathSegments rest
 
 findMarkdownFiles :: FilePath -> IO [FilePath]
 findMarkdownFiles root = do
