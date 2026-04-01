@@ -116,7 +116,7 @@ runComposeExpectSuccess args = do
   (exitCode, stdoutText, stderrText) <-
     readProcessWithExitCode
       "docker"
-      (["compose", "-f", "docker/docker-compose.yaml"] <> args)
+      (["compose", "-f", "docker-compose.yaml"] <> args)
       ""
   let combinedOutput = stdoutText <> stderrText
   exitCode `shouldBe` ExitSuccess
@@ -127,7 +127,7 @@ runOuterCliExpectSuccess args = do
   (exitCode, stdoutText, stderrText) <-
     readProcessWithExitCode
       "docker"
-      ( ["compose", "-f", "docker/docker-compose.yaml", "exec", "-T", "studiomcp-env", "studiomcp"]
+      ( ["compose", "-f", "docker-compose.yaml", "exec", "-T", "studiomcp-env", "studiomcp"]
           <> args
       )
       ""
@@ -143,7 +143,7 @@ runOuterCliExpectSuccessWithDiagnostics args = do
   (exitCode, stdoutText, stderrText) <-
     readProcessWithExitCode
       "docker"
-      ( ["compose", "-f", "docker/docker-compose.yaml", "exec", "-T", "studiomcp-env", "studiomcp"]
+      ( ["compose", "-f", "docker-compose.yaml", "exec", "-T", "studiomcp-env", "studiomcp"]
           <> args
       )
       ""

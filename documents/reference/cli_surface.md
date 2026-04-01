@@ -311,7 +311,7 @@ The exact final taxonomy may evolve, but the repository must not reintroduce she
 For local development and LLM-driven operations, the CLI is expected to run inside the outer development container:
 
 ```bash
-docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp <subcommand...>
+docker compose -f docker-compose.yaml exec studiomcp-env studiomcp <subcommand...>
 ```
 
 ## Current Repo Note

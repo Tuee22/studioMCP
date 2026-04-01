@@ -26,7 +26,7 @@
 - `cabal run studiomcp -- validate-dag examples/dags/transcode-basic.yaml`
 - `cabal run studiomcp -- dag validate-fixtures`
 - `cabal run studiomcp -- validate docs`
-- `docker compose -f docker/docker-compose.yaml config`
+- `docker compose -f docker-compose.yaml config`
 - `helm lint chart -f chart/values.yaml -f chart/values-kind.yaml`
 - `skaffold diagnose --yaml-only --profile kind`
 - `skaffold render --offline --profile kind --digest-source=tag`
@@ -35,26 +35,26 @@
 
 The repo now includes the outer development-container service and the first native cluster commands. The intended invocation shape is:
 
-- `docker compose -f docker/docker-compose.yaml up -d studiomcp-env`
-- `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp dag validate-fixtures`
-- `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp cluster up`
-- `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp cluster status`
-- `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp cluster storage reconcile`
-- `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp cluster deploy sidecars`
-- `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp cluster deploy server`
-- `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp validate cluster`
-- `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp validate executor`
-- `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp validate e2e`
-- `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp validate worker`
-- `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp validate pulsar`
-- `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp validate minio`
-- `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp validate boundary`
-- `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp validate ffmpeg-adapter`
-- `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp validate mcp-http`
-- `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp validate mcp-conformance`
-- `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp validate inference`
-- `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp validate observability`
-- `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp validate docs`
+- `docker compose -f docker-compose.yaml up -d studiomcp-env`
+- `docker compose -f docker-compose.yaml exec studiomcp-env studiomcp dag validate-fixtures`
+- `docker compose -f docker-compose.yaml exec studiomcp-env studiomcp cluster up`
+- `docker compose -f docker-compose.yaml exec studiomcp-env studiomcp cluster status`
+- `docker compose -f docker-compose.yaml exec studiomcp-env studiomcp cluster storage reconcile`
+- `docker compose -f docker-compose.yaml exec studiomcp-env studiomcp cluster deploy sidecars`
+- `docker compose -f docker-compose.yaml exec studiomcp-env studiomcp cluster deploy server`
+- `docker compose -f docker-compose.yaml exec studiomcp-env studiomcp validate cluster`
+- `docker compose -f docker-compose.yaml exec studiomcp-env studiomcp validate executor`
+- `docker compose -f docker-compose.yaml exec studiomcp-env studiomcp validate e2e`
+- `docker compose -f docker-compose.yaml exec studiomcp-env studiomcp validate worker`
+- `docker compose -f docker-compose.yaml exec studiomcp-env studiomcp validate pulsar`
+- `docker compose -f docker-compose.yaml exec studiomcp-env studiomcp validate minio`
+- `docker compose -f docker-compose.yaml exec studiomcp-env studiomcp validate boundary`
+- `docker compose -f docker-compose.yaml exec studiomcp-env studiomcp validate ffmpeg-adapter`
+- `docker compose -f docker-compose.yaml exec studiomcp-env studiomcp validate mcp-http`
+- `docker compose -f docker-compose.yaml exec studiomcp-env studiomcp validate mcp-conformance`
+- `docker compose -f docker-compose.yaml exec studiomcp-env studiomcp validate inference`
+- `docker compose -f docker-compose.yaml exec studiomcp-env studiomcp validate observability`
+- `docker compose -f docker-compose.yaml exec studiomcp-env studiomcp validate docs`
 
 The outer container talks to the same engine through `/var/run/docker.sock`.
 By default the CLI derives the host-visible `./.data/` path for kind from the outer container's `/.data/` bind mount. Set `STUDIOMCP_KIND_HOST_DATA_PATH` only as an override for non-standard Docker contexts.

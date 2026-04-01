@@ -92,7 +92,7 @@ The outer development container must bind host `./.data/` into container `/.data
 
 ## Compose Role
 
-`docker/docker-compose.yaml` exists to start the outer development container and attach it to the active Docker context.
+`docker-compose.yaml` exists to start the outer development container and attach it to the active Docker context.
 
 Compose must not become:
 
@@ -107,14 +107,14 @@ When an LLM needs to manage the local Kubernetes lifecycle, it should do so by e
 The canonical shape is:
 
 ```bash
-docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp <subcommand...>
+docker compose -f docker-compose.yaml exec studiomcp-env studiomcp <subcommand...>
 ```
 
 Examples of intended usage:
 
-- `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp cluster up`
-- `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp cluster deploy sidecars`
-- `docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp cluster deploy server`
+- `docker compose -f docker-compose.yaml exec studiomcp-env studiomcp cluster up`
+- `docker compose -f docker-compose.yaml exec studiomcp-env studiomcp cluster deploy sidecars`
+- `docker compose -f docker-compose.yaml exec studiomcp-env studiomcp cluster deploy server`
 
 ## Container Naming Policy
 

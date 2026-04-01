@@ -59,7 +59,7 @@ The repo keeps one Helm chart at `chart/`.
 The local control-plane loop is:
 
 1. start the outer development container with Docker Compose
-2. enter it with `docker compose -f docker/docker-compose.yaml exec`
+2. enter it with `docker compose -f docker-compose.yaml exec`
 3. run `studiomcp cluster ...` commands to manage kind
 4. run `studiomcp cluster deploy ...` commands to deploy Helm-backed workloads
 
@@ -88,7 +88,7 @@ This policy is represented today through:
 - `chart/`
 - `skaffold.yaml`
 - `kind/kind_config.yaml`
-- `docker/docker-compose.yaml`
+- `docker-compose.yaml`
 - [Docker Policy](docker_policy.md#docker-policy)
 - [CLI Architecture](../architecture/cli_architecture.md#cli-architecture)
 

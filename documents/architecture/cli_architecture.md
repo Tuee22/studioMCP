@@ -36,7 +36,7 @@ The CLI is expected to run inside the outer development container, not directly 
 Canonical invocation shape:
 
 ```bash
-docker compose -f docker/docker-compose.yaml exec studiomcp-env studiomcp <subcommand...>
+docker compose -f docker-compose.yaml exec studiomcp-env studiomcp <subcommand...>
 ```
 
 The CLI may internally call external tools such as `kind`, `kubectl`, and `helm`, but those calls must be orchestrated from Haskell rather than delegated to checked-in shell scripts.
