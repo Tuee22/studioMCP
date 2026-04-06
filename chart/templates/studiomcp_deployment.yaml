@@ -29,12 +29,14 @@ spec:
               value: {{ .Values.studiomcp.service.port | quote }}
             # Pulsar subchart service endpoints
             - name: STUDIO_MCP_PULSAR_HTTP_URL
-              value: "http://{{ .Release.Name }}-pulsar-proxy:8080"
+              value: "http://{{ .Release.Name }}-pulsar-proxy"
             - name: STUDIO_MCP_PULSAR_BINARY_URL
               value: "pulsar://{{ .Release.Name }}-pulsar-proxy:6650"
             # MinIO subchart service endpoint
             - name: STUDIO_MCP_MINIO_ENDPOINT
               value: "http://{{ .Release.Name }}-minio:9000"
+            - name: STUDIO_MCP_MINIO_PUBLIC_ENDPOINT
+              value: {{ include "studiomcp.objectStoragePublicEndpoint" . | quote }}
             - name: STUDIO_MCP_MINIO_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
@@ -57,12 +59,14 @@ spec:
             {{- end }}
             # Keycloak subchart configuration
             {{- if .Values.keycloak.enabled }}
-            - name: STUDIO_MCP_KEYCLOAK_URL
-              value: "http://{{ .Release.Name }}-keycloak:8080"
             - name: STUDIOMCP_KEYCLOAK_REALM
-              value: "studiomcp"
+              value: {{ .Values.keycloak.realm | quote }}
             - name: STUDIOMCP_KEYCLOAK_ISSUER
-              value: "http://{{ .Release.Name }}-keycloak:8080/realms/studiomcp"
+              value: {{ include "studiomcp.keycloakPublicIssuer" . | quote }}
+            - name: STUDIOMCP_KEYCLOAK_ADDITIONAL_ISSUERS
+              value: {{ include "studiomcp.keycloakAdditionalIssuers" . | quote }}
+            - name: STUDIOMCP_KEYCLOAK_AUDIENCE
+              value: {{ .Values.auth.audience | quote }}
             {{- end }}
             # JWT configuration
             {{- if .Values.secrets.jwt.jwksUri }}

@@ -111,6 +111,8 @@ data TenantStorageConfig = TenantStorageConfig
     tscBucketPrefix :: Text,
     -- | Endpoint for platform-managed MinIO/S3 storage
     tscPlatformEndpoint :: Text,
+    -- | Public endpoint used in presigned URLs returned to callers
+    tscPlatformPublicEndpoint :: Maybe Text,
     -- | AWS region used for SigV4 signing
     tscPlatformRegion :: Text,
     -- | Access key for platform-managed storage
@@ -130,6 +132,7 @@ defaultTenantStorageConfig =
       tscMaxArtifactSize = 10 * 1024 * 1024 * 1024, -- 10 GB
       tscBucketPrefix = "studiomcp-tenant-",
       tscPlatformEndpoint = "http://localhost:9000",
+      tscPlatformPublicEndpoint = Nothing,
       tscPlatformRegion = "us-east-1",
       tscPlatformAccessKeyId = "minioadmin",
       tscPlatformSecretAccessKey = "minioadmin"
@@ -491,7 +494,7 @@ presignCredentials config backend =
   case backend of
     PlatformMinIO ->
       buildCredentials
-        (tscPlatformEndpoint config)
+        (fromMaybe (tscPlatformEndpoint config) (tscPlatformPublicEndpoint config))
         (tscPlatformRegion config)
         (tscPlatformAccessKeyId config)
         (tscPlatformSecretAccessKey config)

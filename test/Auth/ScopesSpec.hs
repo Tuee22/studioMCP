@@ -146,6 +146,14 @@ spec = do
       let ctx = testAuthContext {acSubject = testSubject {subjectScopes = Set.fromList [scopeWorkflowRead]}}
       authorizeResourceRead "studiomcp://workflow/123" ctx `shouldBe` Allowed
 
+    it "authorizes run history resource with workflow:read" $ do
+      let ctx = testAuthContext {acSubject = testSubject {subjectScopes = Set.fromList [scopeWorkflowRead]}}
+      authorizeResourceRead "studiomcp://history/runs" ctx `shouldBe` Allowed
+
+    it "authorizes manifest resource with workflow:read" $ do
+      let ctx = testAuthContext {acSubject = testSubject {subjectScopes = Set.fromList [scopeWorkflowRead]}}
+      authorizeResourceRead "studiomcp://manifests/run-123" ctx `shouldBe` Allowed
+
     it "authorizes artifact resource with artifact:read" $ do
       let ctx = testAuthContext {acSubject = testSubject {subjectScopes = Set.fromList [scopeArtifactRead]}}
       authorizeResourceRead "studiomcp://artifact/abc" ctx `shouldBe` Allowed

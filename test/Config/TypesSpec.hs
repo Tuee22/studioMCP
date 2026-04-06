@@ -34,6 +34,7 @@ spec = do
             , pulsarHttpUrl = "http://localhost:8080"
             , pulsarBinaryUrl = "pulsar://localhost:6650"
             , minioEndpoint = "http://localhost:9000"
+            , minioPublicEndpoint = "http://localhost:9000"
             , minioAccessKey = "access"
             , minioSecretKey = "secret"
             }
@@ -41,16 +42,17 @@ spec = do
       pulsarHttpUrl config `shouldBe` "http://localhost:8080"
       pulsarBinaryUrl config `shouldBe` "pulsar://localhost:6650"
       minioEndpoint config `shouldBe` "http://localhost:9000"
+      minioPublicEndpoint config `shouldBe` "http://localhost:9000"
       minioAccessKey config `shouldBe` "access"
       minioSecretKey config `shouldBe` "secret"
 
     it "can be compared for equality" $ do
-      let config1 = AppConfig ServerMode "http" "pulsar" "minio" "key" "secret"
-          config2 = AppConfig ServerMode "http" "pulsar" "minio" "key" "secret"
-          config3 = AppConfig InferenceMode "http" "pulsar" "minio" "key" "secret"
+      let config1 = AppConfig ServerMode "http" "pulsar" "minio" "minio-public" "key" "secret"
+          config2 = AppConfig ServerMode "http" "pulsar" "minio" "minio-public" "key" "secret"
+          config3 = AppConfig InferenceMode "http" "pulsar" "minio" "minio-public" "key" "secret"
       config1 `shouldBe` config2
       config1 `shouldNotBe` config3
 
     it "can be shown" $ do
-      let config = AppConfig ServerMode "http" "pulsar" "minio" "key" "secret"
+      let config = AppConfig ServerMode "http" "pulsar" "minio" "minio-public" "key" "secret"
       show config `shouldContain` "AppConfig"

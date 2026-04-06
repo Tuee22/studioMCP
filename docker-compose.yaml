@@ -1,5 +1,10 @@
-## Compose exists only to launch the outer development container.
-## The Haskell CLI inside that container owns kind, Helm, and sidecar lifecycle.
+# docker-compose.yaml
+#
+# Purpose: Launch the outer development container only.
+# The application stack runs in kind, not in compose.
+# See: documents/engineering/docker_policy.md
+# See: documents/engineering/k8s_native_dev_policy.md
+
 services:
   studiomcp-env:
     build:
@@ -12,15 +17,21 @@ services:
     tty: true
     working_dir: /workspace
     environment:
+      # Docker context
       DOCKER_HOST: unix:///var/run/docker.sock
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
+      # Kind cluster configuration
       STUDIOMCP_KIND_CLUSTER: ${STUDIOMCP_KIND_CLUSTER:-studiomcp}
       STUDIOMCP_KIND_HOST_DATA_PATH: ${STUDIOMCP_KIND_HOST_DATA_PATH:-}
+      # Skip Docker image rebuilds inside container (image already in kind cluster)
+      STUDIOMCP_SKIP_IMAGE_BUILD: "1"
+      # Validation defaults - kind-edge is the only supported path
+      STUDIOMCP_VALIDATE_KIND_EDGE: "true"
+      STUDIOMCP_VALIDATE_KEYCLOAK_USERNAME: testuser1
+      STUDIOMCP_VALIDATE_KEYCLOAK_PASSWORD: testpassword1
     volumes:
       - .:/workspace
-      # Persistent data stored in project root directory, mounted into container
-      # This path is passed through to kind cluster via STUDIOMCP_KIND_HOST_DATA_PATH
       - ./.data:/.data
       - ${HOME}/.docker:/root/.docker:ro
       - /var/run/docker.sock:/var/run/docker.sock

@@ -12,7 +12,10 @@ spec :: Spec
 spec = do
   describe "defaultKeycloakConfig" $ do
     it "has localhost issuer" $ do
-      kcIssuer defaultKeycloakConfig `shouldBe` "http://localhost:8080/realms/studiomcp"
+      kcIssuer defaultKeycloakConfig `shouldBe` "http://localhost:8080/kc/realms/studiomcp"
+
+    it "has no additional issuers by default" $ do
+      kcAdditionalIssuers defaultKeycloakConfig `shouldBe` []
 
     it "has studiomcp-mcp audience" $ do
       kcAudience defaultKeycloakConfig `shouldBe` "studiomcp-mcp"
@@ -45,22 +48,26 @@ spec = do
   describe "jwksEndpoint" $ do
     it "builds correct JWKS URL" $ do
       jwksEndpoint defaultKeycloakConfig
-        `shouldBe` "http://localhost:8080/realms/studiomcp/protocol/openid-connect/certs"
+        `shouldBe` "http://localhost:8080/kc/realms/studiomcp/protocol/openid-connect/certs"
+
+    it "uses first additional issuer when present" $ do
+      jwksEndpoint defaultKeycloakConfig {kcAdditionalIssuers = ["http://keycloak-loopback-proxy:8080/kc/realms/studiomcp"]}
+        `shouldBe` "http://keycloak-loopback-proxy:8080/kc/realms/studiomcp/protocol/openid-connect/certs"
 
   describe "tokenEndpoint" $ do
     it "builds correct token URL" $ do
       tokenEndpoint defaultKeycloakConfig
-        `shouldBe` "http://localhost:8080/realms/studiomcp/protocol/openid-connect/token"
+        `shouldBe` "http://localhost:8080/kc/realms/studiomcp/protocol/openid-connect/token"
 
   describe "authorizeEndpoint" $ do
     it "builds correct authorize URL" $ do
       authorizeEndpoint defaultKeycloakConfig
-        `shouldBe` "http://localhost:8080/realms/studiomcp/protocol/openid-connect/auth"
+        `shouldBe` "http://localhost:8080/kc/realms/studiomcp/protocol/openid-connect/auth"
 
   describe "userinfoEndpoint" $ do
     it "builds correct userinfo URL" $ do
       userinfoEndpoint defaultKeycloakConfig
-        `shouldBe` "http://localhost:8080/realms/studiomcp/protocol/openid-connect/userinfo"
+        `shouldBe` "http://localhost:8080/kc/realms/studiomcp/protocol/openid-connect/userinfo"
 
   describe "validateKeycloakConfig" $ do
     it "returns no errors for valid config" $ do

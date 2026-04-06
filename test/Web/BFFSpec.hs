@@ -27,6 +27,12 @@ spec = do
     it "has 10 GB max upload size" $ do
       bffMaxUploadSize defaultBFFConfig `shouldBe` 10 * 1024 * 1024 * 1024
 
+    it "uses the edge URL as the public base" $ do
+      bffPublicBaseUrl defaultBFFConfig `shouldBe` "http://localhost:8080"
+
+    it "sets a browser session cookie name" $ do
+      bffSessionCookieName defaultBFFConfig `shouldBe` "studiomcp_session"
+
     it "allows video content types" $ do
       bffAllowedContentTypes defaultBFFConfig `shouldSatisfy` elem "video/mp4"
       bffAllowedContentTypes defaultBFFConfig `shouldSatisfy` elem "video/quicktime"
@@ -104,6 +110,16 @@ spec = do
       case result of
         Right refreshed -> wsAccessToken refreshed `shouldBe` "new-token"
         Left err -> expectationFailure $ "Failed to refresh session: " ++ show err
+
+    it "summarizes a session without exposing the session identifier" $ do
+      service <- newBFFService defaultBFFConfig
+      Right session <- createWebSession service "user-123" "tenant-456" "token" Nothing
+      result <- getSessionSummary service (wsSessionId session)
+      case result of
+        Right summary -> do
+          ssSubjectId (smerSession summary) `shouldBe` "user-123"
+          ssTenantId (smerSession summary) `shouldBe` "tenant-456"
+        Left err -> expectationFailure $ "Failed to summarize session: " ++ show err
 
     it "invalidates a session" $ do
       service <- newBFFService defaultBFFConfig

@@ -7,7 +7,7 @@ appVersion: "0.1.0"
 
 # Third-party service dependencies
 # All deployed via HA Helm charts per Third-Party Service Deployment Doctrine
-# See documents/engineering/k8s_storage.md and STUDIOMCP_DEVELOPMENT_PLAN.md
+# See documents/engineering/k8s_storage.md and DEVELOPMENT_PLAN.md
 dependencies:
   # Official charts with native HA support
   - name: minio

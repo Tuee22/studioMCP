@@ -14,6 +14,27 @@
 image:
   pullPolicy: IfNotPresent
 
+global:
+  publicBaseUrl: "http://localhost:8081"
+  objectStorage:
+    publicEndpoint: "http://localhost:9000"
+
+auth:
+  enabled: true
+  # Additional issuers for Kind environment to support outer-container test pattern.
+  # Tokens from integration tests use host.docker.internal:8081 to reach Keycloak,
+  # so the server must accept this issuer in addition to the public and internal ones.
+  #
+  # IMPORTANT: The localhost:8081 entry serves as a wildcard pattern trigger.
+  # The validateTokenIssuer function checks if any additional issuer matches
+  # "http://localhost:PORT/kc/realms/REALM" pattern. If so, it accepts ANY
+  # localhost issuer with the same realm suffix. This supports the outer-container
+  # test pattern where validation code obtains tokens via port-forward to Keycloak
+  # with dynamic ports (e.g., localhost:39051, localhost:39054, etc.).
+  additionalIssuers:
+    - "http://host.docker.internal:8081/kc/realms/studiomcp"
+    - "http://localhost:8081/kc/realms/studiomcp"
+
 # Full HA for MCP server (matches production)
 studiomcp:
   replicas: 3
@@ -40,6 +61,12 @@ minio:
   enabled: true
   mode: distributed
   replicas: 4
+  service:
+    type: NodePort
+    nodePort: 32000
+  consoleService:
+    type: NodePort
+    nodePort: 32001
   persistence:
     enabled: true
     storageClass: "studiomcp-manual"
@@ -51,16 +78,22 @@ minio:
 # Anti-affinity disabled for single-node kind cluster (DEVELOPMENT-ONLY)
 pulsar:
   enabled: true
+  kube-prometheus-stack:
+    enabled: false
   affinity:
     anti_affinity: false
   zookeeper:
     replicaCount: 3
+    podMonitor:
+      enabled: false
     volumes:
       data:
         size: 5Gi
         storageClassName: "studiomcp-manual"
   bookkeeper:
     replicaCount: 3
+    podMonitor:
+      enabled: false
     volumes:
       journal:
         size: 10Gi
@@ -68,10 +101,17 @@ pulsar:
       ledgers:
         size: 10Gi
         storageClassName: "studiomcp-manual"
+  autorecovery:
+    podMonitor:
+      enabled: false
   broker:
     replicaCount: 3
+    podMonitor:
+      enabled: false
   proxy:
     replicaCount: 2
+    podMonitor:
+      enabled: false
     # CRITICAL: Must be ClusterIP for kind - LoadBalancer never gets external IP
     # causing helm --wait to timeout after 5 minutes
     service:
@@ -121,10 +161,59 @@ keycloak:
   replicaCount: 2
   podAntiAffinityPreset: soft
 
-# LLM reference disabled
+# LLM reference enabled with mock server for local development
 llmReference:
-  enabled: false
+  enabled: true
+  mock: true
 
-# No ingress for local development (use port-forward)
 ingress:
-  enabled: false
+  enabled: true
+  className: nginx
+  # NOTE: Keycloak requires a separate ingress due to different rewrite requirements.
+  # Keycloak is configured with KEYCLOAK_HTTP_RELATIVE_PATH=/kc, so the /kc prefix
+  # must be preserved. MCP and BFF should have their prefix stripped.
+  #
+  # IMPORTANT: The regex pattern /prefix(/|$)(.*) with rewrite /$2 correctly handles:
+  # - /mcp -> / (group 1 = $, group 2 = empty)
+  # - /mcp/ -> / (group 1 = /, group 2 = empty)
+  # - /mcp/health/live -> /health/live (group 1 = /, group 2 = health/live)
+  annotations:
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    # Enable session affinity based on Mcp-Session-Id header for stateful MCP sessions
+    # This ensures requests with the same MCP session go to the same pod
+    nginx.ingress.kubernetes.io/upstream-hash-by: "$http_mcp_session_id"
+    # NOTE: X-Upstream-Addr header for horizontal-scale validation is exposed via
+    # proxy-set-headers ConfigMap. See ensureKindIngressController in Cluster.hs.
+    # This is preferred over configuration-snippet because configuration-snippet
+    # with more_set_headers is flagged as risky by nginx-ingress 1.14+ and causes
+    # the ingress to not be synced (no Address assigned = 404 errors).
+  hosts:
+    - host: ""
+      paths:
+        - path: /mcp(/|$)(.*)
+          pathType: ImplementationSpecific
+          service: studiomcp
+          port: 3000
+        - path: /api(/|$)(.*)
+          pathType: ImplementationSpecific
+          service: bff
+          port: 3002
+  tls: []
+
+# Separate ingress for Keycloak to preserve /kc path prefix
+keycloakIngress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    # Preserve /kc prefix for Keycloak which expects KEYCLOAK_HTTP_RELATIVE_PATH=/kc
+    nginx.ingress.kubernetes.io/rewrite-target: /kc$1
+  hosts:
+    - host: ""
+      paths:
+        - path: /kc(.*)
+          pathType: ImplementationSpecific
+          service: keycloak
+          port: 80
+  tls: []

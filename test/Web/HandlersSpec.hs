@@ -123,3 +123,22 @@ spec = do
       case result of
         Right response -> rsrStatus response `shouldBe` "submitted"
         Left err -> expectationFailure $ "Expected run status response, got: " ++ show err
+
+  describe "extractSessionId" $ do
+    it "prefers the cookie session when both cookie and bearer credentials are present" $ do
+      let request =
+            defaultRequest
+              { requestHeaders =
+                  [ ("Cookie", "studiomcp_session=web-cookie")
+                  , ("Authorization", "Bearer web-bearer")
+                  ]
+              }
+      extractSessionId defaultBFFConfig request `shouldBe` Just (WebSessionId "web-cookie")
+
+    it "falls back to a bearer session when the cookie is absent" $ do
+      let request =
+            defaultRequest
+              { requestHeaders =
+                  [("Authorization", "Bearer web-bearer")]
+              }
+      extractSessionId defaultBFFConfig request `shouldBe` Just (WebSessionId "web-bearer")

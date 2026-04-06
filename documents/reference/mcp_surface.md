@@ -3,7 +3,7 @@
 
 **Status**: Authoritative source
 **Supersedes**: N/A
-**Referenced by**: [../README.md](../README.md#documentation-suite), [../operations/runbook_local_debugging.md](../operations/runbook_local_debugging.md#cross-references), [../reference/cli_surface.md](../reference/cli_surface.md#cross-references), [../architecture/server_mode.md](../architecture/server_mode.md#cross-references), [../../STUDIOMCP_DEVELOPMENT_PLAN.md](../../STUDIOMCP_DEVELOPMENT_PLAN.md#documentation-governance)
+**Referenced by**: [../README.md](../README.md#documentation-suite), [../operations/runbook_local_debugging.md](../operations/runbook_local_debugging.md#cross-references), [../reference/cli_surface.md](../reference/cli_surface.md#cross-references), [../architecture/server_mode.md](../architecture/server_mode.md#cross-references), [../../DEVELOPMENT_PLAN.md](../../DEVELOPMENT_PLAN.md#documentation-governance)
 
 > **Purpose**: Canonical reference for the public MCP-facing surface in `studioMCP`, including transports, capability scope, and operational endpoints.
 
@@ -21,7 +21,7 @@ Implemented today:
 Current note:
 
 - the legacy `validate mcp` alias has been retired
-- the stdio transport is validated and supported by the protocol core, but a first-class `studiomcp stdio` convenience entry point remains future CLI ergonomics
+- `studiomcp stdio` is now the first-class local stdio entry point alongside `validate mcp-stdio`
 
 ## Target Public MCP Surface
 
@@ -77,10 +77,9 @@ Each message is a complete JSON-RPC 2.0 object on a single line. No length prefi
 ### CLI Invocation
 
 ```bash
+studiomcp stdio                     # Start MCP over stdio
 studiomcp validate mcp-stdio       # Validate stdio transport
 ```
-
-**Note**: The stdio transport core exists and `validate mcp-stdio` passes locally. A first-class `studiomcp stdio` entry point is still future CLI work.
 
 ## Streamable HTTP Transport Specification
 

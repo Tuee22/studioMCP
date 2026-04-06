@@ -6,6 +6,7 @@ metadata:
   labels:
     app.kubernetes.io/name: {{ include "studiomcp.fullname" . }}
     app.kubernetes.io/component: ingress
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
   {{- with .Values.ingress.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
@@ -26,7 +27,9 @@ spec:
   {{- end }}
   rules:
     {{- range .Values.ingress.hosts }}
-    - host: {{ .host | quote }}
+    - {{- if .host }}
+      host: {{ .host | quote }}
+      {{- end }}
       http:
         paths:
           {{- range .paths }}
@@ -39,6 +42,54 @@ spec:
                 {{- else }}
                 name: {{ include "studiomcp.fullname" $ }}-{{ .service }}
                 {{- end }}
+                port:
+                  number: {{ .port }}
+          {{- end }}
+    {{- end }}
+{{- end }}
+---
+{{- if .Values.keycloakIngress.enabled }}
+# Separate ingress for Keycloak to support different rewrite rules
+# Keycloak requires /kc prefix to be preserved (KEYCLOAK_HTTP_RELATIVE_PATH=/kc)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "studiomcp.fullname" . }}-keycloak
+  labels:
+    app.kubernetes.io/name: {{ include "studiomcp.fullname" . }}
+    app.kubernetes.io/component: keycloak-ingress
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+  {{- with .Values.keycloakIngress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.keycloakIngress.className }}
+  ingressClassName: {{ .Values.keycloakIngress.className }}
+  {{- end }}
+  {{- if .Values.keycloakIngress.tls }}
+  tls:
+    {{- range .Values.keycloakIngress.tls }}
+    - hosts:
+        {{- range .hosts }}
+        - {{ . | quote }}
+        {{- end }}
+      secretName: {{ .secretName }}
+    {{- end }}
+  {{- end }}
+  rules:
+    {{- range .Values.keycloakIngress.hosts }}
+    - {{- if .host }}
+      host: {{ .host | quote }}
+      {{- end }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType }}
+            backend:
+              service:
+                name: {{ include "studiomcp.fullname" $ }}-{{ .service }}
                 port:
                   number: {{ .port }}
           {{- end }}

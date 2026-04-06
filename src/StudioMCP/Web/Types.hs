@@ -28,13 +28,14 @@ module StudioMCP.Web.Types
     RunStatusResponse (..),
     RunProgressEvent (..),
 
-    -- * OAuth Types
-    OAuthState (..),
-    newOAuthState,
-    LoginInitiateResponse (..),
-    OAuthCallbackRequest (..),
-    LogoutResponse (..),
-    TokenRefreshResponse (..),
+    -- * Session Auth Types
+    SessionSummary (..),
+    sessionSummaryFromWebSession,
+    SessionLoginRequest (..),
+    SessionLoginResponse (..),
+    SessionMeResponse (..),
+    SessionLogoutResponse (..),
+    SessionRefreshResponse (..),
   )
 where
 
@@ -45,13 +46,12 @@ import Data.Aeson
     withObject,
     withText,
     (.:),
+    (.!=),
     (.:?),
     (.=),
   )
 import Data.Text (Text)
-import qualified Data.Text as T
-import Data.Time (UTCTime, getCurrentTime)
-import Data.UUID (UUID)
+import Data.Time (UTCTime)
 import qualified Data.UUID as UUID
 import qualified Data.UUID.V4 as UUID
 import GHC.Generics (Generic)
@@ -105,8 +105,46 @@ instance FromJSON WebSession where
       <$> obj .: "sessionId"
       <*> obj .: "subjectId"
       <*> obj .: "tenantId"
-      <*> obj .: "accessToken"
+      <*> obj .:? "accessToken" .!= ""
       <*> obj .:? "refreshToken"
+      <*> obj .: "expiresAt"
+      <*> obj .: "createdAt"
+      <*> obj .: "lastActiveAt"
+
+data SessionSummary = SessionSummary
+  { ssSubjectId :: Text,
+    ssTenantId :: Text,
+    ssExpiresAt :: UTCTime,
+    ssCreatedAt :: UTCTime,
+    ssLastActiveAt :: UTCTime
+  }
+  deriving (Eq, Show, Generic)
+
+sessionSummaryFromWebSession :: WebSession -> SessionSummary
+sessionSummaryFromWebSession session =
+  SessionSummary
+    { ssSubjectId = wsSubjectId session,
+      ssTenantId = wsTenantId session,
+      ssExpiresAt = wsExpiresAt session,
+      ssCreatedAt = wsCreatedAt session,
+      ssLastActiveAt = wsLastActiveAt session
+    }
+
+instance ToJSON SessionSummary where
+  toJSON summary =
+    object
+      [ "subjectId" .= ssSubjectId summary,
+        "tenantId" .= ssTenantId summary,
+        "expiresAt" .= ssExpiresAt summary,
+        "createdAt" .= ssCreatedAt summary,
+        "lastActiveAt" .= ssLastActiveAt summary
+      ]
+
+instance FromJSON SessionSummary where
+  parseJSON = withObject "SessionSummary" $ \obj ->
+    SessionSummary
+      <$> obj .: "subjectId"
+      <*> obj .: "tenantId"
       <*> obj .: "expiresAt"
       <*> obj .: "createdAt"
       <*> obj .: "lastActiveAt"
@@ -419,134 +457,92 @@ instance FromJSON RunProgressEvent where
       <*> obj .:? "progress"
       <*> obj .: "timestamp"
 
--- | OAuth state for CSRF protection during login flow
-data OAuthState = OAuthState
-  { -- | Random state parameter
-    osState :: Text,
-    -- | Nonce for additional protection
-    osNonce :: Text,
-    -- | Redirect URI after login (optional, for deep linking)
-    osRedirectUri :: Maybe Text,
-    -- | When the state was created
-    osCreatedAt :: UTCTime
+-- | Username/password login request handled by the BFF.
+data SessionLoginRequest = SessionLoginRequest
+  { slrUsername :: Text,
+    slrPassword :: Text
   }
   deriving (Eq, Show, Generic)
 
-instance ToJSON OAuthState where
-  toJSON os =
+instance ToJSON SessionLoginRequest where
+  toJSON req =
     object
-      [ "state" .= osState os,
-        "nonce" .= osNonce os,
-        "redirectUri" .= osRedirectUri os,
-        "createdAt" .= osCreatedAt os
+      [ "username" .= slrUsername req,
+        "password" .= slrPassword req
       ]
 
-instance FromJSON OAuthState where
-  parseJSON = withObject "OAuthState" $ \obj ->
-    OAuthState
-      <$> obj .: "state"
-      <*> obj .: "nonce"
-      <*> obj .:? "redirectUri"
-      <*> obj .: "createdAt"
+instance FromJSON SessionLoginRequest where
+  parseJSON = withObject "SessionLoginRequest" $ \obj ->
+    SessionLoginRequest
+      <$> obj .: "username"
+      <*> obj .: "password"
 
--- | Generate a new OAuth state
-newOAuthState :: Maybe Text -> IO OAuthState
-newOAuthState mRedirectUri = do
-  stateUuid <- UUID.nextRandom
-  nonceUuid <- UUID.nextRandom
-  now <- getCurrentTime
-  pure
-    OAuthState
-      { osState = UUID.toText stateUuid,
-        osNonce = UUID.toText nonceUuid,
-        osRedirectUri = mRedirectUri,
-        osCreatedAt = now
-      }
-
--- | Response to login initiation
-data LoginInitiateResponse = LoginInitiateResponse
-  { -- | URL to redirect user to for login
-    lirAuthorizationUrl :: Text,
-    -- | State parameter (also stored server-side)
-    lirState :: Text
+-- | Response returned after a successful login.
+data SessionLoginResponse = SessionLoginResponse
+  { slresSession :: SessionSummary
   }
   deriving (Eq, Show, Generic)
 
-instance ToJSON LoginInitiateResponse where
-  toJSON lir =
+instance ToJSON SessionLoginResponse where
+  toJSON response =
     object
-      [ "authorizationUrl" .= lirAuthorizationUrl lir,
-        "state" .= lirState lir
+      [ "session" .= slresSession response
       ]
 
-instance FromJSON LoginInitiateResponse where
-  parseJSON = withObject "LoginInitiateResponse" $ \obj ->
-    LoginInitiateResponse
-      <$> obj .: "authorizationUrl"
-      <*> obj .: "state"
+instance FromJSON SessionLoginResponse where
+  parseJSON = withObject "SessionLoginResponse" $ \obj ->
+    SessionLoginResponse
+      <$> obj .: "session"
 
--- | Request from OAuth callback
-data OAuthCallbackRequest = OAuthCallbackRequest
-  { -- | Authorization code from Keycloak
-    ocrCode :: Text,
-    -- | State parameter (must match stored state)
-    ocrState :: Text
+data SessionMeResponse = SessionMeResponse
+  { smerSession :: SessionSummary
   }
   deriving (Eq, Show, Generic)
 
-instance ToJSON OAuthCallbackRequest where
-  toJSON ocr =
+instance ToJSON SessionMeResponse where
+  toJSON response =
     object
-      [ "code" .= ocrCode ocr,
-        "state" .= ocrState ocr
+      [ "session" .= smerSession response
       ]
 
-instance FromJSON OAuthCallbackRequest where
-  parseJSON = withObject "OAuthCallbackRequest" $ \obj ->
-    OAuthCallbackRequest
-      <$> obj .: "code"
-      <*> obj .: "state"
+instance FromJSON SessionMeResponse where
+  parseJSON = withObject "SessionMeResponse" $ \obj ->
+    SessionMeResponse
+      <$> obj .: "session"
 
--- | Response to logout
-data LogoutResponse = LogoutResponse
-  { -- | URL to redirect user to for Keycloak logout
-    lorLogoutUrl :: Maybe Text,
-    -- | Whether logout was successful
-    lorSuccess :: Bool
+-- | Response returned after a successful logout.
+data SessionLogoutResponse = SessionLogoutResponse
+  { slorsSuccess :: Bool
   }
   deriving (Eq, Show, Generic)
 
-instance ToJSON LogoutResponse where
-  toJSON lor =
+instance ToJSON SessionLogoutResponse where
+  toJSON response =
     object
-      [ "logoutUrl" .= lorLogoutUrl lor,
-        "success" .= lorSuccess lor
+      [ "success" .= slorsSuccess response
       ]
 
-instance FromJSON LogoutResponse where
-  parseJSON = withObject "LogoutResponse" $ \obj ->
-    LogoutResponse
-      <$> obj .:? "logoutUrl"
-      <*> obj .: "success"
+instance FromJSON SessionLogoutResponse where
+  parseJSON = withObject "SessionLogoutResponse" $ \obj ->
+    SessionLogoutResponse
+      <$> obj .: "success"
 
--- | Response to token refresh
-data TokenRefreshResponse = TokenRefreshResponse
-  { -- | New expiration time
-    trrExpiresAt :: UTCTime,
-    -- | Whether refresh was successful
-    trrSuccess :: Bool
+-- | Response returned after a successful refresh.
+data SessionRefreshResponse = SessionRefreshResponse
+  { srrSession :: SessionSummary,
+    srrSuccess :: Bool
   }
   deriving (Eq, Show, Generic)
 
-instance ToJSON TokenRefreshResponse where
-  toJSON trr =
+instance ToJSON SessionRefreshResponse where
+  toJSON response =
     object
-      [ "expiresAt" .= trrExpiresAt trr,
-        "success" .= trrSuccess trr
+      [ "session" .= srrSession response,
+        "success" .= srrSuccess response
       ]
 
-instance FromJSON TokenRefreshResponse where
-  parseJSON = withObject "TokenRefreshResponse" $ \obj ->
-    TokenRefreshResponse
-      <$> obj .: "expiresAt"
+instance FromJSON SessionRefreshResponse where
+  parseJSON = withObject "SessionRefreshResponse" $ \obj ->
+    SessionRefreshResponse
+      <$> obj .: "session"
       <*> obj .: "success"

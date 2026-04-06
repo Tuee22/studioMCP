@@ -3,7 +3,7 @@
 
 **Status**: Authoritative source
 **Supersedes**: ad hoc auth notes and the earlier non-standard version of this file
-**Referenced by**: [overview.md](overview.md#canonical-follow-on-documents), [server_mode.md](server_mode.md#cross-references), [../engineering/security_model.md](../engineering/security_model.md#cross-references), [../reference/web_portal_surface.md](../reference/web_portal_surface.md#cross-references), [../../STUDIOMCP_DEVELOPMENT_PLAN.md](../../STUDIOMCP_DEVELOPMENT_PLAN.md#public-topology-baseline)
+**Referenced by**: [overview.md](overview.md#canonical-follow-on-documents), [server_mode.md](server_mode.md#cross-references), [../engineering/security_model.md](../engineering/security_model.md#cross-references), [../reference/web_portal_surface.md](../reference/web_portal_surface.md#cross-references), [../../DEVELOPMENT_PLAN.md](../../DEVELOPMENT_PLAN.md#public-topology-baseline)
 
 > **Purpose**: Canonical architecture for the publicly facing `studioMCP` service, including browser clients, external MCP clients, the BFF, Keycloak-based auth, tenant boundaries, and network topology.
 
@@ -35,10 +35,12 @@ External identity providers may be brokered through Keycloak, but the MCP server
 
 ```mermaid
 flowchart TB
-  Browser[Browser] --> BFF[BFF]
-  Browser --> Keycloak[Keycloak]
-  External[External MCP Client] --> MCP[MCP Listener]
-  Service[Service Account Client] --> MCP
+  Browser[Browser] --> Edge[nginx / ingress edge]
+  External[External MCP Client] --> Edge
+  Service[Service Account Client] --> Edge
+  Edge --> BFF[BFF]
+  Edge --> MCP[MCP Listener]
+  Edge --> Keycloak[Keycloak]
   BFF --> Keycloak
   BFF --> MCP
   MCP --> Keycloak
@@ -50,7 +52,7 @@ flowchart TB
 
 ## Current Repo Note
 
-This topology is a target-state document. The current repo does not yet implement the full public auth boundary, BFF, or remote MCP session topology described here.
+This topology is now implemented for the current login/password delivery path. The repo ships the ingress-nginx-backed kind topology, live Keycloak-backed browser login/password flow, deterministic Keycloak realm bootstrap from the checked-in realm export, and live validation behind the shared ingress edge. Docker-compose launches only the outer development container; all application services run in the kind cluster.
 
 ## Client Classes
 
@@ -58,17 +60,18 @@ This topology is a target-state document. The current repo does not yet implemen
 
 The browser interacts with:
 
-- the BFF for application workflows
-- Keycloak for authentication flows
+- the BFF for authentication and application workflows
 - presigned storage URLs where the BFF authorizes them
 
 The browser does not hold direct long-lived credentials for the execution plane.
 
+Bulk upload and download bytes are a separate data plane. The browser receives presigned URLs rooted at the environment's explicit public object-storage endpoint rather than sending large artifact bytes through `/api`.
+
 ### External MCP Client
 
-An external MCP client talks to the remote MCP server over Streamable HTTP and authenticates through OAuth with PKCE.
+An external MCP client talks to the remote MCP server over Streamable HTTP and authenticates with a Keycloak-issued bearer token.
 
-This is the standards-compliant machine-facing integration surface.
+How that token is obtained is intentionally out of scope for the current delivery plan. Redirect-based OAuth/PKCE may return later, but it is not a required dependency for the current delivery phases.
 
 ### Service Account
 
@@ -86,6 +89,8 @@ The BFF exists to serve browser product workflows.
 
 It is responsible for:
 
+- accepting browser login/password over TLS during the simplified auth phase
+- exchanging those credentials with Keycloak
 - browser session management
 - user-facing API composition
 - upload and download orchestration
@@ -159,7 +164,7 @@ The MCP server must validate JWT tokens according to these rules:
 | Claim | Type | Description |
 |-------|------|-------------|
 | `iss` | string | Keycloak issuer URL |
-| `sub` | string | Subject identifier (user ID) |
+| `sub` | string | Subject identifier when present on the access token |
 | `aud` | string or array | Audience (must include MCP resource server) |
 | `exp` | number | Expiration timestamp |
 | `iat` | number | Issued-at timestamp |
@@ -175,6 +180,10 @@ Tenant context is resolved from one of these sources (in order):
 | `resource_access.{client}.roles` | array | Tenant-scoped role (e.g., `tenant:acme-corp`) |
 
 If no tenant can be resolved and the operation requires tenant context, reject with 403.
+
+### Subject Resolution Note
+
+Some Keycloak direct-grant access tokens in the current delivery path can omit `sub` even though they remain valid bearer tokens for the configured audience. In that case, `studioMCP` resolves the subject from Keycloak `userinfo` after signature, issuer, and audience validation succeed.
 
 ### Scope Claims
 
@@ -257,29 +266,27 @@ flowchart TB
 | `artifact.hide` | `artifact:manage` |
 | `artifact.archive` | `artifact:manage` |
 
-## OAuth Flows
+## Authentication Flows
 
-### External MCP Client (PKCE)
-
-```
-1. Client initiates authorize request with PKCE code_challenge
-2. User authenticates with Keycloak
-3. Keycloak redirects with authorization code
-4. Client exchanges code + code_verifier for tokens
-5. Client uses access_token in MCP requests
-6. Client uses refresh_token to obtain new access_token
-```
-
-### BFF Session Flow
+### Browser User (Login/Password Via BFF)
 
 ```
-1. Browser initiates login via BFF
-2. BFF redirects to Keycloak authorize endpoint
-3. User authenticates
-4. Keycloak redirects to BFF callback
-5. BFF exchanges code for tokens (confidential client)
-6. BFF stores tokens in server-side session
-7. BFF uses tokens for MCP calls on user's behalf
+1. Browser submits login/password to the BFF over TLS
+2. BFF exchanges those credentials with the Keycloak token endpoint
+3. BFF creates a server-side web session and stores Keycloak tokens server-side
+4. BFF returns an HTTP-only session cookie plus summary-only JSON that omits session identifiers and Keycloak tokens
+5. Browser uses the cookie as the default `/api` credential and may call `GET /api/v1/session/me` to bootstrap its authenticated state
+6. BFF refreshes or invalidates the Keycloak tokens as needed
+
+Bearer session identifiers may remain available as a compatibility/debug path, but they are not the default browser contract and the cookie wins if both are present.
+```
+
+### External MCP Client
+
+```
+1. Client obtains a Keycloak-issued bearer token through an out-of-band process
+2. Client includes the bearer token in `/mcp` requests
+3. MCP validates signature, issuer, audience, tenant, scopes, and roles
 ```
 
 ### Service Account Flow
@@ -304,7 +311,9 @@ flowchart TB
 }
 ```
 
-### External CLI Client
+### Interactive CLI Client (Deferred)
+
+Optional future client for external interactive MCP tooling. It is not a required part of the current login/password delivery plan.
 
 ```json
 {
@@ -326,9 +335,20 @@ flowchart TB
   "clientId": "studiomcp-bff",
   "publicClient": false,
   "secret": "***",
-  "redirectUris": ["https://app.example.com/callback"],
-  "webOrigins": ["https://app.example.com"],
+  "directAccessGrantsEnabled": true,
   "defaultClientScopes": ["openid", "profile", "workflow:read", "workflow:write", "artifact:read", "artifact:write"]
+}
+```
+
+### Service Account Client
+
+```json
+{
+  "clientId": "studiomcp-automation",
+  "publicClient": false,
+  "secret": "***",
+  "serviceAccountsEnabled": true,
+  "defaultClientScopes": ["workflow:read", "workflow:write", "artifact:read", "artifact:write"]
 }
 ```
 
@@ -354,15 +374,22 @@ The session-store specifics live in [../engineering/session_scaling.md](../engin
 
 ## Keycloak Deployment Model
 
-Keycloak may run on the Kubernetes cluster alongside the rest of the platform.
+Keycloak runs in the kind cluster for local development and on production Kubernetes clusters for shared environments.
 
 The deployment baseline is:
 
+- an nginx or ingress edge as the only published entrypoint
+- Keycloak published behind the edge on `/kc`
 - dedicated Keycloak deployment
 - dedicated PostgreSQL instance or cluster for Keycloak only
 - TLS at ingress
 - realm and client bootstrap automation
 - no sharing of the Keycloak database with unrelated platform services
+
+Current local edge baselines:
+
+- kind control plane: `http://localhost:8081`
+- kind object storage: `http://localhost:9000`
 
 For Helm-first deployments, the documented baseline is:
 
@@ -386,9 +413,11 @@ Seeded artifacts include:
 
 Without deterministic seeding, auth validation in this repo is not credible.
 
+In the current repo, `cluster ensure`, `cluster deploy sidecars`, and `cluster deploy server` all use the checked-in realm export at `docker/keycloak/realm/studiomcp-realm.json`, import it if the realm is missing, and then wait for `/kc/realms/studiomcp/.well-known/openid-configuration` on the published edge.
+
 ## Hard Security Rules
 
-- the browser never sends passwords to the BFF for resource-owner-password style login
+- in the current simplified delivery path, the browser may send username/password to the BFF only on `POST /api/v1/session/login` over TLS
 - the BFF and MCP server accept only Keycloak-issued credentials
 - invalid tokens return `401`
 - authenticated but unauthorized requests return `403`

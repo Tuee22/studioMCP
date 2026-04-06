@@ -3,6 +3,7 @@
 module Web.TypesSpec (spec) where
 
 import Data.Aeson (decode, encode)
+import qualified Data.ByteString.Lazy.Char8 as LBS
 import Data.Time (getCurrentTime)
 import StudioMCP.DAG.Summary (RunId (..))
 import StudioMCP.DAG.Types (DagSpec (..))
@@ -103,6 +104,38 @@ spec = do
       fmap drArtifactId decoded `shouldBe` Just "artifact-123"
       fmap drVersion decoded `shouldBe` Just (Just "v2")
 
+  describe "SessionLoginRequest" $ do
+    it "round-trips through JSON" $ do
+      let req =
+            SessionLoginRequest
+              { slrUsername = "testuser1"
+              , slrPassword = "testpassword1"
+              }
+          encoded = encode req
+          decoded = decode encoded :: Maybe SessionLoginRequest
+      fmap slrUsername decoded `shouldBe` Just "testuser1"
+      fmap slrPassword decoded `shouldBe` Just "testpassword1"
+
+  describe "SessionLoginResponse" $ do
+    it "round-trips through JSON without exposing a session identifier" $ do
+      now <- getCurrentTime
+      let response =
+            SessionLoginResponse
+              { slresSession =
+                  SessionSummary
+                    { ssSubjectId = "subject-1"
+                    , ssTenantId = "tenant-1"
+                    , ssExpiresAt = now
+                    , ssCreatedAt = now
+                    , ssLastActiveAt = now
+                    }
+              }
+          encoded = encode response
+          decoded = decode encoded :: Maybe SessionLoginResponse
+      fmap (ssSubjectId . slresSession) decoded `shouldBe` Just "subject-1"
+      fmap (ssTenantId . slresSession) decoded `shouldBe` Just "tenant-1"
+      LBS.unpack encoded `shouldNotContain` "sessionId"
+
   describe "ChatRequest" $ do
     it "round-trips through JSON" $ do
       let req =
@@ -193,6 +226,46 @@ spec = do
           decoded = decode encoded :: Maybe PresignedDownloadUrl
       fmap pduContentType decoded `shouldBe` Just "video/mp4"
       fmap pduFileSize decoded `shouldBe` Just 1024000
+
+  describe "SessionRefreshResponse" $ do
+    it "round-trips through JSON" $ do
+      now <- getCurrentTime
+      let session =
+            SessionSummary
+              { ssSubjectId = "subject-1"
+              , ssTenantId = "tenant-1"
+              , ssExpiresAt = now
+              , ssCreatedAt = now
+              , ssLastActiveAt = now
+              }
+          response =
+            SessionRefreshResponse
+              { srrSession = session
+              , srrSuccess = True
+              }
+          encoded = encode response
+          decoded = decode encoded :: Maybe SessionRefreshResponse
+      fmap (ssSubjectId . srrSession) decoded `shouldBe` Just "subject-1"
+      fmap srrSuccess decoded `shouldBe` Just True
+      LBS.unpack encoded `shouldNotContain` "sessionId"
+
+  describe "SessionMeResponse" $ do
+    it "round-trips through JSON" $ do
+      now <- getCurrentTime
+      let response =
+            SessionMeResponse
+              { smerSession =
+                  SessionSummary
+                    { ssSubjectId = "subject-2"
+                    , ssTenantId = "tenant-2"
+                    , ssExpiresAt = now
+                    , ssCreatedAt = now
+                    , ssLastActiveAt = now
+                    }
+              }
+          encoded = encode response
+          decoded = decode encoded :: Maybe SessionMeResponse
+      fmap (ssTenantId . smerSession) decoded `shouldBe` Just "tenant-2"
 
 sampleDagSpec :: DagSpec
 sampleDagSpec =

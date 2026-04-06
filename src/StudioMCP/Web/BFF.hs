@@ -7,6 +7,7 @@ module StudioMCP.Web.BFF
     BFFService (..),
     BFFConfig (..),
     defaultBFFConfig,
+    loadBFFConfigFromEnv,
     newBFFService,
     newBFFServiceWithRuntime,
     newBFFServiceWithAuth,
@@ -31,11 +32,11 @@ module StudioMCP.Web.BFF
     submitRun,
     getRunStatus,
 
-    -- * OAuth Operations
-    initiateLogin,
-    handleOAuthCallback,
-    handleLogout,
-    handleTokenRefresh,
+    -- * Session Auth Operations
+    loginWithPassword,
+    logoutSession,
+    refreshSessionTokens,
+    getSessionSummary,
 
     -- * Errors
     BFFError (..),
@@ -44,6 +45,7 @@ module StudioMCP.Web.BFF
 where
 
 import Control.Concurrent.STM (TVar, atomically, newTVarIO, readTVarIO, writeTVar)
+import Data.Char (toLower)
 import Data.Aeson (FromJSON, ToJSON, object, withObject, (.:), (.:?), (.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as AesonKey
@@ -57,19 +59,31 @@ import Data.Time (UTCTime, addUTCTime, getCurrentTime)
 import qualified Data.UUID as UUID
 import qualified Data.UUID.V4 as UUID
 import GHC.Generics (Generic)
-import Network.HTTP.Client (Manager, defaultManagerSettings, newManager)
+import Network.HTTP.Client
+  ( Manager,
+    defaultManagerSettings,
+    httpLbs,
+    newManager,
+    parseRequest,
+    requestHeaders,
+    responseBody,
+    responseStatus,
+  )
+import Network.HTTP.Types.Status (statusCode)
 import Network.HTTP.Types (Status, status400, status401, status403, status404, status500, status502)
-import StudioMCP.Auth.Config (AuthConfig (..), KeycloakConfig (..), defaultAuthConfig)
+import StudioMCP.Auth.Config
+  ( AuthConfig (..),
+    KeycloakConfig (..),
+    defaultAuthConfig,
+    loadAuthConfigFromEnv,
+    userinfoEndpoint,
+  )
 import StudioMCP.Auth.PKCE
-  ( AuthorizationParams (..),
-    PKCEChallenge (..),
+  ( PasswordGrantParams (..),
     RefreshParams (..),
-    TokenExchangeParams (..),
     TokenResponse (..),
-    buildAuthorizationUrl,
-    exchangeCodeForTokens,
-    generatePKCEChallenge,
     pkceErrorToText,
+    exchangePasswordForTokens,
     refreshAccessToken,
   )
 import StudioMCP.Auth.Types (SubjectId (..), TenantId (..))
@@ -100,6 +114,7 @@ import StudioMCP.Storage.TenantStorage
   )
 import qualified StudioMCP.Storage.TenantStorage as TenantStorage
 import StudioMCP.Web.Types
+import System.Environment (lookupEnv)
 
 -- | BFF configuration
 data BFFConfig = BFFConfig
@@ -109,16 +124,18 @@ data BFFConfig = BFFConfig
     bffDownloadTtlSeconds :: Int,
     bffMaxUploadSize :: Integer,
     bffAllowedContentTypes :: [Text],
-    -- | OAuth configuration
+    -- | Keycloak-backed auth configuration
     bffAuthConfig :: AuthConfig,
-    -- | OAuth redirect URI (where Keycloak sends auth code)
-    bffOAuthRedirectUri :: Text,
-    -- | OAuth scopes to request
-    bffOAuthScopes :: [Text],
-    -- | OAuth state TTL in seconds (how long to remember pending logins)
-    bffOAuthStateTtlSeconds :: Int,
-    -- | Post-logout redirect URI
-    bffPostLogoutRedirectUri :: Text
+    -- | Scopes requested during password login.
+    bffAuthScopes :: [Text],
+    -- | Public base URL used when rendering user-facing links or cookies.
+    bffPublicBaseUrl :: Text,
+    -- | Name of the browser session cookie.
+    bffSessionCookieName :: Text,
+    -- | Cookie path for the browser session cookie.
+    bffSessionCookiePath :: Text,
+    -- | Whether the browser session cookie should be marked Secure.
+    bffSessionCookieSecure :: Bool
   }
   deriving (Eq, Show, Generic)
 
@@ -147,11 +164,40 @@ defaultBFFConfig =
           "image/tiff"
         ],
       bffAuthConfig = defaultAuthConfig,
-      bffOAuthRedirectUri = "http://localhost:8081/auth/callback",
-      bffOAuthScopes = ["openid", "profile", "email", "offline_access"],
-      bffOAuthStateTtlSeconds = 300, -- 5 minutes
-      bffPostLogoutRedirectUri = "http://localhost:8081"
+      -- `openid` is required for Keycloak's userinfo endpoint while the rest of
+      -- the effective access scopes come from the BFF client's assigned defaults.
+      bffAuthScopes = ["openid"],
+      bffPublicBaseUrl = "http://localhost:8080",
+      bffSessionCookieName = "studiomcp_session",
+      bffSessionCookiePath = "/",
+      bffSessionCookieSecure = False
     }
+
+loadBFFConfigFromEnv :: IO BFFConfig
+loadBFFConfigFromEnv = do
+  authConfig <- loadAuthConfigFromEnv
+  mcpEndpoint <- lookupEnvText "STUDIO_MCP_BFF_MCP_ENDPOINT" (bffMcpEndpoint defaultBFFConfig)
+  sessionTtl <- lookupEnvInt "STUDIO_MCP_BFF_SESSION_TTL_SECONDS" (bffSessionTtlSeconds defaultBFFConfig)
+  uploadTtl <- lookupEnvInt "STUDIO_MCP_BFF_UPLOAD_TTL_SECONDS" (bffUploadTtlSeconds defaultBFFConfig)
+  downloadTtl <- lookupEnvInt "STUDIO_MCP_BFF_DOWNLOAD_TTL_SECONDS" (bffDownloadTtlSeconds defaultBFFConfig)
+  publicBaseUrl <- lookupEnvText "STUDIO_MCP_BFF_PUBLIC_BASE_URL" (bffPublicBaseUrl defaultBFFConfig)
+  sessionCookieName <- lookupEnvText "STUDIO_MCP_BFF_SESSION_COOKIE_NAME" (bffSessionCookieName defaultBFFConfig)
+  sessionCookiePath <- lookupEnvText "STUDIO_MCP_BFF_SESSION_COOKIE_PATH" (bffSessionCookiePath defaultBFFConfig)
+  sessionCookieSecure <- lookupEnvBool "STUDIO_MCP_BFF_SESSION_COOKIE_SECURE" (bffSessionCookieSecure defaultBFFConfig)
+  authScopes <- lookupEnvTextList "STUDIO_MCP_BFF_AUTH_SCOPES" (bffAuthScopes defaultBFFConfig)
+  pure
+    defaultBFFConfig
+      { bffMcpEndpoint = mcpEndpoint,
+        bffSessionTtlSeconds = sessionTtl,
+        bffUploadTtlSeconds = uploadTtl,
+        bffDownloadTtlSeconds = downloadTtl,
+        bffAuthConfig = authConfig,
+        bffAuthScopes = authScopes,
+        bffPublicBaseUrl = publicBaseUrl,
+        bffSessionCookieName = sessionCookieName,
+        bffSessionCookiePath = sessionCookiePath,
+        bffSessionCookieSecure = sessionCookieSecure
+      }
 
 -- | BFF service errors
 data BFFError
@@ -189,15 +235,6 @@ bffErrorToHttpStatus (InvalidRequest _) = status400
 bffErrorToHttpStatus (McpServiceError _) = status502
 bffErrorToHttpStatus (InternalError _) = status500
 
--- | Pending OAuth state for CSRF protection
-data PendingOAuthState = PendingOAuthState
-  { posState :: OAuthState,
-    posPkceChallenge :: PKCEChallenge,
-    posCreatedAt :: UTCTime,
-    posExpiresAt :: UTCTime
-  }
-  deriving (Eq, Show, Generic)
-
 -- | BFF service state
 data BFFService = BFFService
   { bffConfig :: BFFConfig,
@@ -214,10 +251,8 @@ data BFFService = BFFService
     -- | Inference manager + model config for chat.
     bffInferenceManager :: Maybe Manager,
     bffReferenceModelConfig :: Maybe ReferenceModelConfig,
-    -- | HTTP manager for OAuth token exchange
-    bffHttpManager :: Maybe Manager,
-    -- | Pending OAuth states (for CSRF protection during login)
-    bffPendingOAuthStates :: TVar (Map Text PendingOAuthState)
+    -- | HTTP manager for Keycloak token exchange
+    bffHttpManager :: Maybe Manager
   }
 
 -- | Pending upload record
@@ -253,8 +288,8 @@ newBFFService config = do
   sessionsVar <- newTVarIO Map.empty
   uploadsVar <- newTVarIO Map.empty
   runCacheVar <- newTVarIO Map.empty
-  oauthStatesVar <- newTVarIO Map.empty
   tenantStorage <- newTenantStorageService defaultTenantStorageConfig
+  httpManager <- newManager defaultManagerSettings
   pure
     BFFService
       { bffConfig = config,
@@ -265,8 +300,7 @@ newBFFService config = do
         bffToolCatalog = Nothing,
         bffInferenceManager = Nothing,
         bffReferenceModelConfig = Nothing,
-        bffHttpManager = Nothing,
-        bffPendingOAuthStates = oauthStatesVar
+        bffHttpManager = Just httpManager
       }
 
 newBFFServiceWithRuntime ::
@@ -279,7 +313,6 @@ newBFFServiceWithRuntime config toolCatalog tenantStorage referenceModelConfig =
   sessionsVar <- newTVarIO Map.empty
   uploadsVar <- newTVarIO Map.empty
   runCacheVar <- newTVarIO Map.empty
-  oauthStatesVar <- newTVarIO Map.empty
   inferenceManager <- newManager defaultManagerSettings
   pure
     BFFService
@@ -291,11 +324,10 @@ newBFFServiceWithRuntime config toolCatalog tenantStorage referenceModelConfig =
         bffToolCatalog = Just toolCatalog,
         bffInferenceManager = Just inferenceManager,
         bffReferenceModelConfig = Just referenceModelConfig,
-        bffHttpManager = Just inferenceManager, -- Reuse same manager
-        bffPendingOAuthStates = oauthStatesVar
+        bffHttpManager = Just inferenceManager -- Reuse same manager
       }
 
--- | Create a new BFF service with OAuth support
+-- | Create a new BFF service with Keycloak token exchange support.
 newBFFServiceWithAuth ::
   BFFConfig ->
   TenantStorageService ->
@@ -304,7 +336,6 @@ newBFFServiceWithAuth config tenantStorage = do
   sessionsVar <- newTVarIO Map.empty
   uploadsVar <- newTVarIO Map.empty
   runCacheVar <- newTVarIO Map.empty
-  oauthStatesVar <- newTVarIO Map.empty
   httpManager <- newManager defaultManagerSettings
   pure
     BFFService
@@ -316,8 +347,7 @@ newBFFServiceWithAuth config tenantStorage = do
         bffToolCatalog = Nothing,
         bffInferenceManager = Nothing,
         bffReferenceModelConfig = Nothing,
-        bffHttpManager = Just httpManager,
-        bffPendingOAuthStates = oauthStatesVar
+        bffHttpManager = Just httpManager
       }
 
 -- | Create a new web session
@@ -660,157 +690,56 @@ getRunStatus service sessionId runId = do
             Just status -> pure (Right status)
             Nothing -> pure $ Left $ InvalidRequest "Run not found"
 
--- | Initiate OAuth login flow
---
--- Generates PKCE challenge and OAuth state, stores them for later verification,
--- and returns the authorization URL to redirect the user to.
-initiateLogin ::
+-- | Exchange username/password with Keycloak and create a browser session.
+loginWithPassword ::
   BFFService ->
-  Maybe Text -> -- Optional redirect URI after login
-  IO (Either BFFError LoginInitiateResponse)
-initiateLogin service mRedirectUri = do
-  case bffHttpManager service of
-    Nothing -> pure $ Left $ InternalError "OAuth not configured (no HTTP manager)"
-    Just _ -> do
-      now <- getCurrentTime
-      let config = bffConfig service
-          keycloakConfig = acKeycloak (bffAuthConfig config)
-          ttl = fromIntegral (bffOAuthStateTtlSeconds config)
-          expiresAt = addUTCTime ttl now
-
-      -- Generate OAuth state and PKCE challenge
-      oauthState <- newOAuthState mRedirectUri
-      pkceChallenge <- generatePKCEChallenge
-
-      let pendingState =
-            PendingOAuthState
-              { posState = oauthState,
-                posPkceChallenge = pkceChallenge,
-                posCreatedAt = now,
-                posExpiresAt = expiresAt
-              }
-
-      -- Store pending state
-      states <- readTVarIO (bffPendingOAuthStates service)
-      atomically $ writeTVar (bffPendingOAuthStates service) (Map.insert (osState oauthState) pendingState states)
-
-      -- Build authorization URL
-      let authParams =
-            AuthorizationParams
-              { apClientId = kcClientId keycloakConfig,
-                apRedirectUri = bffOAuthRedirectUri config,
-                apScope = bffOAuthScopes config,
-                apState = osState oauthState,
-                apPkceChallenge = pkceChallenge
-              }
-          authUrl = buildAuthorizationUrl keycloakConfig authParams
-
-      pure $
-        Right
-          LoginInitiateResponse
-            { lirAuthorizationUrl = authUrl,
-              lirState = osState oauthState
-            }
-
--- | Handle OAuth callback after user authenticates with Keycloak
---
--- Verifies the state parameter matches a pending login, exchanges the auth code
--- for tokens using PKCE, extracts claims, and creates a web session.
-handleOAuthCallback ::
-  BFFService ->
-  OAuthCallbackRequest ->
+  SessionLoginRequest ->
   IO (Either BFFError WebSession)
-handleOAuthCallback service req = do
+loginWithPassword service req =
   case bffHttpManager service of
-    Nothing -> pure $ Left $ InternalError "OAuth not configured (no HTTP manager)"
+    Nothing -> pure $ Left $ InternalError "Keycloak token exchange is not configured"
     Just manager -> do
-      now <- getCurrentTime
       let config = bffConfig service
           keycloakConfig = acKeycloak (bffAuthConfig config)
+          passwordGrant =
+            PasswordGrantParams
+              { pgClientId = kcClientId keycloakConfig,
+                pgUsername = slrUsername req,
+                pgPassword = slrPassword req,
+                pgScopes = bffAuthScopes config,
+                pgClientSecret = kcClientSecret keycloakConfig
+              }
+      tokenResult <- exchangePasswordForTokens keycloakConfig manager passwordGrant
+      case tokenResult of
+        Left pkceError ->
+          pure $ Left $ InvalidCredentials (pkceErrorToText pkceError)
+        Right tokenResponse ->
+          createSessionFromTokenResponse service tokenResponse
 
-      -- Look up and validate pending state
-      states <- readTVarIO (bffPendingOAuthStates service)
-      case Map.lookup (ocrState req) states of
-        Nothing -> pure $ Left $ InvalidCredentials "Invalid or expired OAuth state"
-        Just pendingState -> do
-          -- Remove used state
-          atomically $ writeTVar (bffPendingOAuthStates service) (Map.delete (ocrState req) states)
-
-          -- Check if state expired
-          if posExpiresAt pendingState < now
-            then pure $ Left $ InvalidCredentials "OAuth state expired"
-            else do
-              -- Exchange code for tokens
-              let exchangeParams =
-                    TokenExchangeParams
-                      { teClientId = kcClientId keycloakConfig,
-                        teCode = ocrCode req,
-                        teRedirectUri = bffOAuthRedirectUri config,
-                        teCodeVerifier = pcVerifier (posPkceChallenge pendingState)
-                      }
-
-              tokenResult <- exchangeCodeForTokens keycloakConfig manager exchangeParams
-              case tokenResult of
-                Left pkceError ->
-                  pure $ Left $ InvalidCredentials (pkceErrorToText pkceError)
-                Right tokenResponse -> do
-                  -- Extract claims from access token (basic parsing)
-                  let subjectId = extractSubjectFromToken (trAccessToken tokenResponse)
-                      tenantId = extractTenantFromToken (trAccessToken tokenResponse)
-
-                  -- Create web session
-                  createWebSession
-                    service
-                    subjectId
-                    tenantId
-                    (trAccessToken tokenResponse)
-                    (trRefreshToken tokenResponse)
-
--- | Handle logout
-handleLogout ::
+logoutSession ::
   BFFService ->
   WebSessionId ->
-  IO (Either BFFError LogoutResponse)
-handleLogout service sessionId = do
+  IO (Either BFFError SessionLogoutResponse)
+logoutSession service sessionId = do
   sessionResult <- getWebSession service sessionId
   case sessionResult of
     Left err -> pure (Left err)
     Right _ -> do
-      -- Invalidate the session
       _ <- invalidateWebSession service sessionId
+      pure $ Right $ SessionLogoutResponse True
 
-      -- Build Keycloak logout URL if configured
-      let config = bffConfig service
-          keycloakConfig = acKeycloak (bffAuthConfig config)
-          logoutUrl =
-            Just $
-              kcIssuer keycloakConfig
-                <> "/protocol/openid-connect/logout"
-                <> "?post_logout_redirect_uri="
-                <> urlEncode (bffPostLogoutRedirectUri config)
-                <> "&client_id="
-                <> urlEncode (kcClientId keycloakConfig)
-
-      pure $
-        Right
-          LogoutResponse
-            { lorLogoutUrl = logoutUrl,
-              lorSuccess = True
-            }
-
--- | Handle token refresh
-handleTokenRefresh ::
+refreshSessionTokens ::
   BFFService ->
   WebSessionId ->
-  IO (Either BFFError TokenRefreshResponse)
-handleTokenRefresh service sessionId = do
+  IO (Either BFFError WebSession)
+refreshSessionTokens service sessionId =
   case bffHttpManager service of
-    Nothing -> pure $ Left $ InternalError "OAuth not configured (no HTTP manager)"
+    Nothing -> pure $ Left $ InternalError "Keycloak token exchange is not configured"
     Just manager -> do
       sessionResult <- getWebSession service sessionId
       case sessionResult of
         Left err -> pure (Left err)
-        Right session -> do
+        Right session ->
           case wsRefreshToken session of
             Nothing -> pure $ Left $ InvalidCredentials "No refresh token available"
             Just refreshToken -> do
@@ -822,13 +751,11 @@ handleTokenRefresh service sessionId = do
                         rpRefreshToken = refreshToken,
                         rpClientSecret = kcClientSecret keycloakConfig
                       }
-
               tokenResult <- refreshAccessToken keycloakConfig manager refreshParams
               case tokenResult of
                 Left pkceError ->
                   pure $ Left $ InvalidCredentials (pkceErrorToText pkceError)
                 Right tokenResponse -> do
-                  -- Update session with new tokens
                   updatedSession <-
                     refreshWebSession
                       service
@@ -837,37 +764,103 @@ handleTokenRefresh service sessionId = do
                       (trRefreshToken tokenResponse)
                   case updatedSession of
                     Left err -> pure (Left err)
-                    Right sess ->
-                      pure $
-                        Right
-                          TokenRefreshResponse
-                            { trrExpiresAt = wsExpiresAt sess,
-                              trrSuccess = True
-                            }
+                    Right refreshedSession -> pure (Right refreshedSession)
 
--- | URL encode a text value
-urlEncode :: Text -> Text
-urlEncode = T.concatMap encodeChar
-  where
-    encodeChar c
-      | isUnreserved c = T.singleton c
-      | otherwise = T.pack $ "%" <> hexEncode c
-    isUnreserved c =
-      (c >= 'A' && c <= 'Z')
-        || (c >= 'a' && c <= 'z')
-        || (c >= '0' && c <= '9')
-        || c == '-'
-        || c == '_'
-        || c == '.'
-        || c == '~'
-    hexEncode c =
-      let byte = fromEnum c
-          hi = byte `div` 16
-          lo = byte `mod` 16
-       in [hexDigit hi, hexDigit lo]
-    hexDigit n
-      | n < 10 = toEnum (n + fromEnum '0')
-      | otherwise = toEnum (n - 10 + fromEnum 'A')
+getSessionSummary ::
+  BFFService ->
+  WebSessionId ->
+  IO (Either BFFError SessionMeResponse)
+getSessionSummary service sessionId = do
+  sessionResult <- getWebSession service sessionId
+  pure $
+    case sessionResult of
+      Left err -> Left err
+      Right session ->
+        Right
+          SessionMeResponse
+            { smerSession = sessionSummaryFromWebSession session
+            }
+
+createSessionFromTokenResponse ::
+  BFFService ->
+  TokenResponse ->
+  IO (Either BFFError WebSession)
+createSessionFromTokenResponse service tokenResponse = do
+  identity <- resolveTokenIdentity service (trAccessToken tokenResponse)
+  let subjectId = resolvedSubjectId identity
+      tenantId = resolvedTenantId identity
+  if subjectId == "unknown"
+    then pure $ Left $ InvalidCredentials "Keycloak access token did not include a subject claim"
+    else do
+      sessionResult <-
+        createWebSession
+          service
+          subjectId
+          tenantId
+          (trAccessToken tokenResponse)
+          (trRefreshToken tokenResponse)
+      case sessionResult of
+        Left err -> pure (Left err)
+        Right session -> pure (Right session)
+
+data ResolvedTokenIdentity = ResolvedTokenIdentity
+  { resolvedSubjectId :: Text,
+    resolvedTenantId :: Text
+  }
+
+data UserInfoIdentity = UserInfoIdentity
+  { uiiSub :: Maybe Text,
+    uiiTenantId :: Maybe Text
+  }
+
+instance FromJSON UserInfoIdentity where
+  parseJSON = withObject "UserInfoIdentity" $ \obj ->
+    UserInfoIdentity
+      <$> obj .:? "sub"
+      <*> obj .:? "tenant_id"
+
+resolveTokenIdentity :: BFFService -> Text -> IO ResolvedTokenIdentity
+resolveTokenIdentity service accessToken = do
+  let parsedSubjectId = extractSubjectFromToken accessToken
+      parsedTenantId = extractTenantFromToken accessToken
+  fallbackIdentity <-
+    if parsedSubjectId == "unknown" || parsedTenantId == "default"
+      then
+        case bffHttpManager service of
+          Nothing -> pure Nothing
+          Just manager ->
+            fetchUserInfoIdentity
+              (acKeycloak (bffAuthConfig (bffConfig service)))
+              manager
+              accessToken
+      else pure Nothing
+  pure $
+    ResolvedTokenIdentity
+      { resolvedSubjectId =
+          if parsedSubjectId == "unknown"
+            then maybe "unknown" (maybe "unknown" id . uiiSub) fallbackIdentity
+            else parsedSubjectId
+      , resolvedTenantId =
+          if parsedTenantId == "default"
+            then maybe "default" (maybe "default" id . uiiTenantId) fallbackIdentity
+            else parsedTenantId
+      }
+
+fetchUserInfoIdentity :: KeycloakConfig -> Manager -> Text -> IO (Maybe UserInfoIdentity)
+fetchUserInfoIdentity keycloakConfig manager accessToken = do
+  requestResult <- parseRequest (T.unpack (userinfoEndpoint keycloakConfig))
+  let request =
+        requestResult
+          { requestHeaders =
+              [ ("Authorization", "Bearer " <> TE.encodeUtf8 accessToken)
+              ]
+          }
+  responseResult <- httpLbs request manager
+  if statusCode (responseStatus responseResult) /= 200
+    then pure Nothing
+    else case Aeson.eitherDecode (responseBody responseResult) of
+      Right userInfo -> pure (Just userInfo)
+      Left _ -> pure Nothing
 
 -- | Extract subject ID from JWT access token (basic parsing)
 -- In production this should use proper JWT parsing and validation
@@ -1024,3 +1017,47 @@ decodeRunStatusResponse callResult =
 firstToolPayload :: CallToolResult -> Maybe Text
 firstToolPayload callResult =
   tcData =<< safeLast (ctrContent callResult)
+
+lookupEnvText :: String -> Text -> IO Text
+lookupEnvText name fallback =
+  maybe fallback T.pack <$> lookupEnv name
+
+lookupEnvInt :: String -> Int -> IO Int
+lookupEnvInt name fallback = do
+  maybeValue <- lookupEnv name
+  pure $
+    case maybeValue >>= readMaybeInt of
+      Just value -> value
+      Nothing -> fallback
+
+lookupEnvBool :: String -> Bool -> IO Bool
+lookupEnvBool name fallback = do
+  maybeValue <- lookupEnv name
+  pure $
+    case fmap (map toLower) maybeValue of
+      Just "true" -> True
+      Just "1" -> True
+      Just "false" -> False
+      Just "0" -> False
+      _ -> fallback
+
+lookupEnvTextList :: String -> [Text] -> IO [Text]
+lookupEnvTextList name fallback = do
+  maybeValue <- lookupEnv name
+  pure $
+    case maybeValue of
+      Nothing -> fallback
+      Just value ->
+        let values =
+              filter (not . T.null)
+                . map T.strip
+                . T.splitOn ","
+                . T.pack
+                $ value
+         in if null values then fallback else values
+
+readMaybeInt :: String -> Maybe Int
+readMaybeInt rawValue =
+  case reads rawValue of
+    [(value, "")] -> Just value
+    _ -> Nothing

@@ -35,6 +35,10 @@ module StudioMCP.MCP.Protocol.Types
     ReadResourceParams (..),
     ReadResourceResult (..),
     ResourceContent (..),
+    SubscribeResourceParams (..),
+    SubscribeResourceResult (..),
+    UnsubscribeResourceParams (..),
+    UnsubscribeResourceResult (..),
 
     -- * Prompts
     PromptDefinition (..),
@@ -482,6 +486,84 @@ instance ToJSON ReadResourceResult where
 instance FromJSON ReadResourceResult where
   parseJSON = withObject "ReadResourceResult" $ \obj ->
     ReadResourceResult <$> obj .: "contents"
+
+data SubscribeResourceParams = SubscribeResourceParams
+  { srpUri :: Text,
+    srpCursor :: Maybe Text,
+    srpLastEventId :: Maybe Text
+  }
+  deriving (Eq, Show, Generic)
+
+instance ToJSON SubscribeResourceParams where
+  toJSON params =
+    object $
+      [ "uri" .= srpUri params
+      ]
+        ++ maybe [] (\cursor -> ["cursor" .= cursor]) (srpCursor params)
+        ++ maybe [] (\eventId -> ["lastEventId" .= eventId]) (srpLastEventId params)
+
+instance FromJSON SubscribeResourceParams where
+  parseJSON = withObject "SubscribeResourceParams" $ \obj ->
+    SubscribeResourceParams
+      <$> obj .: "uri"
+      <*> obj .:? "cursor"
+      <*> obj .:? "lastEventId"
+
+data SubscribeResourceResult = SubscribeResourceResult
+  { srrUri :: Text,
+    srrSubscribed :: Bool,
+    srrCursor :: Maybe Text,
+    srrLastEventId :: Maybe Text
+  }
+  deriving (Eq, Show, Generic)
+
+instance ToJSON SubscribeResourceResult where
+  toJSON result =
+    object $
+      [ "uri" .= srrUri result,
+        "subscribed" .= srrSubscribed result
+      ]
+        ++ maybe [] (\cursor -> ["cursor" .= cursor]) (srrCursor result)
+        ++ maybe [] (\eventId -> ["lastEventId" .= eventId]) (srrLastEventId result)
+
+instance FromJSON SubscribeResourceResult where
+  parseJSON = withObject "SubscribeResourceResult" $ \obj ->
+    SubscribeResourceResult
+      <$> obj .: "uri"
+      <*> obj .: "subscribed"
+      <*> obj .:? "cursor"
+      <*> obj .:? "lastEventId"
+
+newtype UnsubscribeResourceParams = UnsubscribeResourceParams
+  { urpUri :: Text
+  }
+  deriving (Eq, Show, Generic)
+
+instance ToJSON UnsubscribeResourceParams where
+  toJSON params = object ["uri" .= urpUri params]
+
+instance FromJSON UnsubscribeResourceParams where
+  parseJSON = withObject "UnsubscribeResourceParams" $ \obj ->
+    UnsubscribeResourceParams <$> obj .: "uri"
+
+data UnsubscribeResourceResult = UnsubscribeResourceResult
+  { urrUri :: Text,
+    urrUnsubscribed :: Bool
+  }
+  deriving (Eq, Show, Generic)
+
+instance ToJSON UnsubscribeResourceResult where
+  toJSON result =
+    object
+      [ "uri" .= urrUri result,
+        "unsubscribed" .= urrUnsubscribed result
+      ]
+
+instance FromJSON UnsubscribeResourceResult where
+  parseJSON = withObject "UnsubscribeResourceResult" $ \obj ->
+    UnsubscribeResourceResult
+      <$> obj .: "uri"
+      <*> obj .: "unsubscribed"
 
 -- | Prompt definition
 data PromptDefinition = PromptDefinition

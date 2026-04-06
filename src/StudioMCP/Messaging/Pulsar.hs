@@ -187,7 +187,10 @@ classifyPulsarFailure operationName topicName maybeExitCode commandOutput =
             "Pulsar was not reachable through the current broker path.",
             True
           )
-      | "deployments.apps" `Text.isInfixOf` loweredOutput && "not found" `Text.isInfixOf` loweredOutput =
+      | ( "deployments.apps" `Text.isInfixOf` loweredOutput
+            || "statefulsets.apps" `Text.isInfixOf` loweredOutput
+        )
+          && "not found" `Text.isInfixOf` loweredOutput =
           ( "pulsar-sidecar-unavailable",
             "The Pulsar deployment is not present in the cluster.",
             True
@@ -206,7 +209,7 @@ runPulsarClientCommand config operationName topicName pulsarArgs = do
     try
       ( readProcessWithExitCode
           "kubectl"
-          ( ["exec", "deploy/studiomcp-pulsar", "--", "bin/pulsar-client", "--url", Text.unpack (pulsarBinaryEndpoint config)]
+          ( ["exec", "statefulset/studiomcp-pulsar-toolset", "--", "bin/pulsar-client", "--url", Text.unpack (pulsarBinaryEndpoint config)]
               <> pulsarArgs
           )
           ""

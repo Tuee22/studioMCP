@@ -29,18 +29,32 @@ spec:
               value: "server"
             - name: STUDIO_MCP_BFF_PORT
               value: {{ .Values.bff.service.port | quote }}
-            - name: STUDIO_MCP_MCP_ENDPOINT
+            - name: STUDIO_MCP_BFF_MCP_ENDPOINT
               value: "http://{{ .Release.Name }}:{{ .Values.studiomcp.service.port }}"
+            - name: STUDIO_MCP_BFF_PUBLIC_BASE_URL
+              value: {{ include "studiomcp.publicBaseUrl" . | quote }}
+            - name: STUDIO_MCP_BFF_SESSION_COOKIE_NAME
+              value: "studiomcp_session"
+            - name: STUDIO_MCP_BFF_SESSION_COOKIE_PATH
+              value: "/"
+            - name: STUDIO_MCP_BFF_SESSION_COOKIE_SECURE
+              value: "{{ if .Values.global.tls.enabled }}true{{ else }}false{{ end }}"
             {{- if .Values.llmReference.enabled }}
             - name: STUDIO_MCP_REFERENCE_MODEL_URL
+              {{- if .Values.llmReference.mock }}
+              value: "http://{{ include "studiomcp.fullname" . }}-llm-reference:{{ .Values.llmReference.port }}/generate"
+              {{- else }}
               value: "http://{{ include "studiomcp.fullname" . }}-llm-reference:{{ .Values.llmReference.port }}/api/generate"
+              {{- end }}
             {{- end }}
             - name: STUDIO_MCP_PULSAR_HTTP_URL
-              value: "http://{{ .Release.Name }}-pulsar-proxy:8080"
+              value: "http://{{ .Release.Name }}-pulsar-proxy"
             - name: STUDIO_MCP_PULSAR_BINARY_URL
               value: "pulsar://{{ .Release.Name }}-pulsar-proxy:6650"
             - name: STUDIO_MCP_MINIO_ENDPOINT
               value: "http://{{ .Release.Name }}-minio:9000"
+            - name: STUDIO_MCP_MINIO_PUBLIC_ENDPOINT
+              value: {{ include "studiomcp.objectStoragePublicEndpoint" . | quote }}
             - name: STUDIO_MCP_MINIO_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
@@ -61,12 +75,20 @@ spec:
                   key: redis-password
             {{- end }}
             {{- if .Values.keycloak.enabled }}
-            - name: STUDIO_MCP_KEYCLOAK_URL
-              value: "http://{{ .Release.Name }}-keycloak:8080"
             - name: STUDIOMCP_KEYCLOAK_REALM
-              value: "studiomcp"
+              value: {{ .Values.keycloak.realm | quote }}
             - name: STUDIOMCP_KEYCLOAK_ISSUER
-              value: "http://{{ .Release.Name }}-keycloak:8080/realms/studiomcp"
+              value: {{ include "studiomcp.keycloakPublicIssuer" . | quote }}
+            # Use ADDITIONAL_ISSUERS (plural) to match loadAuthConfigFromEnv which reads this var
+            # The internal issuer is the first entry, used by keycloakEndpointBase for token/JWKS endpoints
+            - name: STUDIOMCP_KEYCLOAK_ADDITIONAL_ISSUERS
+              value: {{ include "studiomcp.keycloakInternalIssuer" . | quote }}
+            - name: STUDIOMCP_KEYCLOAK_AUDIENCE
+              value: {{ .Values.auth.audience | quote }}
+            - name: STUDIOMCP_KEYCLOAK_CLIENT_ID
+              value: {{ .Values.auth.bffClientId | quote }}
+            - name: STUDIOMCP_KEYCLOAK_CLIENT_SECRET
+              value: {{ .Values.auth.bffClientSecret | quote }}
             {{- end }}
             {{- if .Values.secrets.jwt.jwksUri }}
             - name: STUDIOMCP_JWKS_URI

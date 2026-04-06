@@ -3,7 +3,7 @@
 
 **Status**: Authoritative source
 **Supersedes**: N/A
-**Referenced by**: [../architecture/overview.md](../architecture/overview.md#cross-references), [../architecture/multi_tenant_saas_mcp_auth_architecture.md](../architecture/multi_tenant_saas_mcp_auth_architecture.md#cross-references), [../architecture/artifact_storage_architecture.md](../architecture/artifact_storage_architecture.md#cross-references), [../reference/mcp_surface.md](../reference/mcp_surface.md#cross-references), [../../STUDIOMCP_DEVELOPMENT_PLAN.md](../../STUDIOMCP_DEVELOPMENT_PLAN.md#documentation-governance)
+**Referenced by**: [../architecture/overview.md](../architecture/overview.md#cross-references), [../architecture/multi_tenant_saas_mcp_auth_architecture.md](../architecture/multi_tenant_saas_mcp_auth_architecture.md#cross-references), [../architecture/artifact_storage_architecture.md](../architecture/artifact_storage_architecture.md#cross-references), [../reference/mcp_surface.md](../reference/mcp_surface.md#cross-references), [../../DEVELOPMENT_PLAN.md](../../DEVELOPMENT_PLAN.md#documentation-governance)
 
 > **Purpose**: Canonical security rules for `studioMCP`, covering authentication, authorization, tenant isolation, token handling, artifact protection, and public runtime hardening.
 
@@ -19,7 +19,7 @@ Scope boundary:
 
 ## Current Repo Note
 
-The current repository does not yet implement the full multi-tenant auth model described here. This document defines the target security contract that future code must satisfy.
+The current repository now implements the live auth model described here for the simplified login/password delivery path. The kind cluster exposes Keycloak, the BFF, and the MCP server behind the ingress-nginx edge, validates live bearer tokens, and exercises real multi-node auth and session routing through that edge.
 
 ## Trust Boundaries
 
@@ -37,9 +37,10 @@ Every boundary must validate identity explicitly. No boundary may rely on hidden
 
 - Keycloak is the trusted issuer for public authn
 - external identity providers are brokered through Keycloak, not trusted directly
-- external MCP clients use OAuth with PKCE
-- browser login uses redirect-based auth through Keycloak
+- external MCP clients present Keycloak-issued bearer tokens
+- browser login for the current delivery path uses username/password submitted to the BFF over TLS
 - service accounts use confidential client flows with narrow scopes
+- redirect-based OAuth/PKCE is explicitly deferred from the current delivery plan
 
 ## Authorization Rules
 
@@ -53,8 +54,10 @@ Every boundary must validate identity explicitly. No boundary may rely on hidden
 - access tokens must be short-lived
 - refresh tokens must be rotated where supported
 - wrong-audience tokens are rejected
+- if a validated access token omits end-user identity claims such as `sub`, the server may recover them from Keycloak `userinfo` before building auth context
 - tokens received by the MCP server are not forwarded unchanged to downstream APIs
 - downstream API calls use separate server-acquired credentials
+- BFF-held Keycloak tokens remain server-side session state and are never exposed in logs
 
 ## JWKS Integration
 
@@ -63,7 +66,8 @@ Every boundary must validate identity explicitly. No boundary may rely on hidden
 The MCP server must be configured with the Keycloak JWKS endpoint:
 
 ```
-STUDIOMCP_KEYCLOAK_ISSUER=https://auth.example.com/realms/studiomcp
+STUDIOMCP_KEYCLOAK_ISSUER=https://auth.example.com/kc/realms/studiomcp
+STUDIOMCP_KEYCLOAK_INTERNAL_ISSUER=http://keycloak:8080/kc/realms/studiomcp
 STUDIOMCP_KEYCLOAK_AUDIENCE=studiomcp-mcp
 ```
 
@@ -104,9 +108,10 @@ The JWKS endpoint is derived: `{issuer}/protocol/openid-connect/certs`
 ```haskell
 -- Configuration type
 data KeycloakConfig = KeycloakConfig
-  { kcIssuer :: Text       -- e.g., "https://auth.example.com/realms/studiomcp"
-  , kcAudience :: Text     -- e.g., "studiomcp-mcp"
-  , kcJwksCacheTtl :: Int  -- seconds
+  { kcIssuer :: Text               -- e.g., "https://auth.example.com/kc/realms/studiomcp"
+  , kcInternalIssuer :: Maybe Text -- e.g., "http://keycloak:8080/kc/realms/studiomcp"
+  , kcAudience :: Text             -- e.g., "studiomcp-mcp"
+  , kcJwksCacheTtl :: Int          -- seconds
   }
 
 -- JWKS cache
@@ -119,6 +124,8 @@ data JwksCache = JwksCache
 -- Validation result
 validateToken :: KeycloakConfig -> JwksCache -> ByteString -> IO (Either AuthError JwtClaims)
 ```
+
+If a JWT access token omits `sub` or related end-user identity claims after signature, issuer, and audience validation succeed, the implementation may call Keycloak `userinfo` and then continue claim extraction with the recovered subject data.
 
 ## Token Exchange
 
@@ -211,9 +218,15 @@ logInfo msg = do
 
 ## Browser And BFF Rules
 
-- the BFF never asks the browser for a password to relay to Keycloak
+- in the current simplified delivery path, the BFF may accept username/password over TLS
+- the BFF relays credentials only to the Keycloak token endpoint
+- the BFF never persists raw passwords and never writes them to logs, errors, metrics, or audit records
 - browser uploads and downloads prefer short-lived presigned URLs
 - browser sessions and MCP sessions are distinct concerns
+- browser sessions should prefer HTTP-only cookies for interactive use
+- login and refresh responses must expose only browser-safe session summary fields and must not expose session identifiers, access tokens, or refresh tokens
+- `GET /api/v1/session/me` is the browser bootstrap surface for authenticated subject, tenant, and expiry state
+- Bearer session identifiers, if enabled at all, are compatibility/debug credentials and the cookie wins when both are present
 - the BFF may call MCP on behalf of the user, but it must do so through explicit auth rules rather than a hidden shared secret
 
 ## Artifact Rules
@@ -221,6 +234,7 @@ logInfo msg = do
 - the MCP server may not permanently delete media artifacts
 - storage credentials must be tenant-scoped
 - presigned URLs must be short-lived
+- presigned URLs must be rooted at the environment's explicit public object-storage endpoint
 - summaries and manifests must not embed credentials
 - artifact metadata operations must be audited
 - storage retention and destructive cleanup, if they exist at all, must happen outside the MCP capability surface
@@ -248,6 +262,7 @@ Never log:
 - TLS at the public ingress
 - origin validation for browser-relevant remote flows
 - explicit rate limiting and concurrency controls
+- durable local runtime state must live under `./.data/`; `.studiomcp-data` and other ad hoc repo-root durability paths are forbidden
 - strict input validation before tool dispatch
 - redaction of secret material in logs and errors
 - separate admin endpoints from the MCP endpoint

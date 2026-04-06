@@ -21,7 +21,7 @@ import StudioMCP.Config.Types (AppConfig (..))
 import StudioMCP.DAG.Executor
   ( ExecutionReport (..),
     ExecutorAdapters (..),
-    executeSequential,
+    executeParallel,
   )
 import StudioMCP.DAG.Hashing (normalizeSegment)
 import StudioMCP.DAG.Parser (loadDagFile)
@@ -118,7 +118,7 @@ runDagSpecEndToEnd runtimeConfig runIdValue dagSpec = do
     Left failureDetail -> pure (Left failureDetail)
     Right () -> do
       executionResult <-
-        executeSequential
+        executeParallel
           (buildRuntimeAdapters runtimeConfig runIdValue manifestEntriesRef)
           runIdValue
           startedAt
@@ -129,7 +129,7 @@ runDagSpecEndToEnd runtimeConfig runIdValue dagSpec = do
 
 validateEndToEndRuntime :: AppConfig -> IO (Either FailureDetail ())
 validateEndToEndRuntime appConfig = do
-  let AppConfig _ pulsarHttp pulsarBinary minioUrl minioAccess minioSecret = appConfig
+  let AppConfig _ pulsarHttp pulsarBinary minioUrl _ minioAccess minioSecret = appConfig
   successDagResult <- loadValidatedDagFixture "examples/dags/transcode-basic.yaml"
   case successDagResult of
     Left failureDetail -> pure (Left failureDetail)

@@ -11,12 +11,16 @@ global:
   tls:
     enabled: true
     secretName: studiomcp-tls
+  publicBaseUrl: "https://studiomcp.example.com"
+  objectStorage:
+    publicEndpoint: "https://storage.studiomcp.example.com"
   # Explicit null storage class - prevents dynamic provisioning
   # See documents/engineering/k8s_storage.md for storage policy
   storageClass: "studiomcp-manual"
 
 auth:
   enabled: true
+  bffClientSecret: "CHANGE_ME_IN_PRODUCTION"
 
 # MCP server with autoscaling for production
 studiomcp:
@@ -88,7 +92,7 @@ ingress:
   hosts:
     - host: studiomcp.example.com
       paths:
-        - path: /
+        - path: /mcp
           pathType: Prefix
           service: studiomcp
           port: 3000
@@ -96,7 +100,7 @@ ingress:
           pathType: Prefix
           service: bff
           port: 3002
-        - path: /auth
+        - path: /kc
           pathType: Prefix
           service: keycloak
           port: 8080
@@ -109,7 +113,7 @@ ingress:
 secrets:
   external: true
   jwt:
-    jwksUri: "http://studiomcp-keycloak:8080/realms/studiomcp/protocol/openid-connect/certs"
+    jwksUri: "http://studiomcp-keycloak:8080/kc/realms/studiomcp/protocol/openid-connect/certs"
 
 # ============================================================================
 # Third-Party Service Subcharts - Production Configuration

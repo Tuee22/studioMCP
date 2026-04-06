@@ -24,6 +24,7 @@ module StudioMCP.Auth.Middleware
   )
 where
 
+import Control.Applicative ((<|>))
 import Control.Exception (SomeException, try)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base64.URL as B64
@@ -37,6 +38,7 @@ import qualified Data.Text.Encoding as TE
 import Data.Time (getCurrentTime)
 import qualified Data.UUID as UUID
 import qualified Data.UUID.V4 as UUID
+import Data.Aeson (FromJSON (..), eitherDecode, withObject, (.:?))
 import Crypto.Hash.Algorithms (SHA256 (..), SHA384 (..), SHA512 (..))
 import qualified Crypto.PubKey.ECC.ECDSA as ECDSA
 import Crypto.PubKey.ECC.Types
@@ -47,8 +49,17 @@ import Crypto.PubKey.ECC.Types
 import Crypto.PubKey.RSA.PKCS15 qualified as RSA
 import Crypto.PubKey.RSA.Types qualified as RSA
 import Crypto.Number.Serialize (os2ip)
-import Network.HTTP.Client (Manager)
-import Network.Wai (Request, requestHeaders)
+import Network.HTTP.Client
+  ( Manager,
+    Request (requestHeaders),
+    httpLbs,
+    parseRequest,
+    responseBody,
+    responseStatus,
+  )
+import qualified Network.HTTP.Client as HTTPClient
+import Network.HTTP.Types (statusCode)
+import qualified Network.Wai as Wai
 import StudioMCP.Auth.Claims
 import StudioMCP.Auth.Config
 import StudioMCP.Auth.Jwks
@@ -60,6 +71,23 @@ data AuthService = AuthService
     asJwksCache :: JwksCache,
     asHttpManager :: Manager
   }
+
+data UserInfoClaims = UserInfoClaims
+  { uicSub :: Maybe Text,
+    uicTenantId :: Maybe Text,
+    uicEmail :: Maybe Text,
+    uicEmailVerified :: Maybe Bool,
+    uicName :: Maybe Text
+  }
+
+instance FromJSON UserInfoClaims where
+  parseJSON = withObject "UserInfoClaims" $ \obj ->
+    UserInfoClaims
+      <$> obj .:? "sub"
+      <*> obj .:? "tenant_id"
+      <*> obj .:? "email"
+      <*> obj .:? "email_verified"
+      <*> obj .:? "name"
 
 -- | Create a new auth service
 newAuthService :: AuthConfig -> Manager -> IO AuthService
@@ -111,7 +139,7 @@ validateToken service rawToken = do
                               case verifyJwtSignature jwks rawToken header signature of
                                 Left err -> pure (Left err)
                                 Right () ->
-                                  pure $ extractClaims payload
+                                  extractClaimsWithUserInfoFallback service rawToken payload
 
 -- | Authenticate a request and build full auth context
 authenticateRequest ::
@@ -168,9 +196,9 @@ buildAuthContext config claims correlationId = do
     unRole (Role r) = r
 
 -- | Extract bearer token from Authorization header
-extractBearerToken :: Request -> Maybe RawJwt
+extractBearerToken :: Wai.Request -> Maybe RawJwt
 extractBearerToken req =
-  let headers = requestHeaders req
+  let headers = Wai.requestHeaders req
    in case lookup (CI.mk "Authorization") headers of
         Nothing -> Nothing
         Just value ->
@@ -182,7 +210,7 @@ extractBearerToken req =
 -- | Authenticate a WAI request
 authenticateWaiRequest ::
   AuthService ->
-  Request ->
+  Wai.Request ->
   IO (Either AuthError AuthContext)
 authenticateWaiRequest service req = do
   -- Generate correlation ID
@@ -198,6 +226,69 @@ authenticateWaiRequest service req = do
 -- | Generate a correlation ID
 generateCorrelationId :: IO Text
 generateCorrelationId = UUID.toText <$> UUID.nextRandom
+
+extractClaimsWithUserInfoFallback ::
+  AuthService ->
+  RawJwt ->
+  JwtPayload ->
+  IO (Either AuthError JwtClaims)
+extractClaimsWithUserInfoFallback service rawToken payload =
+  case extractClaims payload of
+    Right claims ->
+      pure (Right claims)
+    Left (MissingClaim "sub") -> do
+      userInfoResult <- fetchUserInfoClaims service rawToken
+      case userInfoResult of
+        Left err -> pure (Left err)
+        Right userInfo ->
+          pure $
+            extractClaims $
+              payload
+                { jpSub = jpSub payload <|> uicSub userInfo
+                , jpTenantId = jpTenantId payload <|> uicTenantId userInfo
+                , jpEmail = jpEmail payload <|> uicEmail userInfo
+                , jpEmailVerified = jpEmailVerified payload <|> uicEmailVerified userInfo
+                , jpName = jpName payload <|> uicName userInfo
+                }
+    Left err ->
+      pure (Left err)
+
+fetchUserInfoClaims :: AuthService -> RawJwt -> IO (Either AuthError UserInfoClaims)
+fetchUserInfoClaims service (RawJwt token) = do
+  let endpoint = T.unpack (userinfoEndpoint (acKeycloak (asConfig service)))
+  requestResult <- try (parseRequest endpoint) :: IO (Either SomeException HTTPClient.Request)
+  case requestResult of
+    Left err ->
+      pure $ Left $ InternalAuthError ("Failed to build Keycloak userinfo request: " <> T.pack (show err))
+    Right req -> do
+      let request =
+            req
+              { requestHeaders =
+                  [ (CI.mk "Authorization", "Bearer " <> TE.encodeUtf8 token)
+                  ]
+              }
+      responseResult <- try (httpLbs request (asHttpManager service))
+      case responseResult of
+        Left (err :: SomeException) ->
+          pure $ Left $ InternalAuthError ("Keycloak userinfo request failed: " <> T.pack (show err))
+        Right response ->
+          if statusCode (responseStatus response) /= 200
+            then
+              pure $
+                Left $
+                  InternalAuthError
+                    ( "Keycloak userinfo endpoint returned HTTP "
+                        <> T.pack (show (statusCode (responseStatus response)))
+                    )
+            else
+              case eitherDecode (responseBody response) of
+                Left err ->
+                  pure $
+                    Left $
+                      InternalAuthError
+                        ("Failed to decode Keycloak userinfo response: " <> T.pack err)
+                Right userInfo ->
+                  pure (Right userInfo)
 
 verifyJwtSignature ::
   JwkSet ->
@@ -356,7 +447,7 @@ devBypassAuth subjectIdText tenantIdText =
   where
     devClaims subId tenId =
       JwtClaims
-        { jcIssuer = "http://localhost:8080/realms/studiomcp",
+        { jcIssuer = "http://localhost:8080/kc/realms/studiomcp",
           jcSubject = SubjectId subId,
           jcAudience = ["studiomcp-mcp"],
           jcExpiration = read "2099-12-31 23:59:59 UTC",

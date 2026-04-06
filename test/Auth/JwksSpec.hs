@@ -151,7 +151,7 @@ spec = do
 
   describe "validateTokenIssuer" $ do
     it "accepts matching issuer" $ do
-      let payload = testPayload { jpIss = Just "http://localhost:8080/realms/studiomcp" }
+      let payload = testPayload { jpIss = Just "http://localhost:8080/kc/realms/studiomcp" }
       validateTokenIssuer defaultKeycloakConfig payload `shouldBe` Right ()
 
     it "rejects mismatched issuer" $ do
@@ -200,7 +200,7 @@ utcToPosix t = round (realToFrac (diffUTCTime t epoch) :: Double)
 -- Test payload helper
 testPayload :: JwtPayload
 testPayload = JwtPayload
-  { jpIss = Just "http://localhost:8080/realms/studiomcp"
+  { jpIss = Just "http://localhost:8080/kc/realms/studiomcp"
   , jpSub = Just "test-user"
   , jpAud = Just (String "studiomcp-mcp")
   , jpExp = Just 1735689600

@@ -3,7 +3,7 @@
 
 **Status**: Authoritative source
 **Supersedes**: N/A
-**Referenced by**: [../architecture/overview.md](../architecture/overview.md#canonical-follow-on-documents), [../architecture/mcp_protocol_architecture.md](../architecture/mcp_protocol_architecture.md#cross-references), [../architecture/multi_tenant_saas_mcp_auth_architecture.md](../architecture/multi_tenant_saas_mcp_auth_architecture.md#cross-references), [../engineering/security_model.md](../engineering/security_model.md#cross-references), [../../STUDIOMCP_DEVELOPMENT_PLAN.md](../../STUDIOMCP_DEVELOPMENT_PLAN.md#documentation-governance)
+**Referenced by**: [../architecture/overview.md](../architecture/overview.md#canonical-follow-on-documents), [../architecture/mcp_protocol_architecture.md](../architecture/mcp_protocol_architecture.md#cross-references), [../architecture/multi_tenant_saas_mcp_auth_architecture.md](../architecture/multi_tenant_saas_mcp_auth_architecture.md#cross-references), [../engineering/security_model.md](../engineering/security_model.md#cross-references), [../../DEVELOPMENT_PLAN.md](../../DEVELOPMENT_PLAN.md#documentation-governance)
 
 > **Purpose**: Canonical engineering rules for horizontally scaling remote MCP listener nodes without sticky sessions.
 
@@ -28,7 +28,14 @@ This design introduces Redis as a critical dependency. Network latency is added 
 
 ## Current Repo Note
 
-The current repository does not yet implement the remote session architecture described here. This document defines the target scaling contract.
+The current repository now implements the remote-session contract described here:
+
+- Redis-backed MCP session persistence is wired into server mode
+- authenticated MCP initialize now persists subject and tenant identity into session metadata
+- resource subscriptions and resumable cursor metadata are persisted through the shared session store
+- shared session visibility and lock semantics are validated directly
+- live horizontal-scale validation confirms one MCP session survives repeated requests routed across multiple listener pods without sticky ingress
+- live validation also exercises subscription/cursor resumption, one-listener rollout survival, and deterministic Redis-outage failure/recovery behavior
 
 ## Non-Sticky Requirement
 

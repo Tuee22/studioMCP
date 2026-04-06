@@ -3,7 +3,7 @@
 
 **Status**: Authoritative source
 **Supersedes**: legacy `documents/architecture/server-mode.md`
-**Referenced by**: [overview.md](overview.md#canonical-follow-on-documents), [../README.md](../README.md#documentation-suite), [../reference/mcp_surface.md](../reference/mcp_surface.md#cross-references), [../../STUDIOMCP_DEVELOPMENT_PLAN.md](../../STUDIOMCP_DEVELOPMENT_PLAN.md#documentation-governance)
+**Referenced by**: [overview.md](overview.md#canonical-follow-on-documents), [../README.md](../README.md#documentation-suite), [../reference/mcp_surface.md](../reference/mcp_surface.md#cross-references), [../../DEVELOPMENT_PLAN.md](../../DEVELOPMENT_PLAN.md#documentation-governance)
 
 > **Purpose**: Canonical definition of the authoritative Haskell server runtime in `studioMCP`, including its responsibilities as an MCP listener tier over the DAG execution system.
 
@@ -22,11 +22,12 @@ The current `studiomcp server` binary exposes the runtime-backed MCP HTTP surfac
 | Feature | Status |
 |---------|--------|
 | HTTP server runtime | ✅ Implemented |
+| Stdio server runtime | ✅ Implemented |
 | MCP `/mcp` endpoint | ✅ Implemented |
 | SSE bootstrap | ✅ Implemented |
 | Auth middleware (Keycloak/JWKS) | ✅ Implemented |
 | Session externalization (Redis) | ✅ Implemented |
-| BFF command | 📋 Planned CLI ergonomic follow-up |
+| Resource subscription resumption metadata | ✅ Implemented |
 
 This document describes the authoritative server mode as implemented today.
 

@@ -144,7 +144,7 @@ handleHealth workerEnv respond = do
 
 createWorkerEnv :: AppConfig -> IO WorkerEnv
 createWorkerEnv appConfig = do
-  let AppConfig _ pulsarHttp pulsarBinary minioUrl minioAccess minioSecret = appConfig
+  let AppConfig _ pulsarHttp pulsarBinary minioUrl _ minioAccess minioSecret = appConfig
   manager <- newManager defaultManagerSettings
   pure
     WorkerEnv

@@ -27,6 +27,10 @@ spec = do
       config <- loadAppConfig
       T.isInfixOf "minio" (minioEndpoint config) `shouldBe` True
 
+    it "defaults the public minio endpoint to the internal endpoint" $ do
+      config <- loadAppConfig
+      minioPublicEndpoint config `shouldBe` minioEndpoint config
+
     it "has default minio credentials" $ do
       config <- loadAppConfig
       T.null (minioAccessKey config) `shouldBe` False

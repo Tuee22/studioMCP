@@ -5,6 +5,7 @@ module DAG.ExecutorSpec
   )
 where
 
+import Control.Concurrent (threadDelay)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
@@ -12,6 +13,7 @@ import Data.Time (UTCTime (UTCTime), fromGregorian, secondsToDiffTime)
 import StudioMCP.DAG.Executor
   ( ExecutionReport (..),
     ExecutorAdapters (..),
+    executeParallel,
     executeSequential,
   )
 import StudioMCP.DAG.Summary
@@ -39,7 +41,7 @@ import StudioMCP.Result.Failure
 import Test.Hspec (Spec, describe, expectationFailure, it, shouldBe)
 
 spec :: Spec
-spec =
+spec = do
   describe "executeSequential" $ do
     it "runs a simple DAG in topological order and assembles a successful summary" $ do
       observedOutcomesRef <- newIORef []
@@ -74,6 +76,23 @@ spec =
           fmap failureCode (outcomeFailure summaryOutcome) `shouldBe` Just "upstream-dependency-failed"
           observedOutcomes <- readIORef observedOutcomesRef
           map outcomeStatus observedOutcomes `shouldBe` [NodeSucceeded, NodeFailed, NodeFailed]
+
+  describe "executeParallel" $ do
+    it "runs independent nodes in the same batch before downstream aggregation" $ do
+      observedOutcomesRef <- newIORef []
+      observedSummaryRef <- newIORef Nothing
+      branchCountRef <- newIORef (0 :: Int)
+      result <- executeParallel (parallelAdapters observedOutcomesRef observedSummaryRef branchCountRef) (RunId "run-parallel") fixedTime parallelDag
+      case result of
+        Left failureDetail ->
+          expectationFailure ("expected parallel success but got failure: " <> show failureDetail)
+        Right executionReport -> do
+          reportOrder executionReport `shouldBe` [NodeId "ingest", NodeId "branch-b", NodeId "branch-c", NodeId "summary"]
+          summaryStatus (reportSummary executionReport) `shouldBe` RunSucceeded
+          observedOutcomes <- readIORef observedOutcomesRef
+          map outcomeNodeId observedOutcomes `shouldBe` [NodeId "ingest", NodeId "branch-b", NodeId "branch-c", NodeId "summary"]
+          branchCount <- readIORef branchCountRef
+          branchCount `shouldBe` 2
 
 successAdapters :: IORef [NodeOutcome] -> IORef (Maybe Summary) -> ExecutorAdapters
 successAdapters observedOutcomesRef observedSummaryRef =
@@ -138,3 +157,51 @@ joinInputs :: [Text] -> Text
 joinInputs [] = ""
 joinInputs [value] = value
 joinInputs (value : remaining) = value <> "+" <> joinInputs remaining
+
+parallelAdapters :: IORef [NodeOutcome] -> IORef (Maybe Summary) -> IORef Int -> ExecutorAdapters
+parallelAdapters observedOutcomesRef observedSummaryRef branchCountRef =
+  ExecutorAdapters
+    { executePureNode = \nodeSpec _ -> pure (Right ("pure://" <> unNodeId (nodeId nodeSpec))),
+      executeBoundaryNode = \nodeSpec inputReferences -> do
+        modifyIORef' branchCountRef (+ 1)
+        peerReady <- waitForOtherBranch branchCountRef 50
+        if peerReady
+          then pure (Right ("boundary://" <> unNodeId (nodeId nodeSpec) <> "/" <> joinInputs inputReferences))
+          else
+            pure
+              ( Left
+                  FailureDetail
+                    { failureCategory = ToolProcessFailure,
+                      failureCode = "parallel-branch-timeout",
+                      failureMessage = "Independent branch did not overlap with its peer.",
+                      failureRetryable = False,
+                      failureContext = Map.empty
+                    }
+              ),
+      observeNodeOutcome = \nodeOutcome -> modifyIORef' observedOutcomesRef (<> [nodeOutcome]),
+      observeSummary = writeIORef observedSummaryRef . Just
+    }
+
+parallelDag :: DagSpec
+parallelDag =
+  DagSpec
+    { dagName = "executor-parallel-unit",
+      dagDescription = Just "Deterministic parallel executor unit-test DAG.",
+      dagNodes =
+        [ mkNode "ingest" PureNode [] "text/plain",
+          mkNode "branch-b" BoundaryNode [NodeId "ingest"] "audio/wav",
+          mkNode "branch-c" BoundaryNode [NodeId "ingest"] "audio/wav",
+          mkNode "summary" SummaryNode [NodeId "branch-b", NodeId "branch-c"] "summary/run"
+        ]
+    }
+
+waitForOtherBranch :: IORef Int -> Int -> IO Bool
+waitForOtherBranch branchCountRef attemptsRemaining
+  | attemptsRemaining <= 0 = pure False
+  | otherwise = do
+      branchCount <- readIORef branchCountRef
+      if branchCount >= 2
+        then pure True
+        else do
+          threadDelay 10000
+          waitForOtherBranch branchCountRef (attemptsRemaining - 1)

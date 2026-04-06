@@ -2,6 +2,7 @@
 
 module StudioMCP.MCP.Server
   ( runServer,
+    runServerStdio,
   )
 where
 
@@ -58,6 +59,7 @@ import StudioMCP.MCP.Core
     defaultServerConfig,
     handleMessageWithAuth,
     newMcpServerWithCatalogs,
+    runMcpServer,
   )
 import StudioMCP.MCP.Handlers
   ( ServerEnv (..),
@@ -67,10 +69,11 @@ import StudioMCP.MCP.Handlers
   )
 import StudioMCP.MCP.Prompts (newPromptCatalog)
 import StudioMCP.MCP.Protocol.StateMachine (ProtocolState (ShuttingDown))
-import StudioMCP.MCP.Session.Store (storeDeleteSession)
+import StudioMCP.MCP.Session.Store (SessionStoreError (..), storeDeleteSession)
 import StudioMCP.MCP.Session.Types (Session (sessionId), SessionData (..), SessionId (..))
-import StudioMCP.MCP.Session.RedisStore (readSessionData, writeSessionData)
+import StudioMCP.MCP.Session.RedisStore (readSessionData, testConnection, writeSessionData)
 import StudioMCP.MCP.Transport.Http (getMcpSessionId)
+import StudioMCP.MCP.Transport.Stdio (createStdioTransport, defaultStdioConfig, runStdioTransport)
 import qualified StudioMCP.Observability.McpMetrics as McpMetrics
 import StudioMCP.Util.Logging (configureProcessLogging)
 import System.Environment (lookupEnv)
@@ -78,14 +81,29 @@ import System.Environment (lookupEnv)
 runServer :: IO ()
 runServer = do
   configureProcessLogging
+  (serverEnv, mcpServer, authConfig, authService) <- buildRuntime
+  port <- resolveServerPort
+  putStrLn ("studioMCP server listening on 0.0.0.0:" <> show port)
+  putStrLn ("Auth enabled: " <> show (acEnabled authConfig))
+  runSettings
+    (setHost "0.0.0.0" (setPort port (setTimeout 0 defaultSettings)))
+    (application serverEnv mcpServer authConfig authService)
+
+runServerStdio :: IO ()
+runServerStdio = do
+  configureProcessLogging
+  (_, mcpServer, _, _) <- buildRuntime
+  stdioTransport <- createStdioTransport defaultStdioConfig
+  putStrLn "studioMCP server listening on stdio"
+  runMcpServer mcpServer (runStdioTransport stdioTransport)
+
+buildRuntime :: IO (ServerEnv, McpServer, AuthConfig, AuthService)
+buildRuntime = do
   appConfig <- loadAppConfig
   serverEnv <- createServerEnv appConfig
-
-  -- Initialize auth service
   authConfig <- loadAuthConfigFromEnv
   httpManager <- newManager defaultManagerSettings
   authService <- newAuthService authConfig httpManager
-
   promptCatalog <- newPromptCatalog
   mcpServer <-
     newMcpServerWithCatalogs
@@ -95,17 +113,14 @@ runServer = do
       promptCatalog
       (Just (serverRateLimiter serverEnv))
       (Just (serverMcpMetrics serverEnv))
-  port <- resolveServerPort
-  putStrLn ("studioMCP server listening on 0.0.0.0:" <> show port)
-  putStrLn ("Auth enabled: " <> show (acEnabled authConfig))
-  runSettings
-    (setHost "0.0.0.0" (setPort port (setTimeout 0 defaultSettings)))
-    (application serverEnv mcpServer authConfig authService)
+      (Just (serverSessionStore serverEnv))
+  pure (serverEnv, mcpServer, authConfig, authService)
 
 application :: ServerEnv -> McpServer -> AuthConfig -> AuthService -> Application
 application serverEnv mcpServer authConfig authService request respond =
   case pathInfo request of
-    -- MCP JSON-RPC endpoint (new in Phase 13) - requires auth in production
+    -- MCP JSON-RPC endpoint - accessible at / or /mcp (for ingress prefix stripping)
+    [] -> handleMcpEndpoint serverEnv mcpServer authConfig authService request respond
     ["mcp"] -> handleMcpEndpoint serverEnv mcpServer authConfig authService request respond
     -- Admin endpoints (no auth required for health/metrics)
     ["healthz"] | requestMethod request == methodGet ->
@@ -169,8 +184,8 @@ handleAuthenticatedMcpRequest serverEnv mcpServer authContext request respond =
       scopedServer <- newRequestScopedServer mcpServer
       hydrateResult <- hydrateRequestSession serverEnv scopedServer request
       case hydrateResult of
-        Left errText ->
-          respond (jsonResponse status400 (object ["error" .= errText]))
+        Left (errStatus, errText) ->
+          respond (jsonResponse errStatus (object ["error" .= errText]))
         Right () -> do
           -- Standard MCP request/response
           requestBody <- strictRequestBody request
@@ -192,8 +207,8 @@ handleAuthenticatedMcpRequest serverEnv mcpServer authContext request respond =
               maybeResponse <- handleMessageWithAuth scopedServer (Just authContext) jsonValue
               persistResult <- persistRequestSession serverEnv scopedServer
               case persistResult of
-                Left errText ->
-                  respond (jsonResponse status400 (object ["error" .= errText]))
+                Left (errStatus, errText) ->
+                  respond (jsonResponse errStatus (object ["error" .= errText]))
                 Right maybeSessionId ->
                   case maybeResponse of
                     Just respValue ->
@@ -209,8 +224,8 @@ handleAuthenticatedMcpRequest serverEnv mcpServer authContext request respond =
       scopedServer <- newRequestScopedServer mcpServer
       hydrateResult <- hydrateRequestSession serverEnv scopedServer request
       case hydrateResult of
-        Left errText ->
-          respond (jsonResponse status400 (object ["error" .= errText]))
+        Left (errStatus, errText) ->
+          respond (jsonResponse errStatus (object ["error" .= errText]))
         Right () -> do
           sessionId <- resolveResponseSessionId scopedServer request
           let bootstrap =
@@ -333,19 +348,26 @@ newRequestScopedServer mcpServer =
     (msPromptCatalog mcpServer)
     (msRateLimiter mcpServer)
     (msMetrics mcpServer)
+    (msSessionStore mcpServer)
 
-hydrateRequestSession :: ServerEnv -> McpServer -> Request -> IO (Either Text ())
+hydrateRequestSession :: ServerEnv -> McpServer -> Request -> IO (Either (Status, Text) ())
 hydrateRequestSession serverEnv scopedServer request =
   case getMcpSessionId request of
     Nothing -> pure (Right ())
     Just sidText -> do
-      sessionDataResult <- readSessionData (serverSessionStore serverEnv) (SessionId sidText)
-      case sessionDataResult of
-        Left _ -> pure (Left "Unknown or expired MCP session")
-        Right sessionData ->
-          persistScopedState scopedServer (sdSession sessionData) (sdProtocolState sessionData)
+      -- First verify Redis is reachable with an explicit ping, to detect outages
+      -- that would otherwise hang on session reads
+      pingResult <- testConnection (serverSessionStore serverEnv)
+      case pingResult of
+        Left sessionErr -> pure (Left (sessionStoreHttpError sessionErr))
+        Right () -> do
+          sessionDataResult <- readSessionData (serverSessionStore serverEnv) (SessionId sidText)
+          case sessionDataResult of
+            Left sessionErr -> pure (Left (sessionStoreHttpError sessionErr))
+            Right sessionData ->
+              persistScopedState scopedServer (sdSession sessionData) (sdProtocolState sessionData)
 
-persistRequestSession :: ServerEnv -> McpServer -> IO (Either Text (Maybe Text))
+persistRequestSession :: ServerEnv -> McpServer -> IO (Either (Status, Text) (Maybe Text))
 persistRequestSession serverEnv scopedServer = do
   currentSession <- readTVarIO (msSession scopedServer)
   currentProtocolState <- readTVarIO (msProtocolState scopedServer)
@@ -360,10 +382,23 @@ persistRequestSession serverEnv scopedServer = do
       writeResult <- writeSessionData (serverSessionStore serverEnv) sessionData
       pure $
         case writeResult of
-          Left _ -> Left "Failed to persist MCP session state"
+          Left sessionErr -> Left (sessionStoreHttpError sessionErr)
           Right () -> Right (Just (currentSessionIdText sessionValue))
 
-persistScopedState :: McpServer -> Session -> ProtocolState -> IO (Either Text ())
+sessionStoreHttpError :: SessionStoreError -> (Status, Text)
+sessionStoreHttpError sessionErr =
+  case sessionErr of
+    SessionNotFound _ -> (status400, "Unknown or expired MCP session")
+    StoreConnectionError _ -> (status503, "MCP session store unavailable")
+    StoreUnavailable _ -> (status503, "MCP session store unavailable")
+    StoreTimeoutError _ -> (status503, "MCP session store timed out")
+    SessionSerializationError _ -> (status503, "Failed to persist MCP session state")
+    SessionDeserializationError _ -> (status503, "Failed to read MCP session state")
+    LockAcquisitionFailed _ -> (status503, "Failed to coordinate MCP session state")
+    LockNotHeld _ -> (status503, "Failed to coordinate MCP session state")
+    SessionAlreadyExists _ -> (status400, "MCP session already exists")
+
+persistScopedState :: McpServer -> Session -> ProtocolState -> IO (Either (Status, Text) ())
 persistScopedState scopedServer sessionValue protocolState = do
   atomically $ do
     writeTVar (msSession scopedServer) (Just sessionValue)

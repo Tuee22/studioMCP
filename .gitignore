@@ -47,6 +47,7 @@ docker/.env
 docker-compose.override.yaml
 .docker/
 .data/
+.studiomcp-data/
 .minio/
 .pulsar/
 tmp/

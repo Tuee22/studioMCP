@@ -38,6 +38,11 @@ spec =
       _ <- runOuterCliExpectSuccess ["validate", "cluster"]
       pure ()
 
+    it "validates Keycloak bootstrap and connectivity through the cluster edge" $ do
+      ensureOuterEnvironment
+      output <- runOuterCliExpectSuccess ["validate", "keycloak"]
+      output `shouldContain` "validate keycloak: PASS"
+
     it "runs a real successful and failing DAG end to end through the outer-container CLI" $ do
       ensureOuterEnvironment
       output <- runOuterCliExpectSuccess ["validate", "e2e"]
@@ -72,6 +77,11 @@ spec =
       ensureOuterEnvironment
       output <- runOuterCliExpectSuccess ["validate", "mcp-horizontal-scale"]
       output `shouldContain` "validate horizontal-scale: PASS"
+
+    it "exercises MCP auth through the cluster edge" $ do
+      ensureOuterEnvironment
+      output <- runOuterCliExpectSuccess ["validate", "mcp-auth"]
+      output `shouldContain` "validate mcp-auth: PASS"
 
     it "exercises MCP conformance through the outer-container CLI" $ do
       ensureOuterEnvironment

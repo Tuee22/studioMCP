@@ -13,7 +13,7 @@ import StudioMCP.MCP.Handlers
     createServerEnv,
   )
 import StudioMCP.Util.Logging (configureProcessLogging)
-import StudioMCP.Web.BFF (defaultBFFConfig, newBFFServiceWithRuntime)
+import StudioMCP.Web.BFF (loadBFFConfigFromEnv, newBFFServiceWithRuntime)
 import StudioMCP.Web.Handlers (bffApplication, newBFFContextWithService)
 import System.Environment (lookupEnv)
 
@@ -22,15 +22,16 @@ runBffMode = do
   configureProcessLogging
   port <- resolveBFFPort
   appConfig <- loadAppConfig
+  bffConfig <- loadBFFConfigFromEnv
   serverEnv <- createServerEnv appConfig
   referenceModelUrl <- maybe "http://127.0.0.1:11434/api/generate" id <$> lookupEnv "STUDIO_MCP_REFERENCE_MODEL_URL"
   service <-
     newBFFServiceWithRuntime
-      defaultBFFConfig
+      bffConfig
       (serverToolCatalog serverEnv)
       (serverTenantStorage serverEnv)
       (ReferenceModelConfig referenceModelUrl)
-  let ctx = newBFFContextWithService defaultBFFConfig service
+  let ctx = newBFFContextWithService bffConfig service
   putStrLn ("studioMCP BFF listening on 0.0.0.0:" <> show port)
   runSettings
     (setHost "0.0.0.0" (setPort port defaultSettings))

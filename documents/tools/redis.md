@@ -65,7 +65,7 @@ HA deployment is required in all environments including local kind development. 
 
 ## Current Maturity
 
-The repo includes Redis in the deployment topology for session storage. Current implementation status is tracked in [../../STUDIOMCP_DEVELOPMENT_PLAN.md](../../STUDIOMCP_DEVELOPMENT_PLAN.md#current-repo-assessment-against-this-plan).
+The repo includes Redis in the deployment topology for session storage. Current implementation status is tracked in [../../DEVELOPMENT_PLAN.md](../../DEVELOPMENT_PLAN.md#current-repo-assessment-against-this-plan).
 
 ## Storage Policy
 

@@ -10,12 +10,23 @@ global:
   tls:
     enabled: false
     secretName: studiomcp-tls
+  # Optional explicit public control-plane base URL override.
+  # When set, this becomes the external contract for /mcp, /api, and /kc.
+  publicBaseUrl: ""
+  objectStorage:
+    # Optional explicit public object-storage endpoint used in presigned URLs.
+    # Environment overlays should set this for any browser-facing deployment.
+    publicEndpoint: ""
   # Explicit null storage class - prevents dynamic provisioning
   # See documents/engineering/k8s_storage.md for storage policy
   storageClass: "studiomcp-manual"
 
 auth:
   enabled: false
+  realm: studiomcp
+  audience: studiomcp-mcp
+  bffClientId: studiomcp-bff
+  bffClientSecret: studiomcp-bff-dev-secret
 
 # Main studioMCP MCP server
 studiomcp:
@@ -124,8 +135,9 @@ bff:
 # Reference LLM service (optional)
 llmReference:
   enabled: false
+  mock: false  # Use mock server instead of real LLM (for local dev)
   image: ollama/ollama:latest
-  port: 11434
+  port: 8080  # Mock server uses 8080
   resources:
     requests:
       cpu: 500m
@@ -134,7 +146,7 @@ llmReference:
       cpu: 4000m
       memory: 8Gi
 
-# Ingress configuration
+# Ingress configuration for MCP server and BFF
 ingress:
   enabled: false
   className: nginx
@@ -142,7 +154,7 @@ ingress:
   hosts:
     - host: studiomcp.local
       paths:
-        - path: /
+        - path: /mcp
           pathType: Prefix
           service: studiomcp
           port: 3000
@@ -150,10 +162,22 @@ ingress:
           pathType: Prefix
           service: bff
           port: 3002
-        - path: /auth
+  tls: []
+
+# Separate ingress for Keycloak (requires different path rewrite rules)
+# Keycloak is configured with httpRelativePath=/kc, so the /kc prefix
+# must be preserved when forwarding to the backend.
+keycloakIngress:
+  enabled: false
+  className: nginx
+  annotations: {}
+  hosts:
+    - host: studiomcp.local
+      paths:
+        - path: /kc
           pathType: Prefix
           service: keycloak
-          port: 8080
+          port: 80
   tls: []
 
 # Secrets management
@@ -177,7 +201,7 @@ secrets:
 # ============================================================================
 # Third-Party Service Subcharts
 # All deployed via HA Helm charts per Third-Party Service Deployment Doctrine
-# See documents/engineering/k8s_storage.md and STUDIOMCP_DEVELOPMENT_PLAN.md
+# See documents/engineering/k8s_storage.md and DEVELOPMENT_PLAN.md
 # ============================================================================
 
 # MinIO object storage (minio/minio official chart)
@@ -313,6 +337,19 @@ redis:
 keycloak:
   enabled: true
   replicaCount: 2
+  realm: studiomcp
+  httpPort: 8080
+  httpRelativePath: /kc
+  customReadinessProbe:
+    httpGet:
+      path: /kc/realms/master
+      port: http
+      scheme: HTTP
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 1
+    failureThreshold: 3
+    successThreshold: 1
   image:
     registry: docker.io
     repository: bitnamilegacy/keycloak

@@ -52,7 +52,7 @@ HA deployment is the preferred mode where possible. See [../engineering/k8s_stor
 
 ## Current Maturity
 
-The repo now includes a real Haskell MinIO adapter that uses the native CLI workflow to round-trip memo objects, manifests, and summaries through the deployed MinIO cluster. `studiomcp validate minio` exercises that live path and asserts the missing-object failure contract. The deployment now uses the official MinIO Helm chart in HA mode. Current implementation status is tracked in [../../STUDIOMCP_DEVELOPMENT_PLAN.md](../../STUDIOMCP_DEVELOPMENT_PLAN.md#current-repo-assessment-against-this-plan).
+The repo now includes a real Haskell MinIO adapter that uses the native CLI workflow to round-trip memo objects, manifests, and summaries through the deployed MinIO cluster. `studiomcp validate minio` exercises that live path and asserts the missing-object failure contract. The deployment now uses the official MinIO Helm chart in HA mode. Current implementation status is tracked in [../../DEVELOPMENT_PLAN.md](../../DEVELOPMENT_PLAN.md#current-repo-assessment-against-this-plan).
 
 ## Storage Policy
 

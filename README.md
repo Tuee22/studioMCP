@@ -1,7 +1,7 @@
 # studioMCP
 
 ## Project Vision
-`studioMCP` is a Haskell-first MCP platform for DAG-based studio workflows. The repository already contains the typed execution foundations, but the current public server surface is still being migrated from a custom DAG HTTP API to a standards-compliant MCP server.
+`studioMCP` is a Haskell-first MCP platform for DAG-based studio workflows. The repository already contains the typed execution foundations and a live MCP surface, but the auth topology, browser product surface, and local edge deployment story are still being completed.
 
 ## Why This Could Replace Large Parts of DAW / Photo / Video Toolchains
 Most studio workflows are long chains of deterministic transforms wrapped around a smaller number of impure boundaries. `studioMCP` treats those chains as typed DAGs instead of opaque editor sessions. That creates room for repeatability, memoization, better summaries, and safer automation.
@@ -51,7 +51,7 @@ app/               executable entrypoints
 src/               Haskell library modules
 test/              unit and integration tests
 docker/            Dockerfile and container assets
-docker-compose.yaml  outer development-container launcher
+docker-compose.yaml  outer development container launcher
 chart/             Helm deployment source of truth
 kind/              local kind cluster configuration
 skaffold.yaml      Kubernetes-native development loop config
@@ -88,7 +88,7 @@ Supported operational commands are expected to live in the Haskell `studiomcp` C
 The repo uses one multi-stage Dockerfile at [docker/Dockerfile](/Users/matthewnowak/studioMCP/docker/Dockerfile). One stage is the outer development container with the Haskell toolchain and cluster-management tools. Another stage builds the runtime image for the actual MCP server, which is intended to run only inside the kind cluster.
 
 ## Kubernetes-Native Development
-The repo is Kubernetes-forward. Helm under [chart/](/Users/matthewnowak/studioMCP/chart) defines service topology, [skaffold.yaml](/Users/matthewnowak/studioMCP/skaffold.yaml) remains part of the image-build and deploy toolchain, and [kind/kind_config.yaml](/Users/matthewnowak/studioMCP/kind/kind_config.yaml) defines the local cluster target. Compose at [docker-compose.yaml](/Users/matthewnowak/studioMCP/docker-compose.yaml) is intended to launch the outer development container and bind host `./.data/` plus the active Docker context into it. The canonical policies are [documents/engineering/k8s_native_dev_policy.md](/Users/matthewnowak/studioMCP/documents/engineering/k8s_native_dev_policy.md), [documents/engineering/docker_policy.md](/Users/matthewnowak/studioMCP/documents/engineering/docker_policy.md), and [documents/engineering/k8s_storage.md](/Users/matthewnowak/studioMCP/documents/engineering/k8s_storage.md).
+The repo is Kubernetes-forward. Helm under [chart/](/Users/matthewnowak/studioMCP/chart) defines service topology, [skaffold.yaml](/Users/matthewnowak/studioMCP/skaffold.yaml) remains part of the image-build and deploy toolchain, and [kind/kind_config.yaml](/Users/matthewnowak/studioMCP/kind/kind_config.yaml) defines the local cluster target. Compose at [docker-compose.yaml](/Users/matthewnowak/studioMCP/docker-compose.yaml) launches only the outer `studiomcp-env` development container; all application services (MCP server, BFF, Keycloak, Redis, MinIO, Pulsar, PostgreSQL-HA) run inside the kind cluster via Helm. The control plane is exposed through ingress-nginx at `http://localhost:8081` with `/mcp`, `/api`, and `/kc`. The canonical policies are [documents/engineering/k8s_native_dev_policy.md](/Users/matthewnowak/studioMCP/documents/engineering/k8s_native_dev_policy.md), [documents/engineering/docker_policy.md](/Users/matthewnowak/studioMCP/documents/engineering/docker_policy.md), and [documents/engineering/k8s_storage.md](/Users/matthewnowak/studioMCP/documents/engineering/k8s_storage.md).
 
 ## FOOS Ecosystem Survey
 The project leans on existing tools instead of rebuilding them:
@@ -102,7 +102,7 @@ The project leans on existing tools instead of rebuilding them:
 - a local LLM host such as Ollama or `llama.cpp` for inference mode
 
 ## Development Roadmap
-The implementation plan lives in [STUDIOMCP_DEVELOPMENT_PLAN.md](/Users/matthewnowak/studioMCP/STUDIOMCP_DEVELOPMENT_PLAN.md). The current phase plan is complete through Phase 17. Remaining work now belongs to the next planning pass rather than to unfinished work inside the current roadmap.
+The implementation plan lives in [DEVELOPMENT_PLAN.md](/Users/matthewnowak/studioMCP/DEVELOPMENT_PLAN.md). That file is the authoritative phase tracker. The current scoped roadmap is an 8-phase plan centered on Keycloak-backed login/password auth, an nginx-fronted topology, explicit control-plane and data-plane contracts, and validation for each phase. Phases 1 through 3 are complete; phases 4 through 8 are in progress with implementation complete but validation blocked by a kind-cluster Keycloak 404 issue. Redirect-based OAuth/PKCE remains intentionally deferred.
 
 ## Status / Current Maturity
 Current state:
@@ -111,14 +111,14 @@ Current state:
 - The `documents/` suite now has an explicit standards SSoT and index.
 - Kubernetes-forward repo scaffolding is in place: one Dockerfile, one Helm chart, Skaffold config, and kind config.
 - The no-scripts policy, outer development-container model, and local storage doctrine are now documented and materially embodied in code.
-- All phases in the current development plan are complete through Phase 17.
-- The `studiomcp` CLI now includes native `dag validate ...`, `dag validate-fixtures`, `validate docs`, `validate cluster`, `validate pulsar`, `validate minio`, `validate boundary`, `validate ffmpeg-adapter`, `validate executor`, `validate e2e`, `validate worker`, `validate mcp`, `validate inference`, `validate observability`, `cluster up`, `cluster down`, `cluster status`, `cluster deploy ...`, and `cluster storage reconcile` commands.
-- `docker-compose.yaml` now launches `studiomcp-env` as the outer development container instead of a local sidecar topology.
+- The current roadmap is in late-stage closure rather than fully done: the runtime, auth, and local edge foundations are implemented, while contract hardening, cluster parity, cluster bootstrap automation, and final regression closure remain open in the plan.
+- The `studiomcp` CLI now includes native `dag validate ...`, `dag validate-fixtures`, `validate docs`, `validate cluster`, `validate pulsar`, `validate minio`, `validate boundary`, `validate ffmpeg-adapter`, `validate executor`, `validate e2e`, `validate worker`, `validate inference`, `validate mcp-stdio`, `validate mcp-http`, `validate mcp-conformance`, `validate keycloak`, `validate mcp-auth`, `validate session-store`, `validate horizontal-scale`, `validate web-bff`, and `cluster ...` commands, plus `studiomcp bff`.
+- `docker-compose.yaml` now launches only the outer `studiomcp-env` development container; all application services run in the kind cluster.
 - A real Haskell MinIO adapter now round-trips memo objects, manifests, and summaries through the deployed MinIO sidecar and maps missing-object lookups to a stable storage failure contract.
 - A real boundary runtime now executes deterministic helper processes with stdout/stderr capture, non-zero exit projection, and enforced timeout failure mapping, and `studiomcp validate boundary` exercises that contract.
 - A real FFmpeg adapter now runs on top of the boundary runtime, seeds a deterministic WAV fixture under `examples/assets/audio/`, validates one successful transcode, and asserts structured failure output for a missing input.
-- The server, inference, and worker entrypoints are all real HTTP runtimes with live validation coverage. The current `server` runtime still exposes a legacy custom DAG HTTP surface and is planned to migrate to a proper MCP protocol surface under the revised development plan.
-- Verified commands now include `cabal build all`, `cabal test unit-tests`, `cabal test integration-tests` (requires outer container and cluster), `cabal run studiomcp -- validate docs`, `docker compose -f docker-compose.yaml exec -T studiomcp-env studiomcp validate cluster`, `... validate pulsar`, `... validate minio`, `... validate boundary`, `... validate ffmpeg-adapter`, `... validate executor`, `... validate e2e`, `... validate worker`, `... validate mcp`, `... validate inference`, `... validate observability`, plus `helm lint`, `skaffold diagnose`, and `skaffold render`.
+- The server, inference, worker, and BFF entrypoints are all real runtimes with validation coverage, including the live Keycloak-backed auth, browser session, and nginx edge paths.
+- Verified commands now include `cabal build all`, `cabal test all --test-show-details=direct` (currently `unit-tests`: 844 examples, 0 failures; `integration-tests`: 16 examples, 12 failures due to kind-cluster Keycloak 404, and the integration path requires the outer container and cluster), `cabal run studiomcp -- validate docs`, `docker compose -f docker-compose.yaml config`, the cluster validation family, the MCP validation family (`validate mcp-stdio`, `validate mcp-http`, `validate mcp-conformance`), the auth/session validation family (`validate keycloak`, `validate mcp-auth`, `validate session-store`, `validate horizontal-scale`, `validate web-bff`), plus `helm lint`, `helm template`, `skaffold diagnose`, and `skaffold render`.
 - The basic outer-container cluster workflow is now verified on this machine. Persistence-backed Helm releases remain a non-default local workflow, and the shipped `values-kind.yaml` keeps MinIO and Pulsar persistence disabled, so `cluster storage reconcile` is currently a no-op under the default local values.
 
 ## Contribution Guidance

@@ -20,15 +20,17 @@ The target public topology has four major planes:
 
 ## Current Repo Note
 
-The current codebase already includes strong execution foundations, but the shipped `server` binary still exposes a custom DAG-oriented HTTP surface rather than a proper MCP transport. The documents in this suite define the target architecture and the migration path called out in [../../STUDIOMCP_DEVELOPMENT_PLAN.md](../../STUDIOMCP_DEVELOPMENT_PLAN.md#current-repo-assessment-against-this-plan).
+The current codebase already includes the live Keycloak boundary, the ingress-nginx-fronted kind topology, the browser-facing login/session behavior, and the MCP/runtime surface described by this suite. The documents here now describe implemented architecture for the current login/password delivery path, with OAuth/PKCE explicitly deferred.
 
 ## System Topology
 
 ```mermaid
 flowchart TB
-  Browser[Browser Client] --> BFF[BFF]
-  External[External MCP Client] --> MCP[MCP Listener]
-  Browser --> Keycloak[Keycloak]
+  Browser[Browser Client] --> Edge[nginx / ingress edge]
+  External[External MCP Client] --> Edge
+  Edge --> BFF[BFF]
+  Edge --> MCP[MCP Listener]
+  Edge --> Keycloak[Keycloak]
   BFF --> Keycloak
   BFF --> MCP
   MCP --> Keycloak
@@ -66,4 +68,4 @@ flowchart TB
 
 - [Documentation Standards](../documentation_standards.md#studiomcp-documentation-standards)
 - [Testing Strategy](../development/testing_strategy.md#testing-strategy)
-- [studioMCP Development Plan](../../STUDIOMCP_DEVELOPMENT_PLAN.md#studiomcp-development-plan)
+- [studioMCP Development Plan](../../DEVELOPMENT_PLAN.md#studiomcp-development-plan)

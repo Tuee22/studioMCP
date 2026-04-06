@@ -3,20 +3,20 @@
 
 **Status**: Authoritative source
 **Supersedes**: N/A
-**Referenced by**: [overview.md](overview.md#canonical-follow-on-documents), [../../STUDIOMCP_DEVELOPMENT_PLAN.md](../../STUDIOMCP_DEVELOPMENT_PLAN.md#current-repo-assessment-against-this-plan)
+**Referenced by**: [overview.md](overview.md#canonical-follow-on-documents), [../../DEVELOPMENT_PLAN.md](../../DEVELOPMENT_PLAN.md#current-repo-assessment-against-this-plan)
 
-> **Purpose**: Canonical current-state contract for how `studioMCP` may add deterministic parallel scheduling without weakening the typed execution, timeout, and summary guarantees that already exist in the sequential runtime.
+> **Purpose**: Canonical current-state contract for the deterministic parallel DAG scheduler in `studioMCP`.
 
 ## Summary
 
-`studioMCP` currently executes DAGs sequentially in topological order. Any future parallel executor is a bounded optimization layer over that baseline and must preserve the same externally visible semantics:
+`studioMCP` now executes independent DAG stages in deterministic parallel batches. The sequential topological executor remains available as the correctness baseline, and the parallel executor preserves the same externally visible semantics:
 
 - DAG validity is still decided before execution starts
 - every node still resolves to a typed success or structured failure
 - timeout remains a first-class failure outcome
 - the final summary remains the terminal immutable record of the run
 
-This document defines the required guarantees for a future parallel scheduler. It does not claim that production parallel execution code exists today.
+This document defines the guarantees the implemented parallel scheduler must continue to satisfy.
 
 ## Execution Model
 
@@ -29,7 +29,7 @@ Sequential: A, B, C, D (4 time units)
 Parallel:   A, (B || C), D (3 time units)
 ```
 
-Independent nodes (B and C above) may execute concurrently while respecting dependency edges.
+Independent nodes (B and C above) may execute concurrently while respecting dependency edges. The runtime records their outcomes in a stable `NodeId` order even when the work itself overlaps.
 
 ## Design Rationale
 
@@ -67,7 +67,7 @@ This design implies that worker pool sizing affects parallel throughput, Pulsar 
 
 ## Optimization Notes
 
-- Prefer bounded worker pools over unbounded fork-per-node behavior.
+- The current implementation runs one async per runnable node in a batch. A bounded worker pool remains an acceptable future optimization, but it is not required for current correctness.
 - Preserve content-addressed memoization boundaries. Parallel scheduling may reduce wall-clock time, but it must not weaken cache key determinism.
 - Keep MinIO writes and Pulsar event publication behind the same typed adapter contracts that already exist for the sequential runtime.
 - If zero-copy or reduced-copy media handling is introduced, it must remain an optimization beneath the same typed node contracts and summary model.
@@ -83,4 +83,4 @@ This design implies that worker pool sizing affects parallel throughput, Pulsar 
 
 - [Architecture Overview](overview.md#architecture-overview)
 - [Server Mode](server_mode.md#server-mode)
-- [studioMCP Development Plan](../../STUDIOMCP_DEVELOPMENT_PLAN.md#studiomcp-development-plan)
+- [studioMCP Development Plan](../../DEVELOPMENT_PLAN.md#studiomcp-development-plan)

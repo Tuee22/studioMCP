@@ -8,6 +8,7 @@ module StudioMCP.MCP.Handlers
     currentMetricsSnapshot,
     currentVersionInfo,
     fetchSummary,
+    resolvePersistenceRoot,
     submitDag,
   )
 where
@@ -61,6 +62,7 @@ import StudioMCP.Storage.TenantStorage
     newTenantStorageService,
     tscPlatformAccessKeyId,
     tscPlatformEndpoint,
+    tscPlatformPublicEndpoint,
     tscPlatformSecretAccessKey,
   )
 import StudioMCP.Messaging.Pulsar (PulsarConfig (..))
@@ -88,7 +90,7 @@ data SubmissionResult
 
 createServerEnv :: AppConfig -> IO ServerEnv
 createServerEnv appConfig = do
-  let AppConfig _ pulsarHttp pulsarBinary minioUrl minioAccess minioSecret = appConfig
+  let AppConfig _ pulsarHttp pulsarBinary minioUrl minioPublicUrl minioAccess minioSecret = appConfig
   metricsRef <- newIORef emptyMetricsSnapshot
   manager <- newManager defaultManagerSettings
   mcpMetrics <- newMcpMetricsService
@@ -100,6 +102,7 @@ createServerEnv appConfig = do
   let tenantStorageConfig =
         defaultTenantStorageConfig
           { tscPlatformEndpoint = minioUrl
+          , tscPlatformPublicEndpoint = Just minioPublicUrl
           , tscPlatformAccessKeyId = minioAccess
           , tscPlatformSecretAccessKey = minioSecret
           }
@@ -139,7 +142,7 @@ createServerEnv appConfig = do
 
 resolvePersistenceRoot :: IO FilePath
 resolvePersistenceRoot = do
-  persistenceRoot <- maybe ".studiomcp-data" id <$> lookupEnv "STUDIOMCP_DATA_DIR"
+  persistenceRoot <- maybe ".data/studiomcp" id <$> lookupEnv "STUDIOMCP_DATA_DIR"
   createDirectoryIfMissing True persistenceRoot
   pure persistenceRoot
 

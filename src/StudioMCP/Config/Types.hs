@@ -17,6 +17,7 @@ data AppConfig = AppConfig
     pulsarHttpUrl :: Text,
     pulsarBinaryUrl :: Text,
     minioEndpoint :: Text,
+    minioPublicEndpoint :: Text,
     minioAccessKey :: Text,
     minioSecretKey :: Text
   }

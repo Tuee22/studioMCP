@@ -302,14 +302,36 @@ validateTokenTiming config payload now = do
       addUTCTime (fromIntegral posix) (read "1970-01-01 00:00:00 UTC")
 
 -- | Validate token issuer
+-- Accepts the primary issuer or any of the additional issuers.
+-- This allows tokens issued via internal URLs (e.g., host.docker.internal, in-cluster)
+-- to be validated when the validator is configured with multiple endpoints.
+--
+-- Additionally, for development/testing purposes, if an additional issuer matches the
+-- pattern "http://localhost:*/kc/realms/<realm>", any localhost issuer with the same
+-- realm suffix is accepted. This supports the outer-container test pattern where
+-- validation code obtains tokens via port-forward to Keycloak with dynamic ports.
 validateTokenIssuer :: KeycloakConfig -> JwtPayload -> Either AuthError ()
 validateTokenIssuer config payload =
   case jpIss payload of
     Nothing -> Left $ MissingClaim "iss"
     Just iss ->
-      if iss == kcIssuer config
-        then Right ()
-        else Left $ InvalidIssuer iss
+      let acceptedIssuers = kcIssuer config : kcAdditionalIssuers config
+          realm = kcRealm config
+          realmSuffix = "/kc/realms/" <> realm
+          -- Check if any additional issuer starts with "http://localhost:" and ends with the realm suffix.
+          -- If so, accept any localhost issuer with the same realm suffix.
+          hasLocalhostWildcard = any isLocalhostIssuerPattern acceptedIssuers
+          isLocalhostIssuerPattern :: Text -> Bool
+          isLocalhostIssuerPattern url =
+            T.isPrefixOf "http://localhost:" url && T.isSuffixOf realmSuffix url
+          issMatchesLocalhostPattern :: Bool
+          issMatchesLocalhostPattern =
+            hasLocalhostWildcard
+              && T.isPrefixOf "http://localhost:" iss
+              && T.isSuffixOf realmSuffix iss
+       in if iss `elem` acceptedIssuers || issMatchesLocalhostPattern
+            then Right ()
+            else Left $ InvalidIssuer iss
 
 -- | Validate token audience
 validateTokenAudience :: KeycloakConfig -> JwtPayload -> Either AuthError ()

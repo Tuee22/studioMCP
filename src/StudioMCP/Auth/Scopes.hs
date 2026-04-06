@@ -180,10 +180,16 @@ authorizeResourceRead resourceUri ctx =
 -- | Get required permissions for a resource
 resourcePermissions :: Text -> [Permission]
 resourcePermissions uri
+  | "studiomcp://history/runs" `T.isPrefixOf` uri = [WorkflowRead]
+  | "studiomcp://summaries/" `T.isPrefixOf` uri = [WorkflowRead]
+  | "studiomcp://manifests/" `T.isPrefixOf` uri = [WorkflowRead]
+  | "studiomcp://artifacts/" `T.isPrefixOf` uri = [ArtifactRead]
+  | "studiomcp://metadata/tenant/" `T.isPrefixOf` uri = [TenantRead]
+  | "studiomcp://metadata/quotas" `T.isPrefixOf` uri = [TenantRead]
   | "workflow" `T.isInfixOf` uri = [WorkflowRead]
   | "artifact" `T.isInfixOf` uri = [ArtifactRead]
   | "summary" `T.isInfixOf` uri = [WorkflowRead]
-  | "manifest" `T.isInfixOf` uri = [ArtifactRead]
+  | "manifest" `T.isInfixOf` uri = [WorkflowRead]
   | otherwise = [ResourceRead]
 
 -- | Authorize MCP prompt get

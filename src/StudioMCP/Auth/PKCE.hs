@@ -1,19 +1,14 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module StudioMCP.Auth.PKCE
-  ( -- * PKCE Challenge
-    PKCEChallenge (..),
-    generatePKCEChallenge,
-
-    -- * Authorization URL
-    AuthorizationParams (..),
-    buildAuthorizationUrl,
-
-    -- * Token Exchange
-    TokenExchangeParams (..),
+  ( -- * Token Response
     TokenResponse (..),
-    exchangeCodeForTokens,
+
+    -- * Password Grant
+    PasswordGrantParams (..),
+    exchangePasswordForTokens,
 
     -- * Token Refresh
     RefreshParams (..),
@@ -25,7 +20,7 @@ module StudioMCP.Auth.PKCE
   )
 where
 
-import Crypto.Hash (Digest, SHA256 (..), hash)
+import Control.Exception (SomeException, try)
 import Data.Aeson
   ( FromJSON (parseJSON),
     ToJSON (toJSON),
@@ -36,20 +31,16 @@ import Data.Aeson
     (.:?),
     (.=),
   )
-import qualified Data.ByteArray as BA
 import qualified Data.ByteString as BS
-import qualified Data.ByteString.Base64.URL as B64URL
-import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Lazy as LBS
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
-import Data.Time (UTCTime)
 import GHC.Generics (Generic)
 import Network.HTTP.Client
   ( Manager,
-    Request,
     RequestBody (..),
+    Response,
     httpLbs,
     method,
     parseRequest,
@@ -59,118 +50,7 @@ import Network.HTTP.Client
     responseStatus,
   )
 import Network.HTTP.Types (statusCode)
-import StudioMCP.Auth.Config (KeycloakConfig (..), authorizeEndpoint, tokenEndpoint)
-import System.Random (randomRIO)
-
--- | PKCE challenge data
-data PKCEChallenge = PKCEChallenge
-  { -- | The code verifier (43-128 character random string)
-    pcVerifier :: Text,
-    -- | The code challenge (SHA256 hash of verifier, base64url encoded)
-    pcChallenge :: Text,
-    -- | The challenge method (always "S256")
-    pcMethod :: Text
-  }
-  deriving (Eq, Show, Generic)
-
-instance ToJSON PKCEChallenge where
-  toJSON pc =
-    object
-      [ "verifier" .= pcVerifier pc,
-        "challenge" .= pcChallenge pc,
-        "method" .= pcMethod pc
-      ]
-
--- | Generate a new PKCE challenge
-generatePKCEChallenge :: IO PKCEChallenge
-generatePKCEChallenge = do
-  -- Generate 32 random bytes (will produce 43 characters base64url encoded)
-  bytes <- replicateM 32 (randomRIO (0, 255) :: IO Int)
-  let byteString = BS.pack (map fromIntegral bytes)
-      -- Base64url encode without padding for the verifier
-      verifier = stripPadding $ B64URL.encode byteString
-      -- SHA256 hash the verifier and base64url encode for the challenge
-      verifierHash :: Digest SHA256
-      verifierHash = hash (TE.encodeUtf8 $ TE.decodeUtf8 verifier)
-      challenge = stripPadding $ B64URL.encode (BA.convert verifierHash :: BS.ByteString)
-  pure
-    PKCEChallenge
-      { pcVerifier = TE.decodeUtf8 verifier,
-        pcChallenge = TE.decodeUtf8 challenge,
-        pcMethod = "S256"
-      }
-  where
-    -- Strip padding characters for base64url-no-pad encoding
-    stripPadding = BS.filter (/= 61) -- 61 is '='
-    replicateM n action = sequence (replicate n action)
-
--- | Parameters for building an authorization URL
-data AuthorizationParams = AuthorizationParams
-  { -- | Client ID
-    apClientId :: Text,
-    -- | Redirect URI (where Keycloak will send the auth code)
-    apRedirectUri :: Text,
-    -- | Requested scopes
-    apScope :: [Text],
-    -- | State parameter (for CSRF protection)
-    apState :: Text,
-    -- | PKCE challenge
-    apPkceChallenge :: PKCEChallenge
-  }
-  deriving (Eq, Show, Generic)
-
--- | Build the authorization URL for OAuth2 PKCE flow
-buildAuthorizationUrl :: KeycloakConfig -> AuthorizationParams -> Text
-buildAuthorizationUrl kc params =
-  authorizeEndpoint kc
-    <> "?"
-    <> T.intercalate
-      "&"
-      [ "client_id=" <> urlEncode (apClientId params),
-        "redirect_uri=" <> urlEncode (apRedirectUri params),
-        "response_type=code",
-        "scope=" <> urlEncode (T.intercalate " " (apScope params)),
-        "state=" <> urlEncode (apState params),
-        "code_challenge=" <> urlEncode (pcChallenge (apPkceChallenge params)),
-        "code_challenge_method=" <> pcMethod (apPkceChallenge params)
-      ]
-
--- | URL encode a text value
-urlEncode :: Text -> Text
-urlEncode = T.concatMap encodeChar
-  where
-    encodeChar c
-      | isUnreserved c = T.singleton c
-      | otherwise = T.pack $ "%" <> hexEncode c
-    isUnreserved c =
-      (c >= 'A' && c <= 'Z')
-        || (c >= 'a' && c <= 'z')
-        || (c >= '0' && c <= '9')
-        || c == '-'
-        || c == '_'
-        || c == '.'
-        || c == '~'
-    hexEncode c =
-      let byte = fromEnum c
-          hi = byte `div` 16
-          lo = byte `mod` 16
-       in [hexDigit hi, hexDigit lo]
-    hexDigit n
-      | n < 10 = toEnum (n + fromEnum '0')
-      | otherwise = toEnum (n - 10 + fromEnum 'A')
-
--- | Parameters for exchanging authorization code for tokens
-data TokenExchangeParams = TokenExchangeParams
-  { -- | Client ID
-    teClientId :: Text,
-    -- | Authorization code received from Keycloak
-    teCode :: Text,
-    -- | Redirect URI (must match the one used in authorization)
-    teRedirectUri :: Text,
-    -- | PKCE code verifier (the original verifier, not the challenge)
-    teCodeVerifier :: Text
-  }
-  deriving (Eq, Show, Generic)
+import StudioMCP.Auth.Config (KeycloakConfig (..), tokenEndpoint)
 
 -- | Token response from Keycloak
 data TokenResponse = TokenResponse
@@ -247,58 +127,6 @@ pkceErrorCode (TokenResponseParseError _) = "token_parse_error"
 pkceErrorCode (TokenEndpointError _ _) = "token_endpoint_error"
 pkceErrorCode (NetworkError _) = "network_error"
 
--- | Exchange authorization code for tokens using PKCE (public client)
-exchangeCodeForTokens ::
-  KeycloakConfig ->
-  Manager ->
-  TokenExchangeParams ->
-  IO (Either PKCEError TokenResponse)
-exchangeCodeForTokens kc manager params = do
-  let endpoint = T.unpack $ tokenEndpoint kc
-      body =
-        TE.encodeUtf8 $
-          T.intercalate
-            "&"
-            [ "grant_type=authorization_code",
-              "client_id=" <> urlEncode (teClientId params),
-              "code=" <> urlEncode (teCode params),
-              "redirect_uri=" <> urlEncode (teRedirectUri params),
-              "code_verifier=" <> urlEncode (teCodeVerifier params)
-            ]
-
-  result <- tryRequest endpoint body
-  case result of
-    Left err -> pure $ Left err
-    Right response -> parseTokenResponse response
-  where
-    tryRequest endpoint body = do
-      mReq <- parseRequest endpoint
-      case mReq of
-        req -> do
-          let request =
-                req
-                  { method = "POST",
-                    requestBody = RequestBodyBS body,
-                    requestHeaders =
-                      [ ("Content-Type", "application/x-www-form-urlencoded")
-                      ]
-                  }
-          response <- httpLbs request manager
-          let status = statusCode $ responseStatus response
-          if status >= 200 && status < 300
-            then pure $ Right $ responseBody response
-            else pure $ Left $ TokenRequestFailed status (TE.decodeUtf8 $ LBS.toStrict $ responseBody response)
-
-    parseTokenResponse body =
-      case decodeTokenResponse body of
-        Just tr -> pure $ Right tr
-        Nothing -> pure $ Left $ TokenResponseParseError "Invalid JSON response"
-
-    decodeTokenResponse body =
-      case eitherDecode body of
-        Right tr -> Just tr
-        Left _ -> Nothing
-
 -- | Parameters for token refresh
 data RefreshParams = RefreshParams
   { -- | Client ID
@@ -307,6 +135,21 @@ data RefreshParams = RefreshParams
     rpRefreshToken :: Text,
     -- | Optional client secret (for confidential clients)
     rpClientSecret :: Maybe Text
+  }
+  deriving (Eq, Show, Generic)
+
+-- | Parameters for a username/password token exchange
+data PasswordGrantParams = PasswordGrantParams
+  { -- | Client ID
+    pgClientId :: Text,
+    -- | Username supplied by the caller
+    pgUsername :: Text,
+    -- | Password supplied by the caller
+    pgPassword :: Text,
+    -- | Requested scopes
+    pgScopes :: [Text],
+    -- | Optional client secret for confidential clients
+    pgClientSecret :: Maybe Text
   }
   deriving (Eq, Show, Generic)
 
@@ -328,30 +171,89 @@ refreshAccessToken kc manager params = do
         Nothing -> baseBody
       body = TE.encodeUtf8 $ T.intercalate "&" bodyWithSecret
 
-  result <- tryRequest endpoint body
+  result <- executeTokenRequest manager endpoint body
   case result of
     Left err -> pure $ Left err
     Right response -> parseTokenResponse response
   where
-    tryRequest endpoint body = do
-      mReq <- parseRequest endpoint
-      case mReq of
-        req -> do
-          let request =
-                req
-                  { method = "POST",
-                    requestBody = RequestBodyBS body,
-                    requestHeaders =
-                      [ ("Content-Type", "application/x-www-form-urlencoded")
-                      ]
-                  }
-          response <- httpLbs request manager
-          let status = statusCode $ responseStatus response
-          if status >= 200 && status < 300
-            then pure $ Right $ responseBody response
-            else pure $ Left $ TokenRequestFailed status (TE.decodeUtf8 $ LBS.toStrict $ responseBody response)
-
     parseTokenResponse body =
       case eitherDecode body of
         Right tr -> pure $ Right tr
         Left err -> pure $ Left $ TokenResponseParseError (T.pack err)
+
+-- | Exchange username/password for tokens using direct access grants.
+exchangePasswordForTokens ::
+  KeycloakConfig ->
+  Manager ->
+  PasswordGrantParams ->
+  IO (Either PKCEError TokenResponse)
+exchangePasswordForTokens kc manager params = do
+  let endpoint = T.unpack $ tokenEndpoint kc
+      baseBody =
+        [ "grant_type=password",
+          "client_id=" <> urlEncode (pgClientId params),
+          "username=" <> urlEncode (pgUsername params),
+          "password=" <> urlEncode (pgPassword params)
+        ]
+      bodyWithScope =
+        if null (pgScopes params)
+          then baseBody
+          else baseBody <> ["scope=" <> urlEncode (T.intercalate " " (pgScopes params))]
+      bodyWithSecret =
+        case pgClientSecret params of
+          Just secret -> bodyWithScope <> ["client_secret=" <> urlEncode secret]
+          Nothing -> bodyWithScope
+      body = TE.encodeUtf8 $ T.intercalate "&" bodyWithSecret
+
+  result <- executeTokenRequest manager endpoint body
+  case result of
+    Left err -> pure $ Left err
+    Right response ->
+      case eitherDecode response of
+        Right tokenResponse -> pure $ Right tokenResponse
+        Left err -> pure $ Left $ TokenResponseParseError (T.pack err)
+
+-- | URL-encode a Text value for form data
+urlEncode :: Text -> Text
+urlEncode = T.concatMap encodeChar
+  where
+    encodeChar c
+      | c >= 'a' && c <= 'z' = T.singleton c
+      | c >= 'A' && c <= 'Z' = T.singleton c
+      | c >= '0' && c <= '9' = T.singleton c
+      | c == '-' || c == '_' || c == '.' || c == '~' = T.singleton c
+      | otherwise = T.pack $ "%" ++ showHex (fromEnum c) ""
+    showHex n s
+      | n < 16 = '0' : showHexDigit n : s
+      | otherwise = showHexDigit (n `div` 16) : showHexDigit (n `mod` 16) : s
+    showHexDigit n
+      | n < 10 = toEnum (fromEnum '0' + n)
+      | otherwise = toEnum (fromEnum 'A' + n - 10)
+
+executeTokenRequest ::
+  Manager ->
+  String ->
+  BS.ByteString ->
+  IO (Either PKCEError LBS.ByteString)
+executeTokenRequest manager endpoint body = do
+  responseOrException <-
+    ( try $ do
+        request <- parseRequest endpoint
+        let tokenRequest =
+              request
+                { method = "POST",
+                  requestBody = RequestBodyBS body,
+                  requestHeaders =
+                    [ ("Content-Type", "application/x-www-form-urlencoded")
+                    ]
+                }
+        httpLbs tokenRequest manager
+    ) :: IO (Either SomeException (Response LBS.ByteString))
+  case responseOrException of
+    Left (exn :: SomeException) ->
+      pure $ Left $ NetworkError (T.pack (show exn))
+    Right response ->
+      let status = statusCode $ responseStatus response
+       in if status >= 200 && status < 300
+            then pure $ Right $ responseBody response
+            else pure $ Left $ TokenRequestFailed status (TE.decodeUtf8 $ LBS.toStrict $ responseBody response)

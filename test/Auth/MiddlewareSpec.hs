@@ -83,7 +83,7 @@ spec = do
     it "has valid claims structure" $ do
       let ctx = devBypassAuth "admin" "test"
           claims = acClaims ctx
-      jcIssuer claims `shouldBe` "http://localhost:8080/realms/studiomcp"
+      jcIssuer claims `shouldBe` "http://localhost:8080/kc/realms/studiomcp"
       jcSubject claims `shouldBe` SubjectId "admin"
 
   describe "AuthContext" $ do

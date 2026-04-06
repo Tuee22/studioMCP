@@ -3,11 +3,14 @@
 module StudioMCP.DAG.Executor
   ( ExecutionReport (..),
     ExecutorAdapters (..),
+    executeParallel,
     executeSequential,
     validateExecutorRuntime,
   )
 where
 
+import Control.Concurrent (threadDelay)
+import Control.Concurrent.Async (mapConcurrently)
 import Control.Monad (foldM)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.List.NonEmpty (NonEmpty ((:|)))
@@ -17,7 +20,7 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Time (UTCTime (UTCTime), fromGregorian, secondsToDiffTime)
 import StudioMCP.DAG.Provenance (emptyProvenance)
-import StudioMCP.DAG.Scheduler (scheduleTopologically)
+import StudioMCP.DAG.Scheduler (scheduleInBatches, scheduleTopologically)
 import StudioMCP.DAG.Summary
   ( NodeExecutionStatus (..),
     NodeOutcome (..),
@@ -74,22 +77,59 @@ executeSequential adapters runIdValue startedAt dagSpec =
     Left failureDetail -> pure (Left failureDetail)
     Right orderedNodes -> do
       finalState <- foldM (executeNode adapters runIdValue) emptyExecutionState orderedNodes
-      let summary = buildSummary runIdValue startedAt (emptyProvenance (dagName dagSpec)) (stateOutcomes finalState)
-      observeSummary adapters summary
-      pure
-        ( Right
-            ExecutionReport
-              { reportOrder = stateOrder finalState,
-                reportSummary = summary,
-                reportOutputs = stateOutputs finalState
-              }
-        )
+      report <- buildExecutionReport adapters runIdValue startedAt dagSpec finalState
+      pure (Right report)
+
+executeParallel ::
+  ExecutorAdapters ->
+  RunId ->
+  UTCTime ->
+  DagSpec ->
+  IO (Either FailureDetail ExecutionReport)
+executeParallel adapters runIdValue startedAt dagSpec =
+  case scheduleInBatches dagSpec of
+    Left failureDetail -> pure (Left failureDetail)
+    Right orderedBatches -> do
+      finalState <- foldM (executeBatch adapters runIdValue) emptyExecutionState orderedBatches
+      report <- buildExecutionReport adapters runIdValue startedAt dagSpec finalState
+      pure (Right report)
+
+buildExecutionReport ::
+  ExecutorAdapters ->
+  RunId ->
+  UTCTime ->
+  DagSpec ->
+  ExecutionState ->
+  IO ExecutionReport
+buildExecutionReport adapters runIdValue startedAt dagSpec finalState =
+  let summary = buildSummary runIdValue startedAt (emptyProvenance (dagName dagSpec)) (stateOutcomes finalState)
+   in do
+        observeSummary adapters summary
+        pure
+          ExecutionReport
+            { reportOrder = stateOrder finalState,
+              reportSummary = summary,
+              reportOutputs = stateOutputs finalState
+            }
+
+executeBatch ::
+  ExecutorAdapters ->
+  RunId ->
+  ExecutionState ->
+  [NodeSpec] ->
+  IO ExecutionState
+executeBatch adapters runIdValue executionState nodeBatch = do
+  batchOutcomes <- mapConcurrently (executeNodeOutcome adapters runIdValue executionState) nodeBatch
+  foldM
+    (\stateSoFar (nodeSpec, nodeOutcome) -> applyNodeOutcome adapters stateSoFar nodeSpec nodeOutcome)
+    executionState
+    (zip nodeBatch batchOutcomes)
 
 validateExecutorRuntime :: IO (Either FailureDetail ())
 validateExecutorRuntime = do
   observedOutcomesRef <- newIORef []
   observedSummaryRef <- newIORef Nothing
-  successResult <- executeSequential (successAdapters observedOutcomesRef observedSummaryRef) (RunId "executor-success") fixedTime successDag
+  successResult <- executeParallel (successAdapters observedOutcomesRef observedSummaryRef) (RunId "executor-success") fixedTime successDag
   case successResult of
     Left failureDetail -> pure (Left failureDetail)
     Right successReport
@@ -107,7 +147,7 @@ validateExecutorRuntime = do
             else do
               failureObservedOutcomesRef <- newIORef []
               failureObservedSummaryRef <- newIORef Nothing
-              failureResult <- executeSequential (failureAdapters failureObservedOutcomesRef failureObservedSummaryRef) (RunId "executor-failure") fixedTime successDag
+              failureResult <- executeParallel (failureAdapters failureObservedOutcomesRef failureObservedSummaryRef) (RunId "executor-failure") fixedTime successDag
               case failureResult of
                 Left failureDetail -> pure (Left failureDetail)
                 Right failureReport
@@ -120,7 +160,23 @@ validateExecutorRuntime = do
                       observedFailureSummary <- readIORef failureObservedSummaryRef
                       if length observedFailureOutcomes /= 3 || observedFailureSummary == Nothing
                         then pure (Left executorObserverMismatch)
-                        else pure (Right ())
+                        else do
+                          parallelObservedOutcomesRef <- newIORef []
+                          parallelObservedSummaryRef <- newIORef Nothing
+                          parallelBranchCountRef <- newIORef (0 :: Int)
+                          parallelResult <-
+                            executeParallel
+                              (parallelAdapters parallelObservedOutcomesRef parallelObservedSummaryRef parallelBranchCountRef)
+                              (RunId "executor-parallel")
+                              fixedTime
+                              parallelDag
+                          case parallelResult of
+                            Left failureDetail -> pure (Left failureDetail)
+                            Right parallelReport -> do
+                              branchCount <- readIORef parallelBranchCountRef
+                              if summaryStatus (reportSummary parallelReport) /= RunSucceeded || branchCount /= 2
+                                then pure (Left executorParallelMismatch)
+                                else pure (Right ())
 
 executeNode ::
   ExecutorAdapters ->
@@ -129,6 +185,16 @@ executeNode ::
   NodeSpec ->
   IO ExecutionState
 executeNode adapters runIdValue executionState nodeSpec = do
+  nodeOutcome <- executeNodeOutcome adapters runIdValue executionState nodeSpec
+  applyNodeOutcome adapters executionState nodeSpec nodeOutcome
+
+executeNodeOutcome ::
+  ExecutorAdapters ->
+  RunId ->
+  ExecutionState ->
+  NodeSpec ->
+  IO NodeOutcome
+executeNodeOutcome adapters runIdValue executionState nodeSpec = do
   let upstreamFailures =
         [ dependencyOutcome
         | dependencyNodeId <- nodeInputs nodeSpec,
@@ -140,30 +206,37 @@ executeNode adapters runIdValue executionState nodeSpec = do
         | dependencyNodeId <- nodeInputs nodeSpec,
           outputReference <- maybeToList (Map.lookup dependencyNodeId (stateOutputs executionState))
         ]
-  nodeOutcome <-
-    case upstreamFailures of
-      blockingOutcome : remainingFailures ->
-        pure
-          NodeOutcome
-            { outcomeNodeId = nodeId nodeSpec,
-              outcomeStatus = NodeFailed,
-              outcomeCached = False,
-              outcomeOutputReference = Nothing,
-              outcomeFailure = Just (upstreamDependencyFailure nodeSpec (blockingOutcome :| remainingFailures))
-            }
-      [] ->
-        case nodeKind nodeSpec of
-          PureNode -> projectNodeResult nodeSpec =<< executePureNode adapters nodeSpec inputReferences
-          BoundaryNode -> projectNodeResult nodeSpec =<< executeBoundaryNode adapters nodeSpec inputReferences
-          SummaryNode ->
-            pure
-              NodeOutcome
-                { outcomeNodeId = nodeId nodeSpec,
-                  outcomeStatus = NodeSucceeded,
-                  outcomeCached = False,
-                  outcomeOutputReference = Just (summaryOutputReference runIdValue),
-                  outcomeFailure = Nothing
-                }
+  case upstreamFailures of
+    blockingOutcome : remainingFailures ->
+      pure
+        NodeOutcome
+          { outcomeNodeId = nodeId nodeSpec,
+            outcomeStatus = NodeFailed,
+            outcomeCached = False,
+            outcomeOutputReference = Nothing,
+            outcomeFailure = Just (upstreamDependencyFailure nodeSpec (blockingOutcome :| remainingFailures))
+          }
+    [] ->
+      case nodeKind nodeSpec of
+        PureNode -> projectNodeResult nodeSpec =<< executePureNode adapters nodeSpec inputReferences
+        BoundaryNode -> projectNodeResult nodeSpec =<< executeBoundaryNode adapters nodeSpec inputReferences
+        SummaryNode ->
+          pure
+            NodeOutcome
+              { outcomeNodeId = nodeId nodeSpec,
+                outcomeStatus = NodeSucceeded,
+                outcomeCached = False,
+                outcomeOutputReference = Just (summaryOutputReference runIdValue),
+                outcomeFailure = Nothing
+              }
+
+applyNodeOutcome ::
+  ExecutorAdapters ->
+  ExecutionState ->
+  NodeSpec ->
+  NodeOutcome ->
+  IO ExecutionState
+applyNodeOutcome adapters executionState nodeSpec nodeOutcome = do
   observeNodeOutcome adapters nodeOutcome
   pure
     ExecutionState
@@ -262,6 +335,69 @@ failureAdapters observedOutcomesRef observedSummaryRef =
       observeSummary = writeIORef observedSummaryRef . Just
     }
 
+parallelAdapters :: IORef [NodeOutcome] -> IORef (Maybe Summary) -> IORef Int -> ExecutorAdapters
+parallelAdapters observedOutcomesRef observedSummaryRef branchCountRef =
+  ExecutorAdapters
+    { executePureNode = \nodeSpec _ -> pure (Right ("pure://" <> unNodeId (nodeId nodeSpec))),
+      executeBoundaryNode = \nodeSpec inputReferences -> do
+        modifyIORef' branchCountRef (+ 1)
+        peerReady <- waitForParallelPeer branchCountRef 50
+        if peerReady
+          then pure (Right ("boundary://" <> unNodeId (nodeId nodeSpec) <> "/" <> Text.intercalate "+" inputReferences))
+          else
+            pure
+              ( Left
+                  FailureDetail
+                    { failureCategory = ToolProcessFailure,
+                      failureCode = "parallel-branch-timeout",
+                      failureMessage = "Independent branches did not overlap under the parallel executor.",
+                      failureRetryable = False,
+                      failureContext = Map.empty
+                    }
+              ),
+      observeNodeOutcome = \nodeOutcome -> modifyIORef' observedOutcomesRef (<> [nodeOutcome]),
+      observeSummary = writeIORef observedSummaryRef . Just
+    }
+
+parallelDag :: DagSpec
+parallelDag =
+  DagSpec
+    { dagName = "executor-parallel",
+      dagDescription = Just "Deterministic DAG with one parallel branch layer.",
+      dagNodes =
+        [ mkNode "ingest" PureNode [] "text/plain",
+          mkNode "branch-b" BoundaryNode [NodeId "ingest"] "audio/wav",
+          mkNode "branch-c" BoundaryNode [NodeId "ingest"] "audio/wav",
+          mkNode "summary" SummaryNode [NodeId "branch-b", NodeId "branch-c"] "summary/run"
+        ]
+    }
+
+mkNode :: Text -> NodeKind -> [NodeId] -> Text -> NodeSpec
+mkNode nodeName nodeKindValue inputIds outputTypeValue =
+  NodeSpec
+    { nodeId = NodeId nodeName,
+      nodeKind = nodeKindValue,
+      nodeTool =
+        case nodeKindValue of
+          BoundaryNode -> Just "ffmpeg"
+          _ -> Nothing,
+      nodeInputs = inputIds,
+      nodeOutputType = OutputType outputTypeValue,
+      nodeTimeout = TimeoutPolicy 5,
+      nodeMemoization = "memoize"
+    }
+
+waitForParallelPeer :: IORef Int -> Int -> IO Bool
+waitForParallelPeer branchCountRef attemptsRemaining
+  | attemptsRemaining <= 0 = pure False
+  | otherwise = do
+      branchCount <- readIORef branchCountRef
+      if branchCount >= 2
+        then pure True
+        else do
+          threadDelay 10000
+          waitForParallelPeer branchCountRef (attemptsRemaining - 1)
+
 fixedTime :: UTCTime
 fixedTime = UTCTime (fromGregorian 2026 3 19) (secondsToDiffTime 0)
 
@@ -324,6 +460,10 @@ executorFailureOutcomesMismatch =
 executorObserverMismatch :: FailureDetail
 executorObserverMismatch =
   validationFailure "executor-observer-mismatch" "Executor observers did not receive the expected node outcomes and summary."
+
+executorParallelMismatch :: FailureDetail
+executorParallelMismatch =
+  validationFailure "executor-parallel-mismatch" "Parallel executor validation did not prove overlapping independent branches."
 
 maybeToList :: Maybe a -> [a]
 maybeToList maybeValue =

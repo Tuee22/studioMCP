@@ -3,7 +3,7 @@
 
 **Status**: Authoritative source
 **Supersedes**: N/A
-**Referenced by**: [../architecture/overview.md](../architecture/overview.md#canonical-follow-on-documents), [../architecture/multi_tenant_saas_mcp_auth_architecture.md](../architecture/multi_tenant_saas_mcp_auth_architecture.md#cross-references), [../engineering/security_model.md](../engineering/security_model.md#cross-references), [../../STUDIOMCP_DEVELOPMENT_PLAN.md](../../STUDIOMCP_DEVELOPMENT_PLAN.md#documentation-governance)
+**Referenced by**: [../architecture/overview.md](../architecture/overview.md#canonical-follow-on-documents), [../architecture/multi_tenant_saas_mcp_auth_architecture.md](../architecture/multi_tenant_saas_mcp_auth_architecture.md#cross-references), [../engineering/security_model.md](../engineering/security_model.md#cross-references), [../../DEVELOPMENT_PLAN.md](../../DEVELOPMENT_PLAN.md#documentation-governance)
 
 > **Purpose**: Canonical reference for the target browser-facing product surface and the BFF contract that mediates upload, download, render, and chat workflows.
 
@@ -22,11 +22,40 @@ The BFF is the browser-facing mediator that translates these product workflows i
 
 ## Current Repo Note
 
-The current repository now implements the BFF service and WAI handlers for upload, download, run submission, run status, and chat. Browser UX, Keycloak login UX, and live BFF-to-MCP orchestration remain follow-on work.
+The current repository implements the browser-facing BFF contract for username/password login, logout, refresh, session bootstrap, upload, download, chat, run submission, run status, and run-events SSE.
+
+The active browser contract is now cookie-first:
+
+- `POST /api/v1/session/login` returns an HTTP-only session cookie plus summary-only JSON
+- `GET /api/v1/session/me` returns the authenticated subject, tenant, and session timing metadata
+- `POST /api/v1/session/refresh` rotates server-side tokens and returns summary-only JSON
+- login and refresh responses do not expose `sessionId`, access tokens, or refresh tokens
+- Bearer session identifiers remain a compatibility/debug path, but the browser-default contract is the cookie
+
+## Control-Plane And Data-Plane Contract
+
+The published control plane is always the shared edge:
+
+- `/api` routes to the BFF
+- `/mcp` routes to the MCP server
+- `/kc` routes to Keycloak
+
+Artifact bytes are a separate data plane:
+
+- the BFF authorizes upload and download requests
+- the browser transfers bulk bytes directly against presigned object-storage URLs
+- those presigned URLs must be rooted at the environment's explicit public object-storage endpoint
+
+Current local baselines:
+
+- kind control-plane edge: `http://localhost:8081`
+- kind object-storage public endpoint: `http://localhost:9000`
+
+Chart-driven environments define the same contract through `global.publicBaseUrl` and `global.objectStorage.publicEndpoint`.
 
 ## Top-Level Browser Workflows
 
-- sign in through Keycloak
+- sign in with login/password through the BFF
 - upload source media
 - browse tenant artifacts and runs
 - request renders or workflow execution
@@ -36,6 +65,7 @@ The current repository now implements the BFF service and WAI handlers for uploa
 
 ## BFF Responsibilities
 
+- accept login/password over TLS and exchange it with Keycloak
 - maintain browser session state
 - authorize upload and download intents
 - call MCP on behalf of the authenticated user
@@ -46,11 +76,100 @@ The current repository now implements the BFF service and WAI handlers for uploa
 
 ```mermaid
 flowchart TB
-  Browser[Browser] --> BFF[BFF]
+  Browser[Browser] --> Edge[nginx / ingress edge]
+  Edge --> BFF[BFF]
+  Edge --> Keycloak[Keycloak]
   BFF --> Keycloak[Keycloak]
   BFF --> MCP[MCP]
   BFF --> Storage[Presigned Storage Flow]
 ```
+
+## Authentication Contract
+
+The target browser auth surface is session-oriented and lives under `/api`, not under Keycloak callback routes.
+
+**Login:**
+
+```http
+POST /api/v1/session/login
+Content-Type: application/json
+
+{
+  "username": "editor@example.com",
+  "password": "secret"
+}
+```
+
+The BFF exchanges the credentials with Keycloak, creates a server-side session, sets an HTTP-only `studiomcp_session` cookie, and returns summary-only JSON:
+
+```json
+{
+  "session": {
+    "subjectId": "user-uuid-1234",
+    "tenantId": "tenant-acme",
+    "expiresAt": "2024-01-15T12:00:00Z",
+    "createdAt": "2024-01-15T11:00:00Z",
+    "lastActiveAt": "2024-01-15T11:45:00Z"
+  }
+}
+```
+
+The JSON surface intentionally omits `sessionId`, access tokens, and refresh tokens. Bearer-style session identifiers remain available only as a secondary compatibility/debug interface for non-browser callers that need them.
+
+**Session bootstrap:**
+
+```http
+GET /api/v1/session/me
+Cookie: studiomcp_session={session_id}
+```
+
+**Response:**
+
+```json
+{
+  "session": {
+    "subjectId": "user-uuid-1234",
+    "tenantId": "tenant-acme",
+    "expiresAt": "2024-01-15T12:00:00Z",
+    "createdAt": "2024-01-15T11:00:00Z",
+    "lastActiveAt": "2024-01-15T11:45:00Z"
+  }
+}
+```
+
+**Logout:**
+
+```http
+POST /api/v1/session/logout
+```
+
+**Refresh:**
+
+```http
+POST /api/v1/session/refresh
+Cookie: studiomcp_session={session_id}
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "session": {
+    "subjectId": "user-uuid-1234",
+    "tenantId": "tenant-acme",
+    "expiresAt": "2024-01-15T12:30:00Z",
+    "createdAt": "2024-01-15T11:00:00Z",
+    "lastActiveAt": "2024-01-15T12:00:00Z"
+  }
+}
+```
+
+Current repo note:
+
+- the active browser auth contract is `POST /api/v1/session/login`, `GET /api/v1/session/me`, `POST /api/v1/session/logout`, and `POST /api/v1/session/refresh`
+- cookie authentication wins when both the session cookie and a Bearer session identifier are present
+- repository OAuth/PKCE modules remain deferred implementation inventory and are not part of the active browser route surface
 
 ## Upload Contract
 
@@ -66,7 +185,7 @@ flowchart TB
 
 ```http
 POST /api/v1/upload/request
-Authorization: Bearer {session_token}
+Cookie: studiomcp_session={session_id}
 Content-Type: application/json
 
 {
@@ -97,8 +216,10 @@ Content-Type: application/json
 
 ```http
 POST /api/v1/upload/confirm/{artifactId}
-Authorization: Bearer {session_token}
+Cookie: studiomcp_session={session_id}
 ```
+
+The returned upload URL must be rooted at the explicit public object-storage endpoint for the current environment. In local kind, that endpoint is `http://localhost:9000`.
 
 ### Presigned URL Expiration
 
@@ -121,7 +242,7 @@ Authorization: Bearer {session_token}
 
 ```http
 POST /api/v1/download
-Authorization: Bearer {session_token}
+Cookie: studiomcp_session={session_id}
 Content-Type: application/json
 
 {
@@ -129,6 +250,8 @@ Content-Type: application/json
   "version": "1"
 }
 ```
+
+The returned download URL must be rooted at the explicit public object-storage endpoint for the current environment. In local kind, that endpoint is `http://localhost:9000`.
 
 **Response:**
 
@@ -158,7 +281,7 @@ Content-Type: application/json
 
 ```http
 POST /api/v1/chat
-Authorization: Bearer {session_token}
+Cookie: studiomcp_session={session_id}
 Content-Type: application/json
 
 {
@@ -192,45 +315,18 @@ Content-Type: application/json
 
 ### Workflow API
 
-**List runs:**
+**Get run status:**
 
 ```http
-GET /api/v1/runs
-Authorization: Bearer {session_token}
-```
-
-**Response:**
-
-```json
-{
-  "runs": [
-    {
-      "runId": "run-xyz789",
-      "status": "Running",
-      "submittedAt": "2024-01-15T10:00:00Z",
-      "progress": 45
-    }
-  ],
-  "pagination": {
-    "total": 25,
-    "page": 1,
-    "pageSize": 20
-  }
-}
-```
-
-**Get run details:**
-
-```http
-GET /api/v1/runs/{runId}
-Authorization: Bearer {session_token}
+GET /api/v1/runs/{runId}/status
+Cookie: studiomcp_session={session_id}
 ```
 
 **Submit workflow:**
 
 ```http
 POST /api/v1/runs
-Authorization: Bearer {session_token}
+Cookie: studiomcp_session={session_id}
 Content-Type: application/json
 
 {
@@ -247,11 +343,11 @@ Content-Type: application/json
 }
 ```
 
-**Cancel run:**
+**Stream run progress:**
 
 ```http
-POST /api/v1/runs/{runId}/cancel
-Authorization: Bearer {session_token}
+GET /api/v1/runs/{runId}/events
+Cookie: studiomcp_session={session_id}
 ```
 
 ## BFF API Summary
@@ -260,33 +356,37 @@ Authorization: Bearer {session_token}
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/v1/uploads` | Request upload presigned URL |
-| `POST` | `/api/v1/uploads/{id}/complete` | Confirm upload completion |
-| `POST` | `/api/v1/artifacts/{id}/download` | Request download presigned URL |
-| `GET` | `/api/v1/artifacts` | List tenant artifacts |
-| `GET` | `/api/v1/artifacts/{id}` | Get artifact details |
-| `POST` | `/api/v1/artifacts/{id}/hide` | Hide artifact |
-| `POST` | `/api/v1/artifacts/{id}/archive` | Archive artifact |
-| `GET` | `/api/v1/runs` | List runs |
-| `GET` | `/api/v1/runs/{id}` | Get run details |
+| `POST` | `/api/v1/session/login` | Login with username/password |
+| `GET` | `/api/v1/session/me` | Return browser-safe session summary |
+| `POST` | `/api/v1/session/logout` | End browser session |
+| `POST` | `/api/v1/session/refresh` | Refresh browser session |
+| `POST` | `/api/v1/upload/request` | Request upload presigned URL |
+| `POST` | `/api/v1/upload/confirm/{artifactId}` | Confirm upload completion |
+| `POST` | `/api/v1/download` | Request download presigned URL |
 | `POST` | `/api/v1/runs` | Submit workflow |
-| `POST` | `/api/v1/runs/{id}/cancel` | Cancel run |
-| `POST` | `/api/v1/chat` | Send chat message (SSE response) |
-| `GET` | `/api/v1/me` | Get current user info |
+| `GET` | `/api/v1/runs/{id}/status` | Get run status |
+| `GET` | `/api/v1/runs/{id}/events` | Stream run progress with SSE |
+| `POST` | `/api/v1/chat` | Send chat message |
 
 ### Authentication
 
-All BFF endpoints require a valid session cookie or Bearer token:
+All authenticated BFF endpoints accept these browser-session credentials after login:
+
+Primary browser credential:
 
 ```http
-Authorization: Bearer {access_token}
+Cookie: studiomcp_session={session_id}
 ```
 
-Or:
+Compatibility/debug credential:
 
 ```http
-Cookie: session={session_id}
+Authorization: Bearer {session_id}
 ```
+
+If both are present on the same request, the cookie wins.
+
+Username/password is submitted only to `POST /api/v1/session/login` and must be exchanged immediately with Keycloak. It must not be reused as a general-purpose API credential.
 
 ### Error Responses
 

@@ -10,6 +10,7 @@ dist
 venv
 __pycache__
 .data/
+.studiomcp-data/
 coverage
 logs
 traces

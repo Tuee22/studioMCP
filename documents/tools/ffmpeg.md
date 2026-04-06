@@ -19,7 +19,7 @@ FFmpeg covers a large part of the initial media-boundary surface:
 
 ## Current Maturity
 
-The repo now includes a production Haskell FFmpeg adapter on top of the generic boundary runtime. `studiomcp validate ffmpeg-adapter` seeds the deterministic `examples/assets/audio/tone.wav` fixture, verifies reseeding repeatability, runs one successful transcode, and asserts the structured failure projection for a missing input. Current implementation status is tracked in [../../STUDIOMCP_DEVELOPMENT_PLAN.md](../../STUDIOMCP_DEVELOPMENT_PLAN.md#current-repo-assessment-against-this-plan).
+The repo now includes a production Haskell FFmpeg adapter on top of the generic boundary runtime. `studiomcp validate ffmpeg-adapter` seeds the deterministic `examples/assets/audio/tone.wav` fixture, verifies reseeding repeatability, runs one successful transcode, and asserts the structured failure projection for a missing input. Current implementation status is tracked in [../../DEVELOPMENT_PLAN.md](../../DEVELOPMENT_PLAN.md#current-repo-assessment-against-this-plan).
 
 ## Boundary Rule
 

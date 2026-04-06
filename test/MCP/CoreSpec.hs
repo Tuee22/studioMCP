@@ -25,7 +25,7 @@ spec = do
     it "has resources capability" $ do
       case scResources (mscCapabilities defaultServerConfig) of
         Just cap -> do
-          rcSubscribe cap `shouldBe` Just False
+          rcSubscribe cap `shouldBe` Just True
           rcListChanged cap `shouldBe` Just True
         Nothing -> expectationFailure "Expected resources capability"
 

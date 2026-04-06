@@ -5,16 +5,17 @@ where
 
 import Data.Maybe (fromMaybe)
 import Data.Char (toLower)
-import Data.Text (Text, pack)
+import Data.Text (Text, pack, unpack)
 import StudioMCP.Config.Types (AppConfig (..), AppMode (InferenceMode, ServerMode, WorkerMode))
 import System.Environment (lookupEnv)
 
 loadAppConfig :: IO AppConfig
 loadAppConfig = do
   appModeValue <- envMode "STUDIO_MCP_MODE" ServerMode
-  pulsarHttp <- envText "STUDIO_MCP_PULSAR_HTTP_URL" "http://studiomcp-pulsar:8080"
-  pulsarBinary <- envText "STUDIO_MCP_PULSAR_BINARY_URL" "pulsar://studiomcp-pulsar:6650"
+  pulsarHttp <- envText "STUDIO_MCP_PULSAR_HTTP_URL" "http://studiomcp-pulsar-proxy"
+  pulsarBinary <- envText "STUDIO_MCP_PULSAR_BINARY_URL" "pulsar://studiomcp-pulsar-proxy:6650"
   minio <- envText "STUDIO_MCP_MINIO_ENDPOINT" "http://studiomcp-minio:9000"
+  minioPublic <- envText "STUDIO_MCP_MINIO_PUBLIC_ENDPOINT" (unpack minio)
   minioAccess <- envText "STUDIO_MCP_MINIO_ACCESS_KEY" "minioadmin"
   minioSecret <- envText "STUDIO_MCP_MINIO_SECRET_KEY" "minioadmin123"
   pure
@@ -23,6 +24,7 @@ loadAppConfig = do
         pulsarHttpUrl = pulsarHttp,
         pulsarBinaryUrl = pulsarBinary,
         minioEndpoint = minio,
+        minioPublicEndpoint = minioPublic,
         minioAccessKey = minioAccess,
         minioSecretKey = minioSecret
       }

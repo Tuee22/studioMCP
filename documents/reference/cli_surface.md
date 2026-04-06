@@ -3,15 +3,17 @@
 
 **Status**: Authoritative source
 **Supersedes**: N/A
-**Referenced by**: [../README.md](../README.md#documentation-suite), [../development/local_dev.md](../development/local_dev.md#cross-references), [../operations/runbook_local_debugging.md](../operations/runbook_local_debugging.md#cross-references), [../architecture/cli_architecture.md](../architecture/cli_architecture.md#cross-references), [../engineering/k8s_storage.md](../engineering/k8s_storage.md#cross-references), [../../STUDIOMCP_DEVELOPMENT_PLAN.md](../../STUDIOMCP_DEVELOPMENT_PLAN.md#current-validation-state)
+**Referenced by**: [../README.md](../README.md#documentation-suite), [../development/local_dev.md](../development/local_dev.md#cross-references), [../operations/runbook_local_debugging.md](../operations/runbook_local_debugging.md#cross-references), [../architecture/cli_architecture.md](../architecture/cli_architecture.md#cross-references), [../engineering/k8s_storage.md](../engineering/k8s_storage.md#cross-references), [../../DEVELOPMENT_PLAN.md](../../DEVELOPMENT_PLAN.md#current-validation-state)
 
-> **Purpose**: Canonical reference for the supported current `studiomcp` CLI surface and near-term planned ergonomics.
+> **Purpose**: Canonical reference for the supported current `studiomcp` CLI surface.
 
 ## Current Implemented Commands
 
 The codebase currently implements this subset:
 
 - `studiomcp server`
+- `studiomcp stdio`
+- `studiomcp bff`
 - `studiomcp inference`
 - `studiomcp worker`
 - `studiomcp validate-dag <path>`
@@ -48,16 +50,18 @@ The codebase currently implements this subset:
 - `studiomcp validate mcp-conformance`
 - `studiomcp cluster up`
 - `studiomcp cluster down`
+- `studiomcp cluster reset`
 - `studiomcp cluster status`
 - `studiomcp cluster ensure`
 - `studiomcp cluster deploy sidecars`
 - `studiomcp cluster deploy server`
 - `studiomcp cluster storage reconcile`
+- `studiomcp cluster storage delete <name>`
 
 Current note:
 
 - The retired `studiomcp validate mcp` alias has been removed. Use `validate mcp-stdio`, `validate mcp-http`, or `validate mcp-conformance`.
-- `studiomcp-bff` exists as a dedicated executable today; wiring `studiomcp bff` into the main CLI remains future ergonomic work.
+- `studiomcp bff` is implemented in the main CLI, and `studiomcp-bff` remains available as a dedicated executable.
 
 ## Required Target Surface
 
@@ -68,10 +72,10 @@ The supported command surface must converge on one Haskell CLI with at least the
 | Command | Description | Status |
 |---------|-------------|--------|
 | `studiomcp server` | Start MCP server (HTTP + operational endpoints) | ✅ Implemented |
-| `studiomcp stdio` | Start MCP server in stdio transport mode | 📋 Planned ergonomic follow-up |
+| `studiomcp stdio` | Start MCP server in stdio transport mode | ✅ Implemented |
 | `studiomcp inference` | Start inference mode server | ✅ Implemented |
 | `studiomcp worker` | Start worker mode server | ✅ Implemented |
-| `studiomcp bff` | Start BFF server | 📋 Planned ergonomic follow-up |
+| `studiomcp bff` | Start BFF server | ✅ Implemented |
 
 ### DAG Commands
 
@@ -87,9 +91,9 @@ The supported command surface must converge on one Haskell CLI with at least the
 |---------|-------------|
 | `studiomcp cluster up` | Start local Kubernetes cluster |
 | `studiomcp cluster down` | Stop local Kubernetes cluster |
-| `studiomcp cluster reset` | Reset cluster to clean state |
+| `studiomcp cluster reset` | Reset the kind cluster to a clean Kubernetes state while preserving host-backed volumes |
 | `studiomcp cluster status` | Show cluster status |
-| `studiomcp cluster ensure` | Idempotent setup: up + sidecars + wait for all services (recommended for automation) |
+| `studiomcp cluster ensure` | Idempotent setup: up + ingress edge + sidecars + Keycloak realm bootstrap + readiness waits (recommended for automation) |
 | `studiomcp cluster storage reconcile` | Reconcile storage resources |
 | `studiomcp cluster storage delete <name>` | Delete a storage resource |
 | `studiomcp cluster deploy sidecars` | Deploy sidecar services |
@@ -103,32 +107,39 @@ All cluster management commands are idempotent and safe to run repeatedly:
 |---------|----------|
 | `cluster up` | Creates cluster only if it doesn't exist; ensures network connectivity |
 | `cluster down` | Deletes cluster only if it exists |
-| `cluster deploy sidecars` | Uses `helm upgrade --install` pattern (idempotent) |
-| `cluster deploy server` | Uses `helm upgrade --install` pattern (idempotent) |
+| `cluster reset` | Uninstalls the Helm release when present, recreates the kind cluster, and preserves host-backed volume contents |
+| `cluster deploy sidecars` | Uses `helm upgrade --install`, ensures ingress-nginx, and bootstraps the checked-in Keycloak realm (idempotent) |
+| `cluster deploy server` | Uses `helm upgrade --install`, ensures ingress-nginx, bootstraps the checked-in Keycloak realm, and rolls server/BFF workloads (idempotent) |
 | `cluster storage reconcile` | Uses `kubectl apply` (idempotent) |
-| `cluster ensure` | Single idempotent command: brings up cluster, deploys sidecars, waits for all services (Redis, PostgreSQL, MinIO, Pulsar, Keycloak). Recommended for automation and tests. |
+| `cluster storage delete <name>` | Deletes the named PV if it exists |
+| `cluster ensure` | Single idempotent command: brings up the kind cluster, applies ingress-nginx, deploys sidecars, imports the checked-in Keycloak realm if missing, and waits for Redis, PostgreSQL, MinIO, Pulsar, and Keycloak. Recommended for automation and tests. |
 
 Running any of these commands multiple times produces the same result as running once. This design supports:
 - **Developer workflow**: Run `cluster ensure` at any point to guarantee a working environment
 - **CI/CD**: Integration tests use `cluster ensure` for reliable setup
 - **Recovery**: After failures or interruptions, simply re-run the command
 
-### Validation Commands - Current (Phases 0-12)
+The default validated kind edge is:
 
-| Command | Description | Phase |
-|---------|-------------|-------|
-| `studiomcp validate docs` | Validate documentation suite | 0 |
-| `studiomcp validate cluster` | Validate cluster readiness | 4 |
-| `studiomcp validate pulsar` | Validate Pulsar connectivity | 6 |
-| `studiomcp validate minio` | Validate MinIO connectivity | 8 |
-| `studiomcp validate boundary` | Validate boundary runtime | 9 |
-| `studiomcp validate ffmpeg-adapter` | Validate FFmpeg adapter | 10 |
-| `studiomcp validate executor` | Validate DAG executor | 11 |
-| `studiomcp validate e2e` | End-to-end validation | 12 |
-| `studiomcp validate worker` | Validate worker mode | 12 |
-| `studiomcp validate inference` | Validate inference mode | 12 |
+- control plane: `http://localhost:8081`
+- object storage: `http://localhost:9000`
 
-### Validation Commands - MCP Protocol (Phase 13) - ✅ IMPLEMENTED
+### Validation Commands - Phase 1 Foundations
+
+| Command | Description | Status |
+|---------|-------------|--------|
+| `studiomcp validate docs` | Validate documentation suite | ✅ Implemented |
+| `studiomcp validate cluster` | Validate cluster readiness | ✅ Implemented |
+| `studiomcp validate pulsar` | Validate Pulsar connectivity | ✅ Implemented |
+| `studiomcp validate minio` | Validate MinIO connectivity | ✅ Implemented |
+| `studiomcp validate boundary` | Validate boundary runtime | ✅ Implemented |
+| `studiomcp validate ffmpeg-adapter` | Validate FFmpeg adapter | ✅ Implemented |
+| `studiomcp validate executor` | Validate DAG executor | ✅ Implemented |
+| `studiomcp validate e2e` | End-to-end validation | ✅ Implemented |
+| `studiomcp validate worker` | Validate worker mode | ✅ Implemented |
+| `studiomcp validate inference` | Validate inference mode | ✅ Implemented |
+
+### Validation Commands - Phase 2 MCP Surface
 
 | Command | Description | Status |
 |---------|-------------|--------|
@@ -151,7 +162,7 @@ Running any of these commands multiple times produces the same result as running
 - tools/list returns expected tools
 - Tool invocation works end-to-end
 
-### Validation Commands - Auth (Phase 14) - ✅ IMPLEMENTED
+### Validation Commands - Phase 3 Auth Foundations
 
 | Command | Description | Status |
 |---------|-------------|--------|
@@ -159,20 +170,22 @@ Running any of these commands multiple times produces the same result as running
 | `studiomcp validate mcp-auth` | Validate MCP authentication flow | ✅ Implemented |
 
 **`validate keycloak`** tests:
-- Keycloak reachable
-- Realm exists
-- JWKS endpoint accessible
-- Test client credentials valid
+- Live JWKS endpoint is accessible when live auth env is configured
+- Password login succeeds against the configured Keycloak realm
+- JWT validation succeeds against the live realm, including subject recovery through `userinfo` when needed
+- When `STUDIOMCP_VALIDATE_KIND_EDGE=true`, `cluster ensure` provisions the kind edge and bootstrapped realm before live validation runs
+- Fake Keycloak-compatible JWKS coverage remains available as the fallback path when live auth env is absent
 
 **`validate mcp-auth`** tests:
-- Valid token accepted
-- Invalid token rejected (401)
-- Expired token rejected
-- Wrong audience rejected
-- Insufficient scope rejected (403)
-- Tenant context resolved correctly
+- Live `/mcp` rejects unauthenticated requests when live auth env is configured
+- Live Keycloak-issued bearer token validates locally against the configured JWKS
+- Authenticated initialize completes through the nginx edge
+- Authenticated tool discovery works through the edge proxy
+- Authenticated `GET /mcp` SSE bootstrap works through the edge proxy
+- When `STUDIOMCP_VALIDATE_KIND_EDGE=true`, the live path targets the kind ingress edge at `http://localhost:8081`
+- Synthetic token validation coverage remains available as the fallback path when live auth env is absent
 
-### Validation Commands - Session Scaling (Phase 15) - ✅ IMPLEMENTED
+### Validation Commands - Phase 3 Session Foundations
 
 | Command | Description | Status |
 |---------|-------------|--------|
@@ -188,25 +201,29 @@ Running any of these commands multiple times produces the same result as running
 - Session data serialization
 
 **`validate mcp-horizontal-scale`** tests:
-- Multiple MCP listener replicas running
-- Session resume across different pods
-- No sticky session requirement
-- Load balancer behavior correct
+- Live MCP requests preserve session continuity across multiple nginx-routed server backends when live auth env is configured
+- Session updates, subscriptions, and locks remain visible across Redis-backed store instances
+- Lock contention and lock handoff behave correctly
+- Shared-store-only coverage remains available as the fallback path when live auth env is absent
 
-### Validation Commands - Web/BFF (Phase 16) - ✅ IMPLEMENTED
+### Validation Commands - Phase 5 BFF Workflow Surface
 
 | Command | Description | Status |
 |---------|-------------|--------|
 | `studiomcp validate web-bff` | Validate BFF integration | ✅ Implemented |
 
 **`validate web-bff`** tests:
-- BFF server starts
-- User authentication flow
-- MCP client integration
-- Upload presigned URL generation
-- Download presigned URL generation
+- Live login returns an HTTP-only browser session cookie when live auth env is configured
+- Login and refresh JSON omit session identifiers and tokens
+- `GET /api/v1/session/me` works from the login cookie
+- Cookie auth wins over Bearer session compatibility credentials when both are present
+- Live refresh, upload, confirm, download, chat, run submit, run status, and run-events SSE work through `/api`
+- Upload and download presigned URLs are rooted at the configured public object-storage endpoint
+- When `STUDIOMCP_VALIDATE_KIND_EDGE=true`, the live path targets the kind ingress edge at `http://localhost:8081`
+- Live logout invalidates the session and post-logout refresh is rejected
+- Runtime-backed BFF to MCP/service integration remains covered in both live and fallback modes
 
-### Validation Commands - Artifacts (Phase 17) - ✅ IMPLEMENTED
+### Validation Commands - Phase 2 Artifact Governance
 
 | Command | Description | Status |
 |---------|-------------|--------|
@@ -226,7 +243,7 @@ Running any of these commands multiple times produces the same result as running
 - Hard delete is rejected/not exposed
 - Audit trail recorded
 
-### Validation Commands - MCP Catalog (Phase 18) - ✅ IMPLEMENTED
+### Validation Commands - Phase 2 MCP Catalog
 
 | Command | Description | Status |
 |---------|-------------|--------|
@@ -252,7 +269,7 @@ Running any of these commands multiple times produces the same result as running
 - Prompt templates render correctly
 - Prompt arguments validated
 
-### Validation Commands - Observability (Phase 19) - ✅ IMPLEMENTED
+### Validation Commands - Phase 2 Observability
 
 | Command | Description | Status |
 |---------|-------------|--------|
@@ -268,7 +285,7 @@ Running any of these commands multiple times produces the same result as running
 - Token redaction working
 - Structured log format correct
 
-### Validation Commands - Conformance (Phase 21) - ✅ IMPLEMENTED
+### Validation Commands - Phase 2 Conformance
 
 | Command | Description | Status |
 |---------|-------------|--------|
@@ -281,18 +298,16 @@ Running any of these commands multiple times produces the same result as running
 - Session behavior compliance
 - Transport compliance (both stdio and HTTP)
 
-## Validation Command Evolution
+## Validation Coverage By Plan Phase
 
 | Phase | Commands Introduced |
 |-------|---------------------|
-| 13 | `validate mcp-stdio`, `validate mcp-http` |
-| 14 | `validate keycloak`, `validate mcp-auth` |
-| 15 | `validate session-store`, `validate mcp-session-store`, `validate horizontal-scale`, `validate mcp-horizontal-scale` |
-| 16 | `validate web-bff` |
-| 17 | `validate artifact-storage`, `validate artifact-governance` |
-| 18 | `validate mcp-tools`, `validate mcp-resources`, `validate mcp-prompts` |
-| 19 | `validate audit`, `validate quotas`, `validate rate-limit` |
-| 21 | `validate mcp-conformance` |
+| 1 | `validate docs`, `validate cluster`, `validate pulsar`, `validate minio`, `validate boundary`, `validate ffmpeg-adapter`, `validate executor`, `validate e2e`, `validate worker`, `validate inference` |
+| 2 | `validate mcp-stdio`, `validate mcp-http`, `validate artifact-storage`, `validate artifact-governance`, `validate mcp-tools`, `validate mcp-resources`, `validate mcp-prompts`, `validate observability`, `validate audit`, `validate quotas`, `validate rate-limit`, `validate mcp-conformance` |
+| 3 | `validate keycloak`, `validate mcp-auth`, `validate session-store`, `validate mcp-session-store`, `validate horizontal-scale`, `validate mcp-horizontal-scale` |
+| 4 | Validation uses `cluster ensure` and kind-edge curl checks |
+| 5 | `validate web-bff` |
+| 6 | No dedicated deployment-alignment command yet; the development plan currently uses Helm, ingress, and runbook validation |
 
 ## Legacy Alias Retirement
 
@@ -314,9 +329,11 @@ For local development and LLM-driven operations, the CLI is expected to run insi
 docker compose -f docker-compose.yaml exec studiomcp-env studiomcp <subcommand...>
 ```
 
+Kind-edge validation uses the same outer-container entrypoint. Set `STUDIOMCP_VALIDATE_KIND_EDGE=true` to make `validate keycloak`, `validate mcp-auth`, `validate mcp-http`, and `validate web-bff` target the kind ingress edge after cluster provisioning.
+
 ## Current Repo Note
 
-This reference describes the implemented command surface plus remaining CLI ergonomics. The current command surface covers cluster lifecycle, DAG validation, documentation validation, executor and end-to-end validation, worker-runtime validation, Pulsar, MinIO, boundary, FFmpeg-adapter, MCP transport validation, auth validation, session scaling validation, BFF validation, artifact validation, MCP catalog validation, inference, observability, quotas, rate limiting, and MCP conformance validation. The remaining target surface is mostly ergonomic: `cluster reset`, a first-class `studiomcp bff` subcommand, and any future operator-facing convenience commands.
+This reference now matches the implemented command surface. The Haskell CLI covers cluster lifecycle, ingress-backed kind deployment, Keycloak realm bootstrap, storage reconciliation and deletion, DAG validation, documentation validation, executor and end-to-end validation, worker-runtime validation, Pulsar, MinIO, boundary, FFmpeg-adapter, MCP transport validation, auth validation, session scaling validation, BFF validation, artifact validation, MCP catalog validation, inference, observability, quotas, rate limiting, and MCP conformance validation.
 
 ## Cross-References
 

@@ -3,7 +3,7 @@
 
 **Status**: Authoritative source
 **Supersedes**: N/A
-**Referenced by**: [../architecture/multi_tenant_saas_mcp_auth_architecture.md](../architecture/multi_tenant_saas_mcp_auth_architecture.md#realm-seeding-rule), [../engineering/security_model.md](../engineering/security_model.md#cross-references), [../../STUDIOMCP_DEVELOPMENT_PLAN.md](../../STUDIOMCP_DEVELOPMENT_PLAN.md#documentation-governance)
+**Referenced by**: [../architecture/multi_tenant_saas_mcp_auth_architecture.md](../architecture/multi_tenant_saas_mcp_auth_architecture.md#realm-seeding-rule), [../engineering/security_model.md](../engineering/security_model.md#cross-references), [../../DEVELOPMENT_PLAN.md](../../DEVELOPMENT_PLAN.md#documentation-governance)
 
 > **Purpose**: Canonical operational runbook for bootstrapping and validating Keycloak realms, clients, scopes, and tenant mappings for `studioMCP`.
 
@@ -11,21 +11,44 @@
 
 Auth in `studioMCP` is not credible unless Keycloak can be bootstrapped reproducibly in local, test, and cluster environments.
 
-This runbook defines the required bootstrap artifacts and the preferred cluster deployment shape.
+This runbook defines the required bootstrap artifacts and the current automated bootstrap path for kind-backed cluster validation.
 
 ## Deployment Baseline
 
 Keycloak deployment baseline:
 
-- Keycloak in Kubernetes
+- Keycloak behind the shared nginx or ingress edge at `/kc`
+- kind cluster deployment behind ingress-nginx for development and chart-backed validation
 - dedicated PostgreSQL database for Keycloak only
-- ingress with TLS
-- automated realm bootstrap
+- cluster ingress with TLS
+- automated realm bootstrap from the checked-in realm JSON
 
 Helm-first packaging baseline:
 
-- `codecentric/keycloakx` for Keycloak
+- Helm values aligned to the `/kc`, `/api`, and `/mcp` public contract
 - dedicated PostgreSQL chart or managed PostgreSQL for Keycloak persistence
+
+## Automated Default Paths
+
+### Kind And Helm
+
+The current repo default for kind-backed validation is CLI-driven bootstrap:
+
+```bash
+docker compose -f docker-compose.yaml exec -T studiomcp-env studiomcp cluster ensure
+```
+
+`cluster ensure` and the related `cluster deploy sidecars` and `cluster deploy server` paths now:
+
+1. create or reuse the kind cluster
+2. apply the pinned ingress-nginx kind manifest
+3. install or upgrade the Helm release with `chart/values.yaml` and `chart/values-kind.yaml`
+4. wait for Keycloak readiness
+5. port-forward `service/studiomcp-keycloak` for admin access
+6. import `docker/keycloak/realm/studiomcp-realm.json` if the `studiomcp` realm is missing
+7. wait for `http://localhost:8081/kc/realms/studiomcp/.well-known/openid-configuration`
+
+This path is idempotent. Re-running it should leave an already-bootstrapped realm healthy and unchanged.
 
 ## Required Bootstrap Artifacts
 
@@ -51,7 +74,7 @@ Helm-first packaging baseline:
 The canonical realm export lives at:
 
 ```
-keycloak/realm-export.json
+docker/keycloak/realm/studiomcp-realm.json
 ```
 
 This file is version-controlled and used for all environment bootstrapping.
@@ -118,9 +141,9 @@ This is a bearer-only client that validates tokens but does not issue them.
 }
 ```
 
-### CLI Client (Public with PKCE)
+### Interactive CLI Client (Deferred)
 
-For external MCP clients and CLI tools.
+Optional future client for external interactive MCP tooling. It is not a required part of the current login/password delivery plan.
 
 ```json
 {
@@ -154,19 +177,12 @@ For the web portal backend-for-frontend.
   "name": "studioMCP BFF",
   "enabled": true,
   "publicClient": false,
-  "standardFlowEnabled": true,
-  "serviceAccountsEnabled": true,
+  "standardFlowEnabled": false,
+  "directAccessGrantsEnabled": true,
+  "serviceAccountsEnabled": false,
   "authorizationServicesEnabled": false,
   "protocol": "openid-connect",
   "secret": "${BFF_CLIENT_SECRET}",
-  "redirectUris": [
-    "https://app.${DOMAIN}/callback",
-    "http://localhost:3001/callback"
-  ],
-  "webOrigins": [
-    "https://app.${DOMAIN}",
-    "http://localhost:3001"
-  ],
   "defaultClientScopes": [
     "openid", "profile",
     "workflow:read", "workflow:write",
@@ -395,18 +411,18 @@ Add a protocol mapper to include tenant_id in tokens:
 
 set -e
 
-KEYCLOAK_URL="${KEYCLOAK_URL:-http://localhost:8080}"
+KEYCLOAK_URL="${KEYCLOAK_URL:-http://localhost:18080/kc}"
 ADMIN_USER="${KEYCLOAK_ADMIN:-admin}"
 ADMIN_PASS="${KEYCLOAK_ADMIN_PASSWORD:-admin}"
 
-# Wait for Keycloak to be ready
+# Wait for Keycloak to be ready behind the edge
 echo "Waiting for Keycloak..."
-until curl -sf "${KEYCLOAK_URL}/health/ready"; do
+until curl -sf "http://localhost:18080/kc/realms/studiomcp/.well-known/openid-configuration" >/dev/null; do
   sleep 2
 done
 
 # Get admin token
-TOKEN=$(curl -sf -X POST "${KEYCLOAK_URL}/realms/master/protocol/openid-connect/token" \
+TOKEN=$(curl -sf -X POST "http://localhost:18080/kc/realms/master/protocol/openid-connect/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "client_id=admin-cli" \
   -d "username=${ADMIN_USER}" \
@@ -414,15 +430,17 @@ TOKEN=$(curl -sf -X POST "${KEYCLOAK_URL}/realms/master/protocol/openid-connect/
   -d "grant_type=password" | jq -r '.access_token')
 
 # Import realm
-curl -sf -X POST "${KEYCLOAK_URL}/admin/realms" \
+curl -sf -X POST "http://localhost:18080/kc/admin/realms" \
   -H "Authorization: Bearer ${TOKEN}" \
   -H "Content-Type: application/json" \
-  -d @keycloak/realm-export.json
+  -d @docker/keycloak/realm/studiomcp-realm.json
 
 echo "Realm bootstrap complete"
 ```
 
-### Kubernetes Job Bootstrap
+### Alternative Chart-Managed Bootstrap
+
+The repository currently uses the CLI-driven kind bootstrap described above. A chart-managed Kubernetes Job remains a viable alternative pattern, but it is not the active default path.
 
 ```yaml
 apiVersion: batch/v1
@@ -450,46 +468,49 @@ spec:
 ### Manual Validation
 
 ```bash
-# 1. Verify realm exists
-curl -sf "http://localhost:8080/realms/studiomcp" | jq '.realm'
+# 1. Provision the cluster edge and bootstrap Keycloak
+docker compose -f docker-compose.yaml exec -T studiomcp-env studiomcp cluster ensure
 
-# 2. Get CLI token (PKCE flow simulated with direct grant for testing)
-TOKEN=$(curl -sf -X POST "http://localhost:8080/realms/studiomcp/protocol/openid-connect/token" \
-  -d "client_id=studiomcp-cli" \
-  -d "username=testuser1" \
-  -d "password=testpassword1" \
-  -d "grant_type=password" \
-  -d "scope=openid workflow:read" | jq -r '.access_token')
+# 2. Verify realm exists through the kind ingress edge
+curl -sf "http://localhost:8081/kc/realms/studiomcp" | jq '.realm'
 
-# 3. Verify token has expected claims
-echo $TOKEN | cut -d. -f2 | base64 -d 2>/dev/null | jq .
+# 3. Validate the realm through the automated kind-edge path
+docker compose -f docker-compose.yaml exec -T studiomcp-env studiomcp validate keycloak
 
-# 4. Test MCP auth validation
-curl -sf -X POST "http://localhost:3000/mcp" \
-  -H "Authorization: Bearer ${TOKEN}" \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+# 4. Validate authenticated MCP access through the kind ingress edge
+docker compose -f docker-compose.yaml exec -T studiomcp-env studiomcp validate mcp-auth
+
+# 5. Validate browser session and BFF flows through the kind ingress edge
+docker compose -f docker-compose.yaml exec -T studiomcp-env studiomcp validate web-bff
 ```
 
 ### Automated Validation
 
-The `studiomcp validate keycloak` command performs:
+`studiomcp validate keycloak` performs live validation against the kind cluster. The validator provisions the cluster if needed, then validates the realm through the published kind ingress edge.
+
+`studiomcp validate mcp-auth`, `studiomcp validate mcp-http`, and `studiomcp validate web-bff` use the same kind ingress edge plus the bootstrapped realm.
+
+When the kind cluster is not available, validation falls back to the fake Keycloak-compatible JWKS harness.
+
+Required automated validation covers:
 
 1. Realm existence check
-2. Client existence check (all 4 clients)
-3. Scope existence check (all custom scopes)
-4. Test user authentication
-5. Token claim verification
+2. Client existence check for the active MCP, BFF, and service-account clients
+3. Scope existence check for all required custom scopes
+4. Test user authentication through the simplified login/password path
+5. Token claim and subject resolution verification
 6. JWKS endpoint availability
+7. Idempotent cluster bootstrap when the kind-edge path is selected
 
 ## Validation Expectations
 
 - realm exists
-- clients exist
+- required clients exist
 - required scopes and roles exist
 - test users can authenticate
 - wrong-audience tokens are rejected by MCP
 - seeded tenant mappings support integration tests
+- re-running the automated bootstrap leaves the realm usable for the same validation set
 
 ## Cross-References
 

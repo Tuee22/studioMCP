@@ -72,7 +72,7 @@ import qualified Data.Text.Encoding as TE
 import Data.Time (UTCTime, getCurrentTime)
 import Data.Time.Clock (diffUTCTime)
 import StudioMCP.Auth.Types (SubjectId (..), TenantId (..))
-import StudioMCP.DAG.Executor (ExecutorAdapters, ExecutionReport (..), executeSequential)
+import StudioMCP.DAG.Executor (ExecutorAdapters, ExecutionReport (..), executeParallel)
 import StudioMCP.DAG.Parser (decodeDagBytes)
 import StudioMCP.DAG.Runtime (PersistedRun (..), RuntimeConfig (..), runDagSpecEndToEnd)
 import StudioMCP.DAG.Summary (RunId (..), summaryFinishedAt, summaryStartedAt, summaryStatus)
@@ -470,7 +470,7 @@ executeWorkflowSubmit catalog executor =
                   ("Workflow accepted for tenant " <> tenantIdText <> ". Run ID: " <> unRunId runId <> ". Status: accepted")
                   (workflowRunRecordToJson runRecord)
             Just adapters -> do
-              result <- executeSequential adapters runId now dagSpec
+              result <- executeParallel adapters runId now dagSpec
               case result of
                 Left failureDetail -> do
                   let runRecord =

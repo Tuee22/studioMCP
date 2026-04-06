@@ -1,0 +1,277 @@
+{
+  "realm": "studiomcp",
+  "enabled": true,
+  "displayName": "studioMCP",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": false,
+  "rememberMe": true,
+  "verifyEmail": false,
+  "sslRequired": "none",
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "roles": {
+    "realm": [
+      {
+        "name": "user",
+        "description": "Basic studioMCP user"
+      },
+      {
+        "name": "operator",
+        "description": "Operator access for workflow management"
+      },
+      {
+        "name": "admin",
+        "description": "Platform administrator"
+      }
+    ]
+  },
+  "clientScopes": [
+    {
+      "name": "workflow:read",
+      "description": "Read workflow runs",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      }
+    },
+    {
+      "name": "workflow:write",
+      "description": "Submit and manage workflow runs",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      }
+    },
+    {
+      "name": "artifact:read",
+      "description": "Read artifacts",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      }
+    },
+    {
+      "name": "artifact:write",
+      "description": "Write artifacts",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      }
+    },
+    {
+      "name": "artifact:manage",
+      "description": "Manage artifact lifecycle",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      }
+    },
+    {
+      "name": "prompt:read",
+      "description": "Read MCP prompts",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      }
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "studiomcp-mcp",
+      "name": "studioMCP MCP Server",
+      "enabled": true,
+      "bearerOnly": true,
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile"
+      ],
+      "optionalClientScopes": [
+        "workflow:read",
+        "workflow:write",
+        "artifact:read",
+        "artifact:write",
+        "artifact:manage"
+      ]
+    },
+    {
+      "clientId": "studiomcp-bff",
+      "name": "studioMCP BFF",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "studiomcp-bff-dev-secret",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "authorizationServicesEnabled": false,
+      "protocol": "openid-connect",
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "profile",
+        "email",
+        "roles",
+        "web-origins",
+        "workflow:read",
+        "workflow:write",
+        "artifact:read",
+        "artifact:write",
+        "prompt:read"
+      ],
+      "optionalClientScopes": [
+        "artifact:manage"
+      ],
+      "protocolMappers": [
+        {
+          "name": "tenant-id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "tenant_id",
+            "claim.name": "tenant_id",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "mcp-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "studiomcp-mcp",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "studiomcp-service",
+      "name": "studioMCP Service Account",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "studiomcp-service-dev-secret",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "openid",
+        "workflow:read",
+        "workflow:write"
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "testuser1",
+      "email": "testuser1@example.com",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Test",
+      "lastName": "User One",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "testpassword1",
+          "temporary": false
+        }
+      ],
+      "attributes": {
+        "tenant_id": [
+          "tenant-acme"
+        ]
+      },
+      "realmRoles": [
+        "user"
+      ]
+    },
+    {
+      "username": "testuser2",
+      "email": "testuser2@example.com",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Test",
+      "lastName": "User Two",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "testpassword2",
+          "temporary": false
+        }
+      ],
+      "attributes": {
+        "tenant_id": [
+          "tenant-globex"
+        ]
+      },
+      "realmRoles": [
+        "user"
+      ]
+    },
+    {
+      "username": "testoperator",
+      "email": "operator@example.com",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Test",
+      "lastName": "Operator",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "testoperator",
+          "temporary": false
+        }
+      ],
+      "attributes": {
+        "tenant_id": [
+          "tenant-acme"
+        ]
+      },
+      "realmRoles": [
+        "user",
+        "operator"
+      ]
+    },
+    {
+      "username": "testadmin",
+      "email": "admin@example.com",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Platform",
+      "lastName": "Admin",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "testadmin",
+          "temporary": false
+        }
+      ],
+      "attributes": {
+        "tenant_id": [
+          "tenant-platform"
+        ]
+      },
+      "realmRoles": [
+        "user",
+        "operator",
+        "admin"
+      ]
+    }
+  ]
+}

@@ -9,7 +9,7 @@ import StudioMCP.CLI.Command
   )
 import StudioMCP.CLI.Dag (runDagCommand, validateDagFileCommand)
 import StudioMCP.Inference.Host (runInferenceMode)
-import StudioMCP.MCP.Server (runServer)
+import StudioMCP.MCP.Server (runServer, runServerStdio)
 import StudioMCP.Worker.Server (runWorkerMode)
 import System.Environment (getArgs)
 import System.Exit (die)
@@ -22,6 +22,7 @@ main = do
     Right command ->
       case command of
         ServerCommand -> runServer
+        StdioCommand -> runServerStdio
         BffCommand -> runBffMode
         InferenceCommand -> runInferenceMode
         WorkerCommand -> runWorkerMode

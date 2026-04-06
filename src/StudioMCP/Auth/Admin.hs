@@ -26,6 +26,7 @@ module StudioMCP.Auth.Admin
     -- * Bootstrap Operations
     bootstrapStudioMCPRealm,
     BootstrapResult (..),
+    importRealmDefinition,
 
     -- * Errors
     AdminError (..),
@@ -615,6 +616,19 @@ bootstrapStudioMCPRealm client realmName mcpClientId bffClientId bffRedirectUri 
                       brScopesCreated = scopesCreated,
                       brWarnings = []
                     }
+
+importRealmDefinition ::
+  KeycloakAdminClient ->
+  LBS.ByteString ->
+  IO (Either AdminError ())
+importRealmDefinition client realmDefinition = do
+  let url = T.unpack $ kacBaseUrl (kacConfig client) <> "/admin/realms"
+  result <- makeAuthPostRequest client url realmDefinition
+  case result of
+    Left err -> pure $ Left err
+    Right (status, _)
+      | status == 201 || status == 204 -> pure (Right ())
+      | otherwise -> pure $ Left $ RequestFailed status "Failed to import realm definition"
 
 -- | Create scopes, collecting names of successfully created ones
 createScopes ::

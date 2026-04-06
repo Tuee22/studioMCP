@@ -43,6 +43,9 @@ import System.Environment (lookupEnv)
 data KeycloakConfig = KeycloakConfig
   { -- | Keycloak issuer URL (e.g., "https://auth.example.com/realms/studiomcp")
     kcIssuer :: Text,
+    -- | Additional accepted issuer URLs (for containers behind proxies, Kind env, etc.)
+    -- Tokens with any of these issuers will be accepted.
+    kcAdditionalIssuers :: [Text],
     -- | Expected audience in tokens (e.g., "studiomcp-mcp")
     kcAudience :: Text,
     -- | Realm name (extracted from issuer or explicitly set)
@@ -62,6 +65,7 @@ instance ToJSON KeycloakConfig where
   toJSON kc =
     object
       [ "issuer" .= kcIssuer kc,
+        "additionalIssuers" .= kcAdditionalIssuers kc,
         "audience" .= kcAudience kc,
         "realm" .= kcRealm kc,
         "clientId" .= kcClientId kc,
@@ -74,6 +78,7 @@ instance FromJSON KeycloakConfig where
   parseJSON = withObject "KeycloakConfig" $ \obj ->
     KeycloakConfig
       <$> obj .: "issuer"
+      <*> (maybe [] id <$> obj .:? "additionalIssuers")
       <*> obj .: "audience"
       <*> obj .: "realm"
       <*> obj .: "clientId"
@@ -85,7 +90,8 @@ instance FromJSON KeycloakConfig where
 defaultKeycloakConfig :: KeycloakConfig
 defaultKeycloakConfig =
   KeycloakConfig
-    { kcIssuer = "http://localhost:8080/realms/studiomcp",
+    { kcIssuer = "http://localhost:8080/kc/realms/studiomcp",
+      kcAdditionalIssuers = [],
       kcAudience = "studiomcp-mcp",
       kcRealm = "studiomcp",
       kcClientId = "studiomcp-mcp",
@@ -143,7 +149,8 @@ defaultAuthConfig =
 loadAuthConfigFromEnv :: IO AuthConfig
 loadAuthConfigFromEnv = do
   -- Keycloak settings
-  issuer <- lookupEnvText "STUDIOMCP_KEYCLOAK_ISSUER" "http://localhost:8080/realms/studiomcp"
+  issuer <- lookupEnvText "STUDIOMCP_KEYCLOAK_ISSUER" "http://localhost:8080/kc/realms/studiomcp"
+  additionalIssuers <- lookupEnvList "STUDIOMCP_KEYCLOAK_ADDITIONAL_ISSUERS"
   audience <- lookupEnvText "STUDIOMCP_KEYCLOAK_AUDIENCE" "studiomcp-mcp"
   realm <- lookupEnvText "STUDIOMCP_KEYCLOAK_REALM" "studiomcp"
   clientId <- lookupEnvText "STUDIOMCP_KEYCLOAK_CLIENT_ID" "studiomcp-mcp"
@@ -159,6 +166,7 @@ loadAuthConfigFromEnv = do
   let keycloakConfig =
         KeycloakConfig
           { kcIssuer = issuer,
+            kcAdditionalIssuers = additionalIssuers,
             kcAudience = audience,
             kcRealm = realm,
             kcClientId = clientId,
@@ -183,6 +191,15 @@ lookupEnvText name def = maybe def T.pack <$> lookupEnv name
 -- | Helper to lookup optional text env var
 lookupEnvMaybe :: String -> IO (Maybe Text)
 lookupEnvMaybe name = fmap T.pack <$> lookupEnv name
+
+-- | Helper to lookup comma-separated list env var
+lookupEnvList :: String -> IO [Text]
+lookupEnvList name = do
+  mVal <- lookupEnv name
+  pure $ case mVal of
+    Nothing -> []
+    Just "" -> []
+    Just s -> filter (not . T.null) $ map T.strip $ T.splitOn "," (T.pack s)
 
 -- | Helper to lookup int env var with default
 lookupEnvInt :: String -> Int -> IO Int
@@ -209,19 +226,28 @@ lookupEnvBool name def = do
 
 -- | Get JWKS endpoint URL from Keycloak config
 jwksEndpoint :: KeycloakConfig -> Text
-jwksEndpoint kc = kcIssuer kc <> "/protocol/openid-connect/certs"
+jwksEndpoint kc = keycloakEndpointBase kc <> "/protocol/openid-connect/certs"
 
 -- | Get token endpoint URL from Keycloak config
 tokenEndpoint :: KeycloakConfig -> Text
-tokenEndpoint kc = kcIssuer kc <> "/protocol/openid-connect/token"
+tokenEndpoint kc = keycloakEndpointBase kc <> "/protocol/openid-connect/token"
 
 -- | Get authorization endpoint URL from Keycloak config
 authorizeEndpoint :: KeycloakConfig -> Text
-authorizeEndpoint kc = kcIssuer kc <> "/protocol/openid-connect/auth"
+authorizeEndpoint kc = keycloakEndpointBase kc <> "/protocol/openid-connect/auth"
 
 -- | Get userinfo endpoint URL from Keycloak config
 userinfoEndpoint :: KeycloakConfig -> Text
-userinfoEndpoint kc = kcIssuer kc <> "/protocol/openid-connect/userinfo"
+userinfoEndpoint kc = keycloakEndpointBase kc <> "/protocol/openid-connect/userinfo"
+
+-- | Get the base URL for JWKS/token endpoints.
+-- Uses the first additional issuer if available (for internal cluster access),
+-- otherwise falls back to the primary issuer.
+keycloakEndpointBase :: KeycloakConfig -> Text
+keycloakEndpointBase kc =
+  case kcAdditionalIssuers kc of
+    (internalIssuer : _) -> internalIssuer
+    [] -> kcIssuer kc
 
 -- | Configuration validation error
 data ConfigValidationError

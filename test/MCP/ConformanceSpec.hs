@@ -11,6 +11,7 @@
 module MCP.ConformanceSpec (spec) where
 
 import Data.Aeson (Value (..), decode, encode, object, (.=))
+import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.ByteString.Lazy as LBS
 import Data.Maybe (isJust)
@@ -154,6 +155,21 @@ resourcesListSpec = describe "resources/list" $ do
             KM.lookup "result" obj `shouldSatisfy` isJust
           Just _ -> expectationFailure "Response should be an object"
 
+  it "returns resumable metadata for resources/subscribe after initialization" $ do
+    server <- newMcpServer defaultServerConfig
+    let initReq = buildInitializeRequest "2024-11-05" 1
+    _ <- handleMessage server initReq
+    _ <- handleMessage server buildInitializedNotification
+    subscribeResult <- handleMessage server (buildResourcesSubscribeRequest 2 "studiomcp://history/runs" (Just "cursor-2") (Just "evt-2"))
+    case subscribeResult of
+      Nothing -> expectationFailure "Expected response"
+      Just resp ->
+        case decode (encode resp) :: Maybe Value of
+          Just subscribeValue -> do
+            lookupPath ["result", "cursor"] subscribeValue `shouldBe` Just (String "cursor-2")
+            lookupPath ["result", "lastEventId"] subscribeValue `shouldBe` Just (String "evt-2")
+          Nothing -> expectationFailure "Response should be valid JSON"
+
 -- | prompts/list endpoint conformance
 promptsListSpec :: Spec
 promptsListSpec = describe "prompts/list" $ do
@@ -271,6 +287,21 @@ buildResourcesListRequest reqId =
       "method" .= ("resources/list" :: Text)
     ]
 
+buildResourcesSubscribeRequest :: Int -> Text -> Maybe Text -> Maybe Text -> Value
+buildResourcesSubscribeRequest reqId resourceUri maybeCursor maybeLastEventId =
+  object
+    [ "jsonrpc" .= ("2.0" :: Text),
+      "id" .= reqId,
+      "method" .= ("resources/subscribe" :: Text),
+      "params" .=
+        object
+          ( [ "uri" .= resourceUri
+            ]
+              <> maybe [] (\cursor -> ["cursor" .= cursor]) maybeCursor
+              <> maybe [] (\eventId -> ["lastEventId" .= eventId]) maybeLastEventId
+          )
+    ]
+
 buildPromptsListRequest :: Int -> Value
 buildPromptsListRequest reqId =
   object
@@ -295,3 +326,9 @@ buildBadToolsCallRequest reqId =
       "method" .= ("tools/call" :: Text),
       "params" .= object []  -- Missing required 'name' parameter
     ]
+
+lookupPath :: [String] -> Value -> Maybe Value
+lookupPath [] currentValue = Just currentValue
+lookupPath (segment : remainingPath) (Object objectValue) =
+  KM.lookup (Key.fromString segment) objectValue >>= lookupPath remainingPath
+lookupPath _ _ = Nothing

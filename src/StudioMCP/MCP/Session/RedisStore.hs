@@ -27,6 +27,7 @@ where
 import Control.Concurrent.MVar (MVar, newMVar, putMVar, takeMVar)
 import Control.Concurrent.STM (TVar, atomically, newTVarIO, readTVarIO, writeTVar)
 import Control.Exception (SomeException, bracket_, try)
+import System.Timeout (timeout)
 import Control.Monad (forM, forM_, unless)
 import Data.Aeson (FromJSON, ToJSON, decode, encode)
 import qualified Data.ByteString as BS
@@ -120,10 +121,17 @@ withRedisConnection store action = do
         Right value ->
           pure (Right value)
 
+-- | Test Redis connection with a short timeout to detect outages quickly.
+-- Uses a 2-second timeout to fail fast when Redis is unreachable, avoiding
+-- stale pooled connections that may not immediately detect backend failures.
 testConnection :: RedisSessionStore -> IO (Either SessionStoreError ())
 testConnection store = do
-  pingResult <- execRedis store ping
-  pure (pingResult >> Right ())
+  -- 2 second timeout in microseconds (2,000,000 μs)
+  pingResultOrTimeout <- timeout 2_000_000 (execRedis store ping)
+  pure $
+    case pingResultOrTimeout of
+      Nothing -> Left $ StoreTimeoutError "Redis health check timed out"
+      Just pingResult -> pingResult >> Right ()
 
 readSessionData :: RedisSessionStore -> SessionId -> IO (Either SessionStoreError SessionData)
 readSessionData store sid = do

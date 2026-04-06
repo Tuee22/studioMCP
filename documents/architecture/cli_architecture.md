@@ -76,7 +76,7 @@ The exact spellings live in the CLI reference document, but the architectural sp
 
 ## Current Repo Note
 
-The implemented CLI surface already covers DAG validation, cluster lifecycle, sidecar deployment, server deployment, storage reconciliation, executor and end-to-end validation, MCP transport validation, auth validation, session scaling validation, inference validation, observability validation, and conformance validation. The remaining CLI gaps are ergonomic rather than architectural.
+The implemented CLI surface already covers DAG validation, cluster lifecycle, cluster reset, storage reconciliation and deletion, sidecar deployment, server deployment, stdio and HTTP MCP runtime entrypoints, auth validation, session scaling validation, inference validation, observability validation, and conformance validation.
 
 ## Cross-References
 

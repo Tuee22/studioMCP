@@ -3,7 +3,7 @@
 
 **Status**: Authoritative source
 **Supersedes**: N/A
-**Referenced by**: [k8s_native_dev_policy.md](k8s_native_dev_policy.md#cross-references), [k8s_storage.md](k8s_storage.md#cross-references), [../development/local_dev.md](../development/local_dev.md#cross-references), [../architecture/cli_architecture.md](../architecture/cli_architecture.md#cross-references), [../../README.md](../../README.md#docker-strategy), [../../STUDIOMCP_DEVELOPMENT_PLAN.md](../../STUDIOMCP_DEVELOPMENT_PLAN.md#documentation-governance)
+**Referenced by**: [k8s_native_dev_policy.md](k8s_native_dev_policy.md#cross-references), [k8s_storage.md](k8s_storage.md#cross-references), [../development/local_dev.md](../development/local_dev.md#cross-references), [../architecture/cli_architecture.md](../architecture/cli_architecture.md#cross-references), [../../README.md](../../README.md#docker-strategy), [../../DEVELOPMENT_PLAN.md](../../DEVELOPMENT_PLAN.md#documentation-governance)
 
 > **Purpose**: Canonical policy for the repository's Docker usage, including the no-scripts rule, the outer development container, and the runtime image boundary.
 

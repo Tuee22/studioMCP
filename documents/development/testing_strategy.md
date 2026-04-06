@@ -3,7 +3,7 @@
 
 **Status**: Authoritative source
 **Supersedes**: legacy `documents/development/testing-strategy.md`
-**Referenced by**: [../README.md](../README.md#documentation-suite), [../architecture/overview.md](../architecture/overview.md#cross-references), [../reference/cli_surface.md](../reference/cli_surface.md#cross-references), [../../STUDIOMCP_DEVELOPMENT_PLAN.md](../../STUDIOMCP_DEVELOPMENT_PLAN.md#documentation-governance)
+**Referenced by**: [../README.md](../README.md#documentation-suite), [../architecture/overview.md](../architecture/overview.md#cross-references), [../reference/cli_surface.md](../reference/cli_surface.md#cross-references), [../../DEVELOPMENT_PLAN.md](../../DEVELOPMENT_PLAN.md#documentation-governance)
 
 > **Purpose**: Canonical testing policy for unit tests, integration tests, protocol validation, auth validation, and runtime verification in `studioMCP`.
 
