@@ -30,6 +30,7 @@ markdownFilesToCheck =
 validateDocsCommand :: IO ()
 validateDocsCommand = do
   docFiles <- findMarkdownFiles "documents"
+  planFiles <- findMarkdownFiles "DEVELOPMENT_PLAN"
   let requiredFiles =
         [ "documents/README.md"
         , "documents/documentation_standards.md"
@@ -54,11 +55,33 @@ validateDocsCommand = do
         , "documents/reference/web_portal_surface.md"
         -- ADR files removed per documentation_standards.md (no ADRs in documents/)
         ]
+      requiredPlanFiles =
+        [ "DEVELOPMENT_PLAN/README.md"
+        , "DEVELOPMENT_PLAN/development_plan_standards.md"
+        , "DEVELOPMENT_PLAN/00-overview.md"
+        , "DEVELOPMENT_PLAN/system-components.md"
+        , "DEVELOPMENT_PLAN/phase-1-repository-dag-runtime-foundations.md"
+        , "DEVELOPMENT_PLAN/phase-2-mcp-surface-catalog-artifact-governance.md"
+        , "DEVELOPMENT_PLAN/phase-3-keycloak-auth-shared-sessions.md"
+        , "DEVELOPMENT_PLAN/phase-4-control-plane-data-plane-contract.md"
+        , "DEVELOPMENT_PLAN/phase-5-browser-session-contract.md"
+        , "DEVELOPMENT_PLAN/phase-6-cluster-control-plane-parity.md"
+        , "DEVELOPMENT_PLAN/phase-7-keycloak-realm-bootstrap.md"
+        , "DEVELOPMENT_PLAN/phase-8-final-closure-regression-gate.md"
+        , "DEVELOPMENT_PLAN/legacy-tracking-for-deletion.md"
+        ]
   requiredProblems <- fmap concat $
     forM requiredFiles $ \path -> do
       exists <- doesFileExist path
       pure $
         [ "Missing required documentation file: " <> Text.pack path
+        | not exists
+        ]
+  requiredPlanProblems <- fmap concat $
+    forM requiredPlanFiles $ \path -> do
+      exists <- doesFileExist path
+      pure $
+        [ "Missing required development plan file: " <> Text.pack path
         | not exists
         ]
   docProblems <- fmap concat $
@@ -69,6 +92,14 @@ validateDocsCommand = do
           pure ["Documentation file is not valid UTF-8: " <> Text.pack path]
         Right content ->
           pure (validateDocText path content)
+  planProblems <- fmap concat $
+    forM planFiles $ \path -> do
+      fileBytes <- BS.readFile path
+      case decodeUtf8' fileBytes of
+        Left _ ->
+          pure ["Development plan file is not valid UTF-8: " <> Text.pack path]
+        Right content ->
+          pure (validateDocText path content)
   rootProblems <- fmap concat $
     forM markdownFilesToCheck $ \path -> do
       exists <- doesFileExist path
@@ -76,7 +107,7 @@ validateDocsCommand = do
         [ "Missing expected root markdown file: " <> Text.pack path
         | not exists
         ]
-  let problems = requiredProblems <> docProblems <> rootProblems
+  let problems = requiredProblems <> requiredPlanProblems <> docProblems <> planProblems <> rootProblems
   unless (null problems) $
     die (Text.unpack (renderProblems problems))
   putStrLn "Documentation checks passed."

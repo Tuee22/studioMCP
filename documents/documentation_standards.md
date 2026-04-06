@@ -3,7 +3,7 @@
 
 **Status**: Authoritative source
 **Supersedes**: N/A
-**Referenced by**: [README.md](README.md#suite-structure), [../README.md](../README.md#contribution-guidance), [../DEVELOPMENT_PLAN.md](../DEVELOPMENT_PLAN.md#documentation-governance)
+**Referenced by**: [README.md](README.md#suite-structure), [../README.md](../README.md#contribution-guidance), [../DEVELOPMENT_PLAN/README.md](../DEVELOPMENT_PLAN/README.md#phase-overview)
 
 > **Purpose**: Single Source of Truth for how the `documents/` suite is structured, written, linked, and maintained in `studioMCP`.
 
@@ -130,7 +130,7 @@ Validation checklist for each Mermaid diagram:
 - [ ] Validate Mermaid diagrams after edits.
 - [ ] Keep `../README.md` and this suite index aligned when the structure changes.
 - [ ] Keep the suite index aligned when canonical documents are added, renamed, or retired.
-- [ ] Keep `../DEVELOPMENT_PLAN.md` aligned when documentation governance changes.
+- [ ] Keep `../DEVELOPMENT_PLAN/README.md` and `../DEVELOPMENT_PLAN.md` aligned when documentation governance changes.
 
 ## Cross-References
 
