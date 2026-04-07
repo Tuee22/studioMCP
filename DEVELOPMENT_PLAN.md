@@ -14,14 +14,16 @@ This root file remains as a compatibility index for existing links, tooling, and
 | 5 | Done | [DEVELOPMENT_PLAN/phase-5-browser-session-contract.md](DEVELOPMENT_PLAN/phase-5-browser-session-contract.md) |
 | 6 | Done | [DEVELOPMENT_PLAN/phase-6-cluster-control-plane-parity.md](DEVELOPMENT_PLAN/phase-6-cluster-control-plane-parity.md) |
 | 7 | Done | [DEVELOPMENT_PLAN/phase-7-keycloak-realm-bootstrap.md](DEVELOPMENT_PLAN/phase-7-keycloak-realm-bootstrap.md) |
-| 8 | Active | [DEVELOPMENT_PLAN/phase-8-final-closure-regression-gate.md](DEVELOPMENT_PLAN/phase-8-final-closure-regression-gate.md) |
+| 8 | Done | [DEVELOPMENT_PLAN/phase-8-final-closure-regression-gate.md](DEVELOPMENT_PLAN/phase-8-final-closure-regression-gate.md) |
 
 ## Current Validation State
 
 - `cabal build all` passes.
 - `cabal test unit-tests --test-show-details=direct` passes with 844 unit tests.
-- `cabal test integration-tests --test-show-details=direct` passes 15 of 16 integration tests.
-- The remaining open failure is MCP conformance through the outer-container CLI.
+- `cabal test integration-tests --test-show-details=direct` passes with 16 integration tests.
+- `cabal test all --test-show-details=direct` passes on the supported outer-container path.
+- `cabal run studiomcp -- validate docs` passes.
+- The outer `studiomcp-env` container resolves `studiomcp` on `PATH` at `/usr/local/bin/studiomcp`.
 
 ## Public Topology Baseline
 

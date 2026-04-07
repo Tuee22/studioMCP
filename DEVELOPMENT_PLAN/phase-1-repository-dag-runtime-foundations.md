@@ -11,7 +11,7 @@
 ## Phase Summary
 
 **Status**: Done
-**Implementation**: `src/StudioMCP/DAG/Parser.hs`, `src/StudioMCP/DAG/Executor.hs`, `src/StudioMCP/Tools/Boundary.hs`, `src/StudioMCP/Tools/FFmpeg.hs`, `src/StudioMCP/Worker/Server.hs`
+**Implementation**: `src/StudioMCP/DAG/Parser.hs`, `src/StudioMCP/DAG/Validator.hs`, `src/StudioMCP/DAG/Executor.hs`, `src/StudioMCP/DAG/Scheduler.hs`, `src/StudioMCP/DAG/Timeout.hs`, `src/StudioMCP/DAG/Memoization.hs`, `src/StudioMCP/Tools/Boundary.hs`, `src/StudioMCP/Tools/FFmpeg.hs`, `src/StudioMCP/Worker/Server.hs`, `src/StudioMCP/Inference/Host.hs`
 **Docs to update**: `documents/domain/dag_specification.md`, `documents/architecture/parallel_scheduling.md`, `documents/tools/ffmpeg.md`
 
 ### Goal
@@ -23,17 +23,17 @@ adapters, worker entrypoints, and foundational validation commands.
 
 | Item | File(s) | Status |
 |------|---------|--------|
-| DAG parser and validator | `src/StudioMCP/DAG/Parser.hs`, `Validator.hs` | Done |
+| DAG parser and validator | `src/StudioMCP/DAG/Parser.hs`, `src/StudioMCP/DAG/Validator.hs` | Done |
 | Sequential executor | `src/StudioMCP/DAG/Executor.hs` | Done |
 | Parallel scheduler | `src/StudioMCP/DAG/Scheduler.hs` | Done |
-| Timeout and memoization | `src/StudioMCP/DAG/Timeout.hs`, `Memoization.hs` | Done |
+| Timeout and memoization | `src/StudioMCP/DAG/Timeout.hs`, `src/StudioMCP/DAG/Memoization.hs` | Done |
 | Summary model | `src/StudioMCP/DAG/Summary.hs` | Done |
 | Boundary runtime | `src/StudioMCP/Tools/Boundary.hs` | Done |
 | FFmpeg adapter | `src/StudioMCP/Tools/FFmpeg.hs` | Done |
 | Pulsar messaging | `src/StudioMCP/Messaging/Pulsar.hs` | Done |
 | MinIO storage | `src/StudioMCP/Storage/MinIO.hs` | Done |
 | Worker entrypoint | `src/StudioMCP/Worker/Server.hs` | Done |
-| Inference entrypoint | `src/StudioMCP/Inference/*.hs` | Done |
+| Inference entrypoint | `src/StudioMCP/Inference/Host.hs`, `src/StudioMCP/Inference/ReferenceModel.hs` | Done |
 
 ### Validation
 

@@ -21,6 +21,7 @@ services:
       DOCKER_HOST: unix:///var/run/docker.sock
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
+      STUDIOMCP_OUTER_CONTAINER: "1"
       # Kind cluster configuration
       STUDIOMCP_KIND_CLUSTER: ${STUDIOMCP_KIND_CLUSTER:-studiomcp}
       STUDIOMCP_KIND_HOST_DATA_PATH: ${STUDIOMCP_KIND_HOST_DATA_PATH:-}

@@ -5,6 +5,7 @@ where
 
 import Control.Monad (unless)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import System.Environment (lookupEnv)
 import System.Exit (ExitCode (ExitSuccess, ExitFailure))
 import System.IO.Unsafe (unsafePerformIO)
 import System.Process (readProcessWithExitCode)
@@ -75,7 +76,7 @@ spec =
 
     it "rehearses horizontal scaling across deployed MCP replicas" $ do
       ensureOuterEnvironment
-      output <- runOuterCliExpectSuccess ["validate", "mcp-horizontal-scale"]
+      output <- runOuterCliExpectSuccessWithDiagnostics ["validate", "mcp-horizontal-scale"]
       output `shouldContain` "validate horizontal-scale: PASS"
 
     it "exercises MCP auth through the cluster edge" $ do
@@ -97,16 +98,23 @@ ensureOuterContainer :: IO ()
 ensureOuterContainer = do
   alreadyReady <- readIORef outerContainerReadyRef
   unless alreadyReady $ do
-    _ <- runComposeExpectSuccess ["up", "-d", "studiomcp-env"]
-    _ <-
-      runComposeExpectSuccess
-        [ "exec",
-          "-T",
-          "studiomcp-env",
-          "sh",
-          "-lc",
-          "rm -rf /tmp/studiomcp-dist && cabal --builddir=/tmp/studiomcp-dist build all && cabal --builddir=/tmp/studiomcp-dist install exe:studiomcp --installdir /usr/local/bin --overwrite-policy=always"
-        ]
+    insideOuterContainer <- isInsideOuterContainer
+    if insideOuterContainer
+      then do
+        _ <- runShellExpectSuccess outerContainerBuildCommand
+        pure ()
+      else do
+        _ <- runComposeExpectSuccess ["up", "-d", "studiomcp-env"]
+        _ <-
+          runComposeExpectSuccess
+            [ "exec",
+              "-T",
+              "studiomcp-env",
+              "sh",
+              "-lc",
+              outerContainerBuildCommand
+            ]
+        pure ()
     writeIORef outerContainerReadyRef True
 
 ensureOuterEnvironment :: IO ()
@@ -134,13 +142,17 @@ runComposeExpectSuccess args = do
 
 runOuterCliExpectSuccess :: [String] -> IO String
 runOuterCliExpectSuccess args = do
+  insideOuterContainer <- isInsideOuterContainer
   (exitCode, stdoutText, stderrText) <-
-    readProcessWithExitCode
-      "docker"
-      ( ["compose", "-f", "docker-compose.yaml", "exec", "-T", "studiomcp-env", "studiomcp"]
-          <> args
-      )
-      ""
+    if insideOuterContainer
+      then readProcessWithExitCode "studiomcp" args ""
+      else
+        readProcessWithExitCode
+          "docker"
+          ( ["compose", "-f", "docker-compose.yaml", "exec", "-T", "studiomcp-env", "studiomcp"]
+              <> args
+          )
+          ""
   let combinedOutput = stdoutText <> stderrText
   exitCode `shouldBe` ExitSuccess
   pure combinedOutput
@@ -150,13 +162,17 @@ runOuterCliExpectSuccess args = do
 -- the failure reason is essential.
 runOuterCliExpectSuccessWithDiagnostics :: [String] -> IO String
 runOuterCliExpectSuccessWithDiagnostics args = do
+  insideOuterContainer <- isInsideOuterContainer
   (exitCode, stdoutText, stderrText) <-
-    readProcessWithExitCode
-      "docker"
-      ( ["compose", "-f", "docker-compose.yaml", "exec", "-T", "studiomcp-env", "studiomcp"]
-          <> args
-      )
-      ""
+    if insideOuterContainer
+      then readProcessWithExitCode "studiomcp" args ""
+      else
+        readProcessWithExitCode
+          "docker"
+          ( ["compose", "-f", "docker-compose.yaml", "exec", "-T", "studiomcp-env", "studiomcp"]
+              <> args
+          )
+          ""
   let combinedOutput = stdoutText <> stderrText
   case exitCode of
     ExitSuccess -> pure combinedOutput
@@ -174,3 +190,24 @@ outerContainerReadyRef = unsafePerformIO (newIORef False)
 outerEnvironmentReadyRef :: IORef Bool
 outerEnvironmentReadyRef = unsafePerformIO (newIORef False)
 {-# NOINLINE outerEnvironmentReadyRef #-}
+
+outerContainerBuildCommand :: String
+outerContainerBuildCommand =
+  "rm -rf /opt/build/studiomcp-cli && mkdir -p /opt/build/studiomcp-cli && cabal --builddir=/opt/build/studiomcp-cli build all && cabal --builddir=/opt/build/studiomcp-cli install exe:studiomcp --installdir /usr/local/bin --overwrite-policy=always"
+
+isInsideOuterContainer :: IO Bool
+isInsideOuterContainer = do
+  envValue <- lookupEnv "STUDIOMCP_OUTER_CONTAINER"
+  case envValue of
+    Just "1" -> pure True
+    Just "true" -> pure True
+    Just "TRUE" -> pure True
+    _ -> pure False
+
+runShellExpectSuccess :: String -> IO String
+runShellExpectSuccess command = do
+  (exitCode, stdoutText, stderrText) <-
+    readProcessWithExitCode "sh" ["-lc", command] ""
+  let combinedOutput = stdoutText <> stderrText
+  exitCode `shouldBe` ExitSuccess
+  pure combinedOutput

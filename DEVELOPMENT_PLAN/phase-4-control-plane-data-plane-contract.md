@@ -11,7 +11,7 @@
 ## Phase Summary
 
 **Status**: Done
-**Implementation**: `chart/templates/*.yaml`, `chart/values.yaml`, `chart/values-kind.yaml`, `src/StudioMCP/Config/Load.hs`
+**Implementation**: `chart/templates/studiomcp_deployment.yaml`, `chart/templates/bff.yaml`, `chart/templates/ingress.yaml`, `chart/values.yaml`, `chart/values-kind.yaml`, `src/StudioMCP/Config/Load.hs`
 **Docs to update**: `documents/architecture/overview.md`, `documents/reference/web_portal_surface.md`
 
 ### Goal
@@ -23,7 +23,7 @@ contracts explicit in configuration, routing, and validation.
 
 | Item | File(s) | Status |
 |------|---------|--------|
-| Helm chart services | `chart/templates/*.yaml` | Done |
+| Helm chart services | `chart/templates/studiomcp_deployment.yaml`, `chart/templates/bff.yaml` | Done |
 | Ingress configuration | `chart/templates/ingress.yaml` | Done |
 | Values for Kind | `chart/values-kind.yaml` | Done |
 | Public endpoint config | `chart/values.yaml` (`global.publicBaseUrl`) | Done |
@@ -51,10 +51,9 @@ None. This phase is complete on the current supported path.
 
 **Engineering docs to create/update:**
 - `documents/architecture/overview.md` - control-plane and data-plane split
-- `documents/reference/web_portal_surface.md` - endpoint contracts and object-storage URL behavior
 
 **Product docs to create/update:**
-- None.
+- `documents/reference/web_portal_surface.md` - endpoint contracts and object-storage URL behavior
 
 **Cross-references to add:**
 - Keep [00-overview.md](00-overview.md) aligned when route ownership changes.

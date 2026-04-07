@@ -1,7 +1,7 @@
 # studioMCP
 
 ## Project Vision
-`studioMCP` is a Haskell-first MCP platform for DAG-based studio workflows. The repository already contains the typed execution foundations and a live MCP surface, but the auth topology, browser product surface, and local edge deployment story are still being completed.
+`studioMCP` is a Haskell-first MCP platform for DAG-based studio workflows with typed DAG execution, a live MCP surface, Keycloak-backed auth, a browser-facing BFF, and a Kubernetes-forward local edge deployment path.
 
 ## Why This Could Replace Large Parts of DAW / Photo / Video Toolchains
 Most studio workflows are long chains of deterministic transforms wrapped around a smaller number of impure boundaries. `studioMCP` treats those chains as typed DAGs instead of opaque editor sessions. That creates room for repeatability, memoization, better summaries, and safer automation.
@@ -102,7 +102,7 @@ The project leans on existing tools instead of rebuilding them:
 - a local LLM host such as Ollama or `llama.cpp` for inference mode
 
 ## Development Roadmap
-The authoritative implementation plan now lives in [DEVELOPMENT_PLAN/README.md](/Users/matthewnowak/studioMCP/DEVELOPMENT_PLAN/README.md), with [DEVELOPMENT_PLAN.md](/Users/matthewnowak/studioMCP/DEVELOPMENT_PLAN.md) kept as a compatibility index. The roadmap is now split into an overview, system-component inventory, per-phase documents, and a cleanup ledger. Phases 1 through 7 are done; Phase 8 remains active with 844 unit tests passing and 15 of 16 integration tests passing. Redirect-based OAuth/PKCE remains intentionally deferred.
+The authoritative implementation plan now lives in [DEVELOPMENT_PLAN/README.md](/Users/matthewnowak/studioMCP/DEVELOPMENT_PLAN/README.md), with [DEVELOPMENT_PLAN.md](/Users/matthewnowak/studioMCP/DEVELOPMENT_PLAN.md) kept as a compatibility index. The roadmap is now split into an overview, system-component inventory, per-phase documents, and a cleanup ledger. All eight phases are now done. The current gate is clean with 844 unit tests passing, 16 integration tests passing, and `cabal run studiomcp -- validate docs` passing. Redirect-based OAuth/PKCE remains intentionally deferred.
 
 ## Status / Current Maturity
 Current state:
@@ -111,14 +111,14 @@ Current state:
 - The `documents/` suite now has an explicit standards SSoT and index.
 - Kubernetes-forward repo scaffolding is in place: one Dockerfile, one Helm chart, Skaffold config, and kind config.
 - The no-scripts policy, outer development-container model, and local storage doctrine are now documented and materially embodied in code.
-- The current roadmap is in late-stage closure rather than fully done: the runtime, auth, and local edge foundations are implemented, while contract hardening, cluster parity, cluster bootstrap automation, and final regression closure remain open in the plan.
+- The current roadmap is fully closed on the supported path: the runtime, auth, control-plane contract, browser session contract, cluster parity, realm bootstrap automation, and final regression gate are implemented and validated.
 - The `studiomcp` CLI now includes native `dag validate ...`, `dag validate-fixtures`, `validate docs`, `validate cluster`, `validate pulsar`, `validate minio`, `validate boundary`, `validate ffmpeg-adapter`, `validate executor`, `validate e2e`, `validate worker`, `validate inference`, `validate mcp-stdio`, `validate mcp-http`, `validate mcp-conformance`, `validate keycloak`, `validate mcp-auth`, `validate session-store`, `validate horizontal-scale`, `validate web-bff`, and `cluster ...` commands, plus `studiomcp bff`.
 - `docker-compose.yaml` now launches only the outer `studiomcp-env` development container; all application services run in the kind cluster.
 - A real Haskell MinIO adapter now round-trips memo objects, manifests, and summaries through the deployed MinIO sidecar and maps missing-object lookups to a stable storage failure contract.
 - A real boundary runtime now executes deterministic helper processes with stdout/stderr capture, non-zero exit projection, and enforced timeout failure mapping, and `studiomcp validate boundary` exercises that contract.
 - A real FFmpeg adapter now runs on top of the boundary runtime, seeds a deterministic WAV fixture under `examples/assets/audio/`, validates one successful transcode, and asserts structured failure output for a missing input.
 - The server, inference, worker, and BFF entrypoints are all real runtimes with validation coverage, including the live Keycloak-backed auth, browser session, and nginx edge paths.
-- Verified commands now include `cabal build all`, `cabal test all --test-show-details=direct` (currently `unit-tests`: 844 examples, 0 failures; `integration-tests`: 16 examples, 15 pass and 1 fails in MCP conformance on the supported outer-container path), `cabal run studiomcp -- validate docs`, `docker compose -f docker-compose.yaml config`, the cluster validation family, the MCP validation family (`validate mcp-stdio`, `validate mcp-http`, `validate mcp-conformance`), the auth/session validation family (`validate keycloak`, `validate mcp-auth`, `validate session-store`, `validate horizontal-scale`, `validate web-bff`), plus `helm lint`, `helm template`, `skaffold diagnose`, and `skaffold render`.
+- Verified commands now include `cabal build all`, `cabal test all --test-show-details=direct` (`unit-tests`: 844 examples, 0 failures; `integration-tests`: 16 examples, 0 failures on the supported outer-container path), `cabal run studiomcp -- validate docs`, `docker compose -f docker-compose.yaml config`, the cluster validation family, the MCP validation family (`validate mcp-stdio`, `validate mcp-http`, `validate mcp-conformance`), the auth/session validation family (`validate keycloak`, `validate mcp-auth`, `validate session-store`, `validate horizontal-scale`, `validate web-bff`), plus `helm lint`, `helm template`, `skaffold diagnose`, and `skaffold render`.
 - The basic outer-container cluster workflow is now verified on this machine. Persistence-backed Helm releases remain a non-default local workflow, and the shipped `values-kind.yaml` keeps MinIO and Pulsar persistence disabled, so `cluster storage reconcile` is currently a no-op under the default local values.
 
 ## Contribution Guidance

@@ -12,7 +12,7 @@
 
 | Component | Technology | Deployment | Purpose | Durable State |
 |-----------|------------|------------|---------|---------------|
-| Outer dev container | Docker Compose | `studiomcp-env` | Build/test shell and cluster control entrypoint | bind-mounted repo plus `./.data/` |
+| Outer dev container | Docker Compose | `studiomcp-env` | Build/test shell and cluster control entrypoint with `studiomcp` on `PATH` | bind-mounted repo plus `./.data/` |
 | Local cluster | Kind | Docker-backed Kubernetes | Hosts the application and supporting services | host-backed volumes under `./.data/` |
 | Edge router | ingress-nginx | Helm release | Public entrypoint for `/mcp`, `/api`, and `/kc` | none |
 | Identity provider | Keycloak | Helm release | Login/password auth and token issuance | Keycloak PostgreSQL |
@@ -61,7 +61,7 @@
 | Shared resumable session state | MCP session layer | Redis | Required for horizontal scale validation |
 | Immutable artifacts and memo objects | storage adapters | MinIO | Bulk bytes stay on the data plane |
 | Cluster deployment config | Helm values and chart templates | `chart/` | Defines the canonical route split and service topology |
-| Outer container workflow | Compose and Dockerfile | `docker-compose.yaml`, `docker/` | Compose starts only the outer container |
+| Outer container workflow | Compose and Dockerfile | `docker-compose.yaml`, `docker/` | Compose starts only the outer container, and the `env` image installs `studiomcp` to `/usr/local/bin` |
 | Validation assets | repo fixtures | `examples/`, `test/` | Deterministic inputs for runtime validation |
 
 ## Cross-References

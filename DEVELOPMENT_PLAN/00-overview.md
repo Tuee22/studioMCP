@@ -31,7 +31,7 @@
 | 5 | Done | Browser login, session, refresh, and logout behavior are cookie-first and validated |
 | 6 | Done | Kind and Helm expose the canonical control-plane contract |
 | 7 | Done | Keycloak realm bootstrap is automated and idempotent on the default cluster path |
-| 8 | Active | The final remaining regression gap is MCP conformance through the outer-container CLI |
+| 8 | Done | The full regression gate now passes on the supported outer-container and Kind-based workflow |
 
 ## Public Topology Baseline
 
@@ -52,8 +52,8 @@ The supported local and cluster topology is:
 - Browser auth is intentionally simplified to login/password over TLS to the BFF plus an HTTP-only
   session cookie. Redirect-based OAuth/PKCE is deferred.
 - Keycloak remains the identity backend and JWT issuer.
-- `docker-compose.yaml` launches only the outer development container. Application services run in
-  Kind via Helm.
+- `docker-compose.yaml` launches only the outer development container. The `env` image installs
+  `studiomcp` to `/usr/local/bin`, and application services run in Kind via Helm.
 - The control-plane route split is fixed: `/mcp` for MCP, `/api` for the BFF, `/kc` for Keycloak.
 - Bulk artifact bytes stay off the control plane. The BFF authorizes access and returns presigned
   object-storage URLs.

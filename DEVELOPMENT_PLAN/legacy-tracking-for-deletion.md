@@ -10,16 +10,14 @@
 
 ## Pending Removal
 
-| Item | Location | Why it remains | Owning phase |
-|------|----------|----------------|--------------|
-| BFF redirect URIs | `docker/keycloak/realm/studiomcp-realm.json` | Kept only for the deferred browser redirect OAuth path | Phase 8 |
-| `standardFlowEnabled` on the BFF client | `docker/keycloak/realm/studiomcp-realm.json` | Kept only for the deferred redirect-based auth path | Phase 8 |
-| `studiomcp-cli` Keycloak client | `docker/keycloak/realm/studiomcp-realm.json` | Deferred external CLI auth surface; not part of the current supported path | Phase 8 |
+None.
 
 ## Completed
 
 | Item | Former location | Verification |
 |------|-----------------|--------------|
+| BFF redirect URIs | `docker/keycloak/realm/studiomcp-realm.json` | Removed from the imported realm definition |
+| `studiomcp-cli` Keycloak client | `docker/keycloak/realm/studiomcp-realm.json` | Removed from the imported realm definition |
 | `PKCEChallenge` type | `src/StudioMCP/Auth/PKCE.hs` | Removed |
 | `generatePKCEChallenge` | `src/StudioMCP/Auth/PKCE.hs` | Removed |
 | `AuthorizationParams` type | `src/StudioMCP/Auth/PKCE.hs` | Removed |
@@ -33,14 +31,15 @@
 
 These items are not pending removal because the current implementation still depends on them.
 
-| Export or surface | Used by | Reason it stays |
-|-------------------|---------|-----------------|
-| `TokenResponse` | BFF login and refresh flows | Still part of the supported password-grant path |
-| `PasswordGrantParams` | BFF login flow | Required by the current browser auth contract |
-| `exchangePasswordForTokens` | BFF login flow | Required by the current browser auth contract |
-| `RefreshParams` | BFF refresh flow | Required by the current browser auth contract |
-| `refreshAccessToken` | BFF refresh flow | Required by the current browser auth contract |
-| `PKCEError` and `pkceErrorToText` | auth error handling | Shared error surface for the active auth path |
+| Export or surface | Location | Used by | Reason it stays | Owning phase |
+|-------------------|----------|---------|-----------------|--------------|
+| `TokenResponse` | `src/StudioMCP/Auth/PKCE.hs` | BFF login and refresh flows | Still part of the supported password-grant path | Phase 5 |
+| `PasswordGrantParams` | `src/StudioMCP/Auth/PKCE.hs` | BFF login flow | Required by the current browser auth contract | Phase 5 |
+| `exchangePasswordForTokens` | `src/StudioMCP/Auth/PKCE.hs` | BFF login flow | Required by the current browser auth contract | Phase 5 |
+| `RefreshParams` | `src/StudioMCP/Auth/PKCE.hs` | BFF refresh flow | Required by the current browser auth contract | Phase 5 |
+| `refreshAccessToken` | `src/StudioMCP/Auth/PKCE.hs` | BFF refresh flow | Required by the current browser auth contract | Phase 5 |
+| `PKCEError` and `pkceErrorToText` | `src/StudioMCP/Auth/PKCE.hs` | auth error handling | Shared error surface for the active auth path | Phase 3 |
+| `standardFlowEnabled: false` on `studiomcp-bff` | `docker/keycloak/realm/studiomcp-realm.json` | Keycloak realm bootstrap | Explicitly keeps redirect-based browser auth disabled on the supported path | Phase 7 |
 
 ## Cross-References
 

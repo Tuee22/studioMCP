@@ -35,7 +35,7 @@ The current repository now implements the remote-session contract described here
 - resource subscriptions and resumable cursor metadata are persisted through the shared session store
 - shared session visibility and lock semantics are validated directly
 - live horizontal-scale validation confirms one MCP session survives repeated requests routed across multiple listener pods without sticky ingress
-- live validation also exercises subscription/cursor resumption, one-listener rollout survival, and deterministic Redis-outage failure/recovery behavior
+- live validation also exercises subscription/cursor resumption, one-listener rollout survival, and deterministic Redis-outage recovery through either existing-session resumption or clean post-recovery session re-establishment
 
 ## Non-Sticky Requirement
 

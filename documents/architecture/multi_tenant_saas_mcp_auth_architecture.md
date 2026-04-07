@@ -202,7 +202,7 @@ Some Keycloak direct-grant access tokens in the current delivery path can omit `
   "aud": ["studiomcp-mcp", "account"],
   "exp": 1700000000,
   "iat": 1699996400,
-  "azp": "studiomcp-cli",
+  "azp": "studiomcp-bff",
   "tenant_id": "tenant-acme-corp",
   "scope": "openid profile workflow:read workflow:write artifact:read",
   "realm_access": {
@@ -313,20 +313,8 @@ Bearer session identifiers may remain available as a compatibility/debug path, b
 
 ### Interactive CLI Client (Deferred)
 
-Optional future client for external interactive MCP tooling. It is not a required part of the current login/password delivery plan.
-
-```json
-{
-  "clientId": "studiomcp-cli",
-  "publicClient": true,
-  "redirectUris": ["http://localhost:*"],
-  "webOrigins": ["+"],
-  "defaultClientScopes": ["openid", "profile", "workflow:read", "artifact:read"],
-  "attributes": {
-    "pkce.code.challenge.method": "S256"
-  }
-}
-```
+The current realm import does not define a public interactive CLI client. External redirect-based
+OAuth/PKCE remains deferred and is not part of the supported auth contract.
 
 ### BFF Client
 
@@ -336,7 +324,17 @@ Optional future client for external interactive MCP tooling. It is not a require
   "publicClient": false,
   "secret": "***",
   "directAccessGrantsEnabled": true,
-  "defaultClientScopes": ["openid", "profile", "workflow:read", "workflow:write", "artifact:read", "artifact:write"]
+  "defaultClientScopes": [
+    "profile",
+    "email",
+    "roles",
+    "web-origins",
+    "workflow:read",
+    "workflow:write",
+    "artifact:read",
+    "artifact:write",
+    "prompt:read"
+  ]
 }
 ```
 
@@ -344,11 +342,12 @@ Optional future client for external interactive MCP tooling. It is not a require
 
 ```json
 {
-  "clientId": "studiomcp-automation",
+  "clientId": "studiomcp-service",
   "publicClient": false,
   "secret": "***",
   "serviceAccountsEnabled": true,
-  "defaultClientScopes": ["workflow:read", "workflow:write", "artifact:read", "artifact:write"]
+  "standardFlowEnabled": false,
+  "defaultClientScopes": ["openid", "workflow:read", "workflow:write"]
 }
 ```
 

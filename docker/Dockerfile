@@ -85,9 +85,10 @@ WORKDIR /workspace
 
 COPY . /workspace
 
-RUN cabal update && \
-    cabal build all && \
-    cabal install exe:studiomcp --installdir /usr/local/bin --overwrite-policy=always
+RUN mkdir -p /opt/build/studiomcp && \
+    cabal update && \
+    cabal --builddir=/opt/build/studiomcp build all && \
+    cabal --builddir=/opt/build/studiomcp install exe:studiomcp --installdir /usr/local/bin --overwrite-policy=always
 
 CMD ["sleep", "infinity"]
 

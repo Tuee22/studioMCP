@@ -11,7 +11,7 @@
 ## Phase Summary
 
 **Status**: Done
-**Implementation**: `src/StudioMCP/MCP/Core.hs`, `src/StudioMCP/MCP/Transport/Http.hs`, `src/StudioMCP/Storage/Governance.hs`, `src/StudioMCP/Observability/*.hs`
+**Implementation**: `src/StudioMCP/MCP/Core.hs`, `src/StudioMCP/MCP/Transport/Http.hs`, `src/StudioMCP/Storage/Governance.hs`, `src/StudioMCP/Observability/CorrelationId.hs`, `src/StudioMCP/Observability/McpMetrics.hs`, `src/StudioMCP/Observability/Quotas.hs`, `src/StudioMCP/Observability/RateLimiting.hs`, `src/StudioMCP/Observability/Redaction.hs`
 **Docs to update**: `documents/architecture/mcp_protocol_architecture.md`, `documents/reference/mcp_surface.md`, `documents/reference/mcp_tool_catalog.md`, `documents/architecture/artifact_storage_architecture.md`
 
 ### Goal
@@ -32,7 +32,7 @@ storage rules, and observability hooks.
 | Prompt catalog | `src/StudioMCP/MCP/Prompts.hs` | Done |
 | Artifact governance | `src/StudioMCP/Storage/Governance.hs` | Done |
 | Tenant storage | `src/StudioMCP/Storage/TenantStorage.hs` | Done |
-| Observability | `src/StudioMCP/Observability/*.hs` | Done |
+| Observability | `src/StudioMCP/Observability/CorrelationId.hs`, `src/StudioMCP/Observability/McpMetrics.hs`, `src/StudioMCP/Observability/Quotas.hs`, `src/StudioMCP/Observability/RateLimiting.hs`, `src/StudioMCP/Observability/Redaction.hs` | Done |
 | MCP server | `src/StudioMCP/MCP/Server.hs` | Done |
 
 ### Validation
@@ -73,12 +73,11 @@ None. This phase is complete on the current supported path.
 
 **Engineering docs to create/update:**
 - `documents/architecture/mcp_protocol_architecture.md` - protocol lifecycle and transport ownership
-- `documents/reference/mcp_surface.md` - supported MCP surface and validation path
-- `documents/reference/mcp_tool_catalog.md` - tool catalog contract
 - `documents/architecture/artifact_storage_architecture.md` - artifact/data-plane architecture
 
 **Product docs to create/update:**
-- None.
+- `documents/reference/mcp_surface.md` - supported MCP surface and validation path
+- `documents/reference/mcp_tool_catalog.md` - tool catalog contract
 
 **Cross-references to add:**
 - Keep [system-components.md](system-components.md) aligned if transport or storage ownership changes.

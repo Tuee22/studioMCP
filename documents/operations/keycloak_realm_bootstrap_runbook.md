@@ -111,7 +111,7 @@ This file is version-controlled and used for all environment bootstrapping.
 | Setting | Value | Rationale |
 |---------|-------|-----------|
 | Access Token Lifespan | 5 minutes | Short-lived for security |
-| Refresh Token Lifespan | 30 days | Convenience for CLI tools |
+| Refresh Token Lifespan | 30 days | Supports the current BFF-managed refresh flow |
 | SSO Session Idle | 30 minutes | Browser session timeout |
 | SSO Session Max | 10 hours | Daily re-authentication |
 
@@ -143,29 +143,9 @@ This is a bearer-only client that validates tokens but does not issue them.
 
 ### Interactive CLI Client (Deferred)
 
-Optional future client for external interactive MCP tooling. It is not a required part of the current login/password delivery plan.
-
-```json
-{
-  "clientId": "studiomcp-cli",
-  "name": "studioMCP CLI",
-  "enabled": true,
-  "publicClient": true,
-  "standardFlowEnabled": true,
-  "directAccessGrantsEnabled": false,
-  "protocol": "openid-connect",
-  "redirectUris": [
-    "http://localhost:*",
-    "http://127.0.0.1:*"
-  ],
-  "webOrigins": ["+"],
-  "attributes": {
-    "pkce.code.challenge.method": "S256"
-  },
-  "defaultClientScopes": ["openid", "profile", "workflow:read", "artifact:read"],
-  "optionalClientScopes": ["workflow:write", "artifact:write", "artifact:manage"]
-}
-```
+The imported realm intentionally does not define a public interactive CLI client. Redirect-based
+OAuth/PKCE for external tools remains deferred and is not part of the current supported bootstrap
+path.
 
 ### BFF Client (Confidential)
 
@@ -184,9 +164,9 @@ For the web portal backend-for-frontend.
   "protocol": "openid-connect",
   "secret": "${BFF_CLIENT_SECRET}",
   "defaultClientScopes": [
-    "openid", "profile",
+    "profile", "email", "roles", "web-origins",
     "workflow:read", "workflow:write",
-    "artifact:read", "artifact:write"
+    "artifact:read", "artifact:write", "prompt:read"
   ],
   "optionalClientScopes": ["artifact:manage"]
 }

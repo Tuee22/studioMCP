@@ -27,7 +27,7 @@ govern this plan.
 | [phase-5-browser-session-contract.md](phase-5-browser-session-contract.md) | Browser session contract hardening |
 | [phase-6-cluster-control-plane-parity.md](phase-6-cluster-control-plane-parity.md) | Kind and Helm control-plane parity |
 | [phase-7-keycloak-realm-bootstrap.md](phase-7-keycloak-realm-bootstrap.md) | Keycloak realm bootstrap automation |
-| [phase-8-final-closure-regression-gate.md](phase-8-final-closure-regression-gate.md) | Final regression closure and remaining validation gap |
+| [phase-8-final-closure-regression-gate.md](phase-8-final-closure-regression-gate.md) | Final regression closure and clean validation gate |
 | [legacy-tracking-for-deletion.md](legacy-tracking-for-deletion.md) | Cleanup and compatibility removal ledger |
 
 ## Status Vocabulary
@@ -61,14 +61,16 @@ A phase can move to `Done` only when all of the following are true:
 | 5 | Browser Session Contract Hardening | Done | [phase-5-browser-session-contract.md](phase-5-browser-session-contract.md) |
 | 6 | Cluster Control-Plane Parity | Done | [phase-6-cluster-control-plane-parity.md](phase-6-cluster-control-plane-parity.md) |
 | 7 | Keycloak Realm Bootstrap Automation | Done | [phase-7-keycloak-realm-bootstrap.md](phase-7-keycloak-realm-bootstrap.md) |
-| 8 | Final Closure and Regression Gate | Active | [phase-8-final-closure-regression-gate.md](phase-8-final-closure-regression-gate.md) |
+| 8 | Final Closure and Regression Gate | Done | [phase-8-final-closure-regression-gate.md](phase-8-final-closure-regression-gate.md) |
 
 ## Current Validation State
 
 - `cabal build all` passes.
 - `cabal test unit-tests --test-show-details=direct` passes with 844 unit tests.
-- `cabal test integration-tests --test-show-details=direct` passes 15 of 16 integration tests.
-- The remaining open failure is MCP conformance through the outer-container CLI.
+- `cabal test integration-tests --test-show-details=direct` passes with 16 integration tests.
+- `cabal test all --test-show-details=direct` passes end to end on the supported outer-container path.
+- `cabal run studiomcp -- validate docs` passes.
+- The outer `studiomcp-env` container resolves `studiomcp` on `PATH` at `/usr/local/bin/studiomcp`.
 
 ## Phase Details
 
@@ -81,7 +83,7 @@ A phase can move to `Done` only when all of the following are true:
 | 5 | Done | None | `documents/reference/web_portal_surface.md` |
 | 6 | Done | None | `documents/engineering/k8s_native_dev_policy.md`, `documents/operations/runbook_local_debugging.md` |
 | 7 | Done | None | `documents/operations/keycloak_realm_bootstrap_runbook.md` |
-| 8 | Active | Close the MCP conformance gap and rerun the full regression gate | `README.md`, `documents/documentation_standards.md`, plan index files as needed |
+| 8 | Done | None | `README.md`, `documents/documentation_standards.md`, plan index files as needed |
 
 ## Compatibility Entry Point
 
