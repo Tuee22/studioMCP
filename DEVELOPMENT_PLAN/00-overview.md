@@ -58,6 +58,8 @@ The supported local and cluster topology is:
 - Bulk artifact bytes stay off the control plane. The BFF authorizes access and returns presigned
   object-storage URLs.
 - Durable repo-local state must live under `./.data/`; `.studiomcp-data/` is a removed legacy path.
+- Build artifacts are isolated to `/opt/build/studiomcp` via `cabal.project` builddir. The repo
+  tree must remain free of compiled output.
 
 ## Completion Rules
 

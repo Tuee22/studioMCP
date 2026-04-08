@@ -27,6 +27,8 @@ The plan is intentionally concrete.
 - Include real files, commands, validation gates, and contract notes where they materially clarify
   what is implemented or still open.
 - Command examples should use the canonical binary name `studiomcp`.
+- Command examples that invoke `cabal` must either rely on `cabal.project` builddir or pass
+  `--builddir=/opt/build/studiomcp` explicitly. Build artifacts must never land in the repo tree.
 - Examples do not need to be verbatim copies of implementation files, but they must not contradict
   the supported architecture or validation surface.
 

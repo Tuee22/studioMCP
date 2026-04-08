@@ -34,12 +34,13 @@ adapters, worker entrypoints, and foundational validation commands.
 | MinIO storage | `src/StudioMCP/Storage/MinIO.hs` | Done |
 | Worker entrypoint | `src/StudioMCP/Worker/Server.hs` | Done |
 | Inference entrypoint | `src/StudioMCP/Inference/Host.hs`, `src/StudioMCP/Inference/ReferenceModel.hs` | Done |
+| Build artifact isolation | `cabal.project`, `Makefile` | Done |
 
 ### Validation
 
 | Check | Command | Expected |
 |-------|---------|----------|
-| Build | `cabal build all` | Success |
+| Build | `cabal build all` | Success (artifacts in /opt/build/studiomcp) |
 | Unit tests | `cabal test unit-tests` | Pass |
 | DAG fixtures | `studiomcp dag validate-fixtures` | PASS |
 | Boundary | `studiomcp validate boundary` | PASS |

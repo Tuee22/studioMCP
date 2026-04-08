@@ -8,3 +8,7 @@ allow-newer:
   , *:template-haskell
   , *:ghc-prim
   , *:ghc-bignum
+
+-- Build artifacts must stay outside the repository tree.
+-- The outer container and all reasonable CLI commands target /opt/build/.
+builddir: /opt/build/studiomcp

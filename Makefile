@@ -1,37 +1,40 @@
 .PHONY: build test test-integration repl docs validate-dag validate-fixtures cluster-up cluster-down cluster-status cluster-deploy-sidecars cluster-deploy-server
 
+# Build artifacts must stay outside the repository tree.
+BUILDDIR := /opt/build/studiomcp
+
 build:
-	cabal build all
+	cabal --builddir=$(BUILDDIR) build all
 
 test:
-	cabal test unit-tests
+	cabal --builddir=$(BUILDDIR) test unit-tests
 
 test-integration:
-	cabal test integration-tests
+	cabal --builddir=$(BUILDDIR) test integration-tests
 
 repl:
-	cabal repl
+	cabal --builddir=$(BUILDDIR) repl
 
 docs:
-	cabal run studiomcp -- validate docs
+	cabal --builddir=$(BUILDDIR) run studiomcp -- validate docs
 
 validate-dag:
-	cabal run studiomcp -- validate-dag examples/dags/transcode-basic.yaml
+	cabal --builddir=$(BUILDDIR) run studiomcp -- validate-dag examples/dags/transcode-basic.yaml
 
 validate-fixtures:
-	cabal run studiomcp -- dag validate-fixtures
+	cabal --builddir=$(BUILDDIR) run studiomcp -- dag validate-fixtures
 
 cluster-up:
-	cabal run studiomcp -- cluster up
+	cabal --builddir=$(BUILDDIR) run studiomcp -- cluster up
 
 cluster-down:
-	cabal run studiomcp -- cluster down
+	cabal --builddir=$(BUILDDIR) run studiomcp -- cluster down
 
 cluster-status:
-	cabal run studiomcp -- cluster status
+	cabal --builddir=$(BUILDDIR) run studiomcp -- cluster status
 
 cluster-deploy-sidecars:
-	cabal run studiomcp -- cluster deploy sidecars
+	cabal --builddir=$(BUILDDIR) run studiomcp -- cluster deploy sidecars
 
 cluster-deploy-server:
-	cabal run studiomcp -- cluster deploy server
+	cabal --builddir=$(BUILDDIR) run studiomcp -- cluster deploy server
