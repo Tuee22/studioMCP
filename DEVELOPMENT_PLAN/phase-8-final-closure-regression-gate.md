@@ -36,29 +36,30 @@ outer-container and Kind-based workflow.
 All validation commands run inside the outer container after bootstrap:
 
 ```bash
-docker compose up -d
-docker compose exec studiomcp-env studiomcp cluster ensure
+docker compose build
+docker compose run --rm studiomcp studiomcp cluster ensure
 ```
 
 #### Validation Gates
 
 | Check | Command | Expected | Current state |
 |-------|---------|----------|---------------|
-| Build | `docker compose exec studiomcp-env cabal build all` | Success | Pass |
-| Unit tests | `docker compose exec studiomcp-env cabal test unit-tests` | Success | 844 pass |
-| Integration tests | `docker compose exec studiomcp-env cabal test integration-tests` | 0 failures | 16 pass, 0 fail |
-| Full regression gate | `docker compose exec studiomcp-env cabal test all --test-show-details=direct` | 0 failures | Pass |
-| Outer container CLI availability | `docker compose exec studiomcp-env studiomcp --help` | Success | Pass |
+| Build | `docker compose run --rm studiomcp cabal --builddir=/opt/build/studiomcp build all` | Success | Pass |
+| Unit tests | `docker compose run --rm studiomcp studiomcp test unit` | Success | 846 pass |
+| Integration tests | `docker compose run --rm studiomcp studiomcp test integration` | 0 failures | 16 pass, 0 fail |
+| Full regression gate | `docker compose run --rm studiomcp studiomcp test all` | 0 failures | Pass |
+| Outer container CLI availability | `docker compose run --rm studiomcp studiomcp --help` | Success | Pass |
 | Kind edge matrix | cluster validators through `/kc`, `/mcp`, `/api` | PASS | PASS |
-| Docs validation | `docker compose exec studiomcp-env studiomcp validate docs` | PASS | Pass |
+| Docs validation | `docker compose run --rm studiomcp studiomcp validate docs` | PASS | Pass |
+| Full validation | `docker compose run --rm studiomcp studiomcp validate all` | PASS | 28/28 pass |
 
 ### Current Validation State
 
-- 844 unit tests pass.
+- 846 unit tests pass.
 - 16 of 16 integration tests pass.
-- `docker compose exec studiomcp-env cabal test all --test-show-details=direct` passes on the supported outer-container path.
-- `docker compose exec studiomcp-env studiomcp validate docs` passes.
-- The outer `studiomcp-env` container resolves `studiomcp` on `PATH` at `/usr/local/bin/studiomcp`.
+- `docker compose run --rm studiomcp studiomcp test all` passes on the supported outer-container path.
+- `docker compose run --rm studiomcp studiomcp validate all` passes with 28 of 28 validators.
+- The outer `studiomcp` container resolves `studiomcp` on `PATH` at `/usr/local/bin/studiomcp`.
 - Passing integration coverage includes deterministic helper processes, FFmpeg adapter validation,
   sequential executor validation, worker runtime validation, cluster validation, Keycloak bootstrap
   and connectivity, DAG end-to-end validation, Pulsar lifecycle validation, MinIO round-trips, MCP
@@ -67,7 +68,7 @@ docker compose exec studiomcp-env studiomcp cluster ensure
 
 ### Supported Closure State
 
-- Keycloak edge routing uses the supported path-rewrite and ingress contract for `/kc`.
+- Keycloak edge routing uses the prefix-preserving ingress contract for `/kc`.
 - Token issuer validation accepts the supported public and internal issuers, including the
   localhost-oriented validation path used by the outer-container workflow.
 - Cluster lifecycle handling tolerates the service-port, rollout-timeout, and Helm-lock conditions
@@ -76,7 +77,7 @@ docker compose exec studiomcp-env studiomcp cluster ensure
   ConfigMap variants exercised in local development.
 - Redis health checks and image-build-skip handling remain part of the supported local workflow.
 - The outer development container installs `studiomcp` to `/usr/local/bin`, so the supported
-  workflow invokes the CLI directly by name inside `studiomcp-env`.
+  workflow invokes the CLI directly by name inside `studiomcp`.
 - MCP session bootstrap retries the `notifications/initialized` step across transient rollout-time
   `401`, `502`, `503`, and `504` responses.
 - The live horizontal-scale validator accepts both existing-session recovery and clean

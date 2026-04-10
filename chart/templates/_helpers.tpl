@@ -92,6 +92,20 @@ http://{{ .Release.Name }}-minio:9000
 {{- end -}}
 
 {{/*
+Resolve the MinIO credential secret name.
+*/}}
+{{- define "studiomcp.minioSecretName" -}}
+{{- default (printf "%s-minio" .Release.Name) .Values.minio.existingSecret -}}
+{{- end -}}
+
+{{/*
+Resolve the Redis credential secret name.
+*/}}
+{{- define "studiomcp.redisSecretName" -}}
+{{- default (printf "%s-redis" .Release.Name) .Values.redis.auth.existingSecret -}}
+{{- end -}}
+
+{{/*
 Generate the internal Keycloak issuer.
 NOTE: The Bitnami Keycloak chart exposes the service on port 80 (not the container's httpPort).
 */}}

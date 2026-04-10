@@ -136,13 +136,13 @@ Rules:
 
 The canonical validation entrypoints remain:
 
-- `cabal test unit-tests`
-- `cabal test integration-tests`
-- `cabal run studiomcp -- validate docs`
-- `cabal run studiomcp -- validate mcp-stdio`
-- `cabal run studiomcp -- validate mcp-http`
-- `cabal run studiomcp -- validate mcp-conformance`
-- `cabal run studiomcp -- validate web-bff`
+- `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp test unit`
+- `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp test integration`
+- `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate docs`
+- `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate mcp-stdio`
+- `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate mcp-http`
+- `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate mcp-conformance`
+- `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate web-bff`
 
 When a validator or integration suite provisions external state, it must do so with deterministic inputs, unique namespaces, and cleanup rules that do not depend on manual intervention.
 

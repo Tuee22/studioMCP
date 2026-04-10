@@ -58,8 +58,8 @@ The repo keeps one Helm chart at `chart/`.
 
 The local control-plane loop is:
 
-1. start the outer development container with Docker Compose
-2. enter it with `docker compose -f docker-compose.yaml exec`
+1. build the outer development image with Docker Compose
+2. invoke commands with `docker compose -f docker-compose.yaml run --rm studiomcp ...`
 3. run `studiomcp cluster ...` commands to manage kind
 4. run `studiomcp cluster deploy ...` commands to deploy Helm-backed workloads
 
@@ -72,13 +72,14 @@ Skaffold remains part of the Kubernetes-native toolchain for image-build and dep
 
 ### Compose Is a Container Launcher, Not a Platform Model
 
-Compose remains in the repo for one narrow reason: to launch the outer development container with access to the active host Docker context.
+Compose remains in the repo for one narrow reason: to launch ephemeral outer development containers with access to the active host Docker context.
 
 Compose must not become:
 
 - the deployment source of truth
 - the expression of canonical service topology
 - a substitute for the Haskell CLI
+- a long-running daemon container
 
 ## Repository Embodiment
 
@@ -92,7 +93,7 @@ This policy is represented today through:
 - [Docker Policy](docker_policy.md#docker-policy)
 - [CLI Architecture](../architecture/cli_architecture.md#cli-architecture)
 
-Current repo note: the policy is now materially implemented for the local cluster baseline. The native Haskell cluster-management surface exists, Compose launches the outer development container, sidecars and the server can be deployed through the CLI, and the cluster, MCP, inference, and observability workflows have been verified from inside that container on this machine. Remaining work is now limited to persistence-enabled local releases, broader host-context coverage, and any new CLI surface the next plan may introduce.
+Current repo note: the policy is now materially implemented for the local cluster baseline. The native Haskell cluster-management surface exists, Compose launches ephemeral outer development containers, sidecars and the server deploy through the CLI, application images flow through the configured registry, and cluster secrets are created by the CLI before Helm install.
 
 ## Cross-References
 

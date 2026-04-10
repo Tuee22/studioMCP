@@ -40,12 +40,12 @@ spec:
             - name: STUDIO_MCP_MINIO_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Release.Name }}-minio
+                  name: {{ include "studiomcp.minioSecretName" . }}
                   key: rootUser
             - name: STUDIO_MCP_MINIO_SECRET_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Release.Name }}-minio
+                  name: {{ include "studiomcp.minioSecretName" . }}
                   key: rootPassword
             {{- if .Values.redis.enabled }}
             # Redis subchart service endpoint (Sentinel mode)
@@ -54,7 +54,7 @@ spec:
             - name: STUDIO_MCP_REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Release.Name }}-redis
+                  name: {{ include "studiomcp.redisSecretName" . }}
                   key: redis-password
             {{- end }}
           ports:

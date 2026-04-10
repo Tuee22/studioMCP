@@ -43,22 +43,22 @@ adapters, worker entrypoints, and foundational validation commands.
 All validation commands run inside the outer container after bootstrap:
 
 ```bash
-docker compose up -d
+docker compose build
 ```
 
 #### Validation Gates
 
 | Check | Command | Expected |
 |-------|---------|----------|
-| Build | `docker compose exec studiomcp-env cabal build all` | Success (artifacts in /opt/build/studiomcp) |
-| Unit tests | `docker compose exec studiomcp-env cabal test unit-tests` | Pass |
-| DAG fixtures | `docker compose exec studiomcp-env studiomcp dag validate-fixtures` | PASS |
-| Boundary | `docker compose exec studiomcp-env studiomcp validate boundary` | PASS |
-| FFmpeg | `docker compose exec studiomcp-env studiomcp validate ffmpeg-adapter` | PASS |
-| Executor | `docker compose exec studiomcp-env studiomcp validate executor` | PASS |
-| Worker | `docker compose exec studiomcp-env studiomcp validate worker` | PASS |
-| End to end DAG path | `docker compose exec studiomcp-env studiomcp validate e2e` | PASS |
-| Inference advisory path | `docker compose exec studiomcp-env studiomcp validate inference` | PASS |
+| Build | `docker compose run --rm studiomcp cabal --builddir=/opt/build/studiomcp build all` | Success (artifacts in /opt/build/studiomcp) |
+| Unit tests | `docker compose run --rm studiomcp studiomcp test unit` | Pass |
+| DAG fixtures | `docker compose run --rm studiomcp studiomcp dag validate-fixtures` | PASS |
+| Boundary | `docker compose run --rm studiomcp studiomcp validate boundary` | PASS |
+| FFmpeg | `docker compose run --rm studiomcp studiomcp validate ffmpeg-adapter` | PASS |
+| Executor | `docker compose run --rm studiomcp studiomcp validate executor` | PASS |
+| Worker | `docker compose run --rm studiomcp studiomcp validate worker` | PASS |
+| End to end DAG path | `docker compose run --rm studiomcp studiomcp validate e2e` | PASS |
+| Inference advisory path | `docker compose run --rm studiomcp studiomcp validate inference` | PASS |
 
 ### Test Mapping
 

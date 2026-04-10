@@ -11,7 +11,7 @@ global:
     enabled: false
     secretName: studiomcp-tls
   # Optional explicit public control-plane base URL override.
-  # When set, this becomes the external contract for /mcp, /api, and /kc.
+  # When set, this becomes the external contract for /mcp, /api, /kc, and /minio.
   publicBaseUrl: ""
   objectStorage:
     # Optional explicit public object-storage endpoint used in presigned URLs.
@@ -146,7 +146,7 @@ llmReference:
       cpu: 4000m
       memory: 8Gi
 
-# Ingress configuration for MCP server and BFF
+# Unified ingress configuration for web-facing services
 ingress:
   enabled: false
   className: nginx
@@ -162,22 +162,14 @@ ingress:
           pathType: Prefix
           service: bff
           port: 3002
-  tls: []
-
-# Separate ingress for Keycloak (requires different path rewrite rules)
-# Keycloak is configured with httpRelativePath=/kc, so the /kc prefix
-# must be preserved when forwarding to the backend.
-keycloakIngress:
-  enabled: false
-  className: nginx
-  annotations: {}
-  hosts:
-    - host: studiomcp.local
-      paths:
         - path: /kc
           pathType: Prefix
           service: keycloak
           port: 80
+        - path: /minio
+          pathType: Prefix
+          service: minio-console
+          port: 9001
   tls: []
 
 # Secrets management
@@ -210,8 +202,9 @@ minio:
   enabled: true
   mode: distributed
   replicas: 4
-  rootUser: minioadmin
-  rootPassword: minioadmin123
+  existingSecret: studiomcp-minio-credentials
+  rootUser: ""
+  rootPassword: ""
   persistence:
     enabled: true
     storageClass: "studiomcp-manual"
@@ -263,9 +256,10 @@ postgresql-ha:
     replicaCount: 3
     database: keycloak
     username: keycloak
-    password: keycloak123
-    postgresPassword: postgres123
-    repmgrPassword: repmgr123
+    existingSecret: studiomcp-postgres-credentials
+    password: ""
+    postgresPassword: ""
+    repmgrPassword: ""
     initdbScripts:
       00-create-repmgr.sh: |
         #!/bin/bash
@@ -286,7 +280,8 @@ postgresql-ha:
     size: 10Gi
   pgpool:
     replicaCount: 2
-    adminPassword: pgpool123
+    existingSecret: studiomcp-postgres-credentials
+    adminPassword: ""
     image:
       registry: docker.io
       repository: bitnamilegacy/pgpool
@@ -306,7 +301,9 @@ redis:
     repository: bitnamilegacy/redis
   auth:
     enabled: true
-    password: redis123
+    existingSecret: studiomcp-redis-credentials
+    existingSecretPasswordKey: redis-password
+    password: ""
   sentinel:
     enabled: true
     masterService:
@@ -355,7 +352,9 @@ keycloak:
     repository: bitnamilegacy/keycloak
   auth:
     adminUser: admin
-    adminPassword: admin123
+    existingSecret: studiomcp-keycloak-admin
+    passwordSecretKey: admin-password
+    adminPassword: ""
   postgresql:
     enabled: false
   externalDatabase:
@@ -363,7 +362,13 @@ keycloak:
     port: 5432
     database: keycloak
     user: keycloak
-    password: keycloak123
+    password: ""
+    existingSecret: studiomcp-keycloak-admin
+    existingSecretHostKey: host
+    existingSecretPortKey: port
+    existingSecretUserKey: user
+    existingSecretDatabaseKey: database
+    existingSecretPasswordKey: password
   resources:
     requests:
       cpu: 200m

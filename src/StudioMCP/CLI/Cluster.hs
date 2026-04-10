@@ -23,7 +23,7 @@ import Data.ByteString.Char8 qualified as BS
 import Data.ByteString.Lazy.Char8 qualified as LBS
 import qualified Data.CaseInsensitive as CI
 import Data.Char (isSpace, toLower)
-import Data.List (isInfixOf)
+import Data.List (intercalate, isInfixOf)
 import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import qualified Data.Set as Set
 import Data.Time (addUTCTime, getCurrentTime)
@@ -374,6 +374,10 @@ runClusterCommand command =
     ClusterResetCommand -> clusterReset
     ClusterStatusCommand -> clusterStatus
     ClusterEnsureCommand -> clusterEnsure
+    ClusterPushImagesCommand -> do
+      _ <- clusterPushImages
+      pure ()
+    ClusterEnsureSecretsCommand -> clusterEnsureSecretsCommand
     ClusterDeployCommand target -> clusterDeploy target
     ClusterStorageCommand ClusterStorageReconcile -> clusterStorageReconcile
     ClusterStorageCommand (ClusterStorageDelete volumeName) -> clusterStorageDelete volumeName
@@ -812,10 +816,10 @@ bootstrapClusterKeycloakRealm = do
   mergedValues <- loadMergedValues
   let adminUser =
         Text.pack $
-          fromMaybe "admin" (lookupString ["keycloak", "auth", "adminUser"] mergedValues)
+          lookupNonEmptyString ["keycloak", "auth", "adminUser"] mergedValues "admin"
       adminPassword =
         Text.pack $
-          fromMaybe "admin123" (lookupString ["keycloak", "auth", "adminPassword"] mergedValues)
+          lookupNonEmptyString ["keycloak", "auth", "adminPassword"] mergedValues "admin123"
   realmDefinition <- LBS.readFile "docker/keycloak/realm/studiomcp-realm.json"
   withPortForward "service/studiomcp-keycloak" 39021 80 $ \baseUrl -> do
     -- Keycloak can take significant time to fully initialize after pod readiness.
@@ -915,15 +919,17 @@ clusterDeploy :: ClusterDeployTarget -> IO ()
 clusterDeploy target = do
   requireExecutables
     ( case target of
-        DeploySidecars -> ["docker", "kind", "helm"]
+        DeploySidecars -> ["docker", "kind", "helm", "kubectl"]
         DeployServer -> ["docker", "kind", "helm", "kubectl"]
     )
   clusterUp
+  clusterName <- getClusterName
+  registryConfig <- loadImageRegistryConfig
+  ensureKindRegistryAccess registryConfig clusterName
   ensureKindIngressController
   clusterStorageReconcile
-  clusterName <- getClusterName
-  buildServerImage
-  callProcess "kind" ["load", "docker-image", "studiomcp:latest", "--name", clusterName]
+  ensureClusterSecrets
+  _ <- clusterPushImagesWithConfig registryConfig
   upgradeCredentialArgs <- existingHelmUpgradeCredentialArgs
   let baseArgs =
         [ "upgrade"
@@ -935,6 +941,7 @@ clusterDeploy target = do
         , "-f"
         , "chart/values-kind.yaml"
         ]
+        <> helmImageArgs registryConfig
       args =
         case target of
           DeploySidecars ->
@@ -969,6 +976,12 @@ clusterDeploy target = do
     restartWorkloadIfExists "deployment/studiomcp-bff"
     waitForWorkloadRollout "deployment/studiomcp" "480s"
     waitForWorkloadRollout "deployment/studiomcp-bff" "480s"
+
+clusterEnsureSecretsCommand :: IO ()
+clusterEnsureSecretsCommand = do
+  requireExecutables ["kind", "kubectl"]
+  clusterUp
+  ensureClusterSecrets
 
 ensureRedisStatefulSetReady :: IO ()
 ensureRedisStatefulSetReady = do
@@ -1104,14 +1117,99 @@ clusterStorageDelete volumeName = do
   callProcess "kubectl" ["delete", "pv", volumeName, "--ignore-not-found=true"]
   putStrLn ("Persistent volume '" <> volumeName <> "' deleted if it existed.")
 
+ensureClusterSecrets :: IO ()
+ensureClusterSecrets = do
+  requireExecutables ["kubectl"]
+  mergedValues <- loadMergedValues
+  let namespaceName = lookupNonEmptyString ["global", "namespace"] mergedValues "default"
+      postgresPassword = lookupNonEmptyString ["postgresql-ha", "postgresql", "password"] mergedValues "keycloak123"
+      postgresAdminPassword = lookupNonEmptyString ["postgresql-ha", "postgresql", "postgresPassword"] mergedValues "postgres123"
+      repmgrPassword = lookupNonEmptyString ["postgresql-ha", "postgresql", "repmgrPassword"] mergedValues "repmgr123"
+      pgpoolAdminPassword = lookupNonEmptyString ["postgresql-ha", "pgpool", "adminPassword"] mergedValues "pgpool123"
+      redisPassword = lookupNonEmptyString ["redis", "auth", "password"] mergedValues "redis123"
+      minioRootUser = lookupNonEmptyString ["minio", "rootUser"] mergedValues "minioadmin"
+      minioRootPassword = lookupNonEmptyString ["minio", "rootPassword"] mergedValues "minioadmin123"
+      keycloakAdminPassword = lookupNonEmptyString ["keycloak", "auth", "adminPassword"] mergedValues "admin123"
+      keycloakDbHost = lookupNonEmptyString ["keycloak", "externalDatabase", "host"] mergedValues "studiomcp-postgresql-ha-pgpool"
+      keycloakDbPort = lookupNonEmptyString ["keycloak", "externalDatabase", "port"] mergedValues "5432"
+      keycloakDbUser = lookupNonEmptyString ["keycloak", "externalDatabase", "user"] mergedValues "keycloak"
+      keycloakDbName = lookupNonEmptyString ["keycloak", "externalDatabase", "database"] mergedValues "keycloak"
+      keycloakDbPassword = lookupNonEmptyString ["keycloak", "externalDatabase", "password"] mergedValues postgresPassword
+  ensureNamespaceIfNeeded namespaceName
+  applyManifest $
+    renderOpaqueSecret
+      namespaceName
+      "studiomcp-postgres-credentials"
+      [ ("password", postgresPassword)
+      , ("postgres-password", postgresAdminPassword)
+      , ("repmgr-password", repmgrPassword)
+      , ("admin-password", pgpoolAdminPassword)
+      ]
+  applyManifest $
+    renderOpaqueSecret
+      namespaceName
+      "studiomcp-redis-credentials"
+      [("redis-password", redisPassword)]
+  applyManifest $
+    renderOpaqueSecret
+      namespaceName
+      "studiomcp-minio-credentials"
+      [ ("rootUser", minioRootUser)
+      , ("rootPassword", minioRootPassword)
+      ]
+  applyManifest $
+    renderOpaqueSecret
+      namespaceName
+      "studiomcp-keycloak-admin"
+      [ ("admin-password", keycloakAdminPassword)
+      , ("host", keycloakDbHost)
+      , ("port", keycloakDbPort)
+      , ("user", keycloakDbUser)
+      , ("database", keycloakDbName)
+      , ("password", keycloakDbPassword)
+      ]
+  putStrLn "CLI-managed Kubernetes secrets applied."
+
+ensureNamespaceIfNeeded :: String -> IO ()
+ensureNamespaceIfNeeded namespaceName =
+  unless (namespaceName == "default") $
+    applyManifest $
+      unlines
+        [ "apiVersion: v1"
+        , "kind: Namespace"
+        , "metadata:"
+        , "  name: " <> namespaceName
+        ]
+
+renderOpaqueSecret :: String -> String -> [(String, String)] -> String
+renderOpaqueSecret namespaceName secretName entries =
+  unlines $
+    [ "apiVersion: v1"
+    , "kind: Secret"
+    , "metadata:"
+    , "  name: " <> secretName
+    , "  namespace: " <> namespaceName
+    , "type: Opaque"
+    , "stringData:"
+    ]
+      <> map renderEntry entries
+  where
+    renderEntry (key, value) = "  " <> key <> ": " <> yamlSingleQuote value
+
+yamlSingleQuote :: String -> String
+yamlSingleQuote value = "'" <> concatMap escape value <> "'"
+  where
+    escape '\'' = "''"
+    escape character = [character]
+
 existingHelmUpgradeCredentialArgs :: IO [String]
 existingHelmUpgradeCredentialArgs = do
   releaseExists <- helmReleaseExists "studiomcp"
   if not releaseExists
     then pure []
     else do
-      repmgrPassword <- lookupSecretValue "studiomcp-postgresql-ha-postgresql" "{.data.repmgr-password}"
-      pgpoolAdminPassword <- lookupSecretValue "studiomcp-postgresql-ha-pgpool" "{.data.admin-password}"
+      repmgrPassword <- lookupSecretValue "studiomcp-postgres-credentials" "{.data.repmgr-password}"
+      pgpoolAdminPassword <- lookupSecretValue "studiomcp-postgres-credentials" "{.data.admin-password}"
       pure $
         concat
           [ maybe [] (\value -> ["--set-string", "postgresql-ha.postgresql.repmgrPassword=" <> value]) repmgrPassword
@@ -2266,6 +2364,215 @@ requireExecutables commands =
     when (executable == Nothing) $
       die ("Required executable is not available: " <> command)
 
+data ImageRegistryConfig = ImageRegistryConfig
+  { imageRegistryHost :: String,
+    imageRegistryProject :: String,
+    imageRegistryName :: String,
+    imageRegistryTag :: String
+  }
+  deriving (Eq, Show)
+
+localRegistryContainerName :: String
+localRegistryContainerName = "studiomcp-harbor-registry"
+
+localRegistryHost :: String
+localRegistryHost = "localhost:5001"
+
+loadImageRegistryConfig :: IO ImageRegistryConfig
+loadImageRegistryConfig = do
+  registryHost <- lookupEnvDefault "STUDIOMCP_HARBOR_REGISTRY" localRegistryHost
+  registryProject <- lookupEnvDefault "STUDIOMCP_HARBOR_PROJECT" "studiomcp"
+  registryName <- lookupEnvDefault "STUDIOMCP_IMAGE_REPOSITORY" "studiomcp"
+  registryTag <- lookupEnvDefault "STUDIOMCP_IMAGE_TAG" "latest"
+  when ("://" `isInfixOf` registryHost) $
+    die "STUDIOMCP_HARBOR_REGISTRY must be a Docker registry host[:port], not a URL with a scheme."
+  pure
+    ImageRegistryConfig
+      { imageRegistryHost = registryHost,
+        imageRegistryProject = registryProject,
+        imageRegistryName = registryName,
+        imageRegistryTag = registryTag
+      }
+
+lookupEnvDefault :: String -> String -> IO String
+lookupEnvDefault name fallback = do
+  maybeValue <- lookupEnv name
+  pure $
+    case fmap trimWhitespace maybeValue of
+      Just value | not (null value) -> value
+      _ -> fallback
+
+imageRegistryRepository :: ImageRegistryConfig -> String
+imageRegistryRepository config =
+  intercalate "/"
+    ( filter
+        (not . null)
+        [ imageRegistryHost config
+        , imageRegistryProject config
+        , imageRegistryName config
+        ]
+    )
+
+imageRegistryReference :: ImageRegistryConfig -> String
+imageRegistryReference config =
+  imageRegistryRepository config <> ":" <> imageRegistryTag config
+
+helmImageArgs :: ImageRegistryConfig -> [String]
+helmImageArgs config =
+  let repository = imageRegistryRepository config
+      tag = imageRegistryTag config
+   in concat
+        [ ["--set-string", "image.repository=" <> repository]
+        , ["--set-string", "image.tag=" <> tag]
+        , ["--set-string", "worker.image.repository=" <> repository]
+        , ["--set-string", "worker.image.tag=" <> tag]
+        , ["--set-string", "bff.image.repository=" <> repository]
+        , ["--set-string", "bff.image.tag=" <> tag]
+        , ["--set-string", "image.pullPolicy=IfNotPresent"]
+        ]
+
+clusterPushImages :: IO ImageRegistryConfig
+clusterPushImages = do
+  requireExecutables ["docker"]
+  config <- loadImageRegistryConfig
+  clusterPushImagesWithConfig config
+
+clusterPushImagesWithConfig :: ImageRegistryConfig -> IO ImageRegistryConfig
+clusterPushImagesWithConfig config = do
+  ensureImageRegistryAvailable config
+  buildServerImage
+  let registryImage = imageRegistryReference config
+  callProcess "docker" ["tag", "studiomcp:latest", registryImage]
+  localDigest <- localImageConfigDigest registryImage
+  remoteDigest <- remoteImageConfigDigest registryImage
+  if remoteDigest == Just localDigest
+    then putStrLn ("Registry image already current: " <> registryImage)
+    else do
+      putStrLn ("Pushing image to registry: " <> registryImage)
+      callProcess "docker" ["push", registryImage]
+  pure config
+
+ensureImageRegistryAvailable :: ImageRegistryConfig -> IO ()
+ensureImageRegistryAvailable config =
+  if isLocalRegistryConfig config
+    then ensureLocalRegistryRunning
+    else dockerLoginIfConfigured config
+
+isLocalRegistryConfig :: ImageRegistryConfig -> Bool
+isLocalRegistryConfig config =
+  imageRegistryHost config `elem` [localRegistryHost, "127.0.0.1:5001"]
+
+ensureLocalRegistryRunning :: IO ()
+ensureLocalRegistryRunning = do
+  (inspectExit, inspectOut, _) <-
+    readProcessWithExitCode
+      "docker"
+      ["inspect", "-f", "{{.State.Running}}", localRegistryContainerName]
+      ""
+  case inspectExit of
+    ExitSuccess
+      | trimWhitespace inspectOut == "true" ->
+          pure ()
+    _ -> do
+      _ <- readProcessWithExitCode "docker" ["rm", "-f", localRegistryContainerName] ""
+      callProcess
+        "docker"
+        [ "run"
+        , "-d"
+        , "--restart=always"
+        , "-p"
+        , "5001:5000"
+        , "--name"
+        , localRegistryContainerName
+        , "registry:2"
+        ]
+      putStrLn ("Started local registry container '" <> localRegistryContainerName <> "'.")
+
+dockerLoginIfConfigured :: ImageRegistryConfig -> IO ()
+dockerLoginIfConfigured config = do
+  maybeUsername <- fmap normalizeOptionalPath (lookupEnv "STUDIOMCP_HARBOR_USERNAME")
+  maybePassword <- fmap normalizeOptionalPath (lookupEnv "STUDIOMCP_HARBOR_PASSWORD")
+  case (maybeUsername, maybePassword) of
+    (Nothing, Nothing) -> pure ()
+    (Just username, Just password) -> do
+      (exitCode, _, stderrText) <-
+        readProcessWithExitCode
+          "docker"
+          ["login", imageRegistryHost config, "--username", username, "--password-stdin"]
+          (password <> "\n")
+      case exitCode of
+        ExitSuccess -> pure ()
+        ExitFailure _ -> die stderrText
+    _ ->
+      die "Set both STUDIOMCP_HARBOR_USERNAME and STUDIOMCP_HARBOR_PASSWORD, or neither."
+
+localImageConfigDigest :: String -> IO String
+localImageConfigDigest imageRef = do
+  (exitCode, stdoutText, stderrText) <-
+    readProcessWithExitCode
+      "docker"
+      ["image", "inspect", imageRef, "--format", "{{.Id}}"]
+      ""
+  case exitCode of
+    ExitSuccess -> pure (trimWhitespace stdoutText)
+    ExitFailure _ -> die stderrText
+
+remoteImageConfigDigest :: String -> IO (Maybe String)
+remoteImageConfigDigest imageRef = do
+  (exitCode, stdoutText, _) <-
+    readProcessWithExitCode "docker" ["manifest", "inspect", imageRef] ""
+  case exitCode of
+    ExitFailure _ -> pure Nothing
+    ExitSuccess ->
+      case decode (LBS.pack stdoutText) of
+        Just value -> pure (lookupString ["config", "digest"] value)
+        Nothing -> pure Nothing
+
+ensureKindRegistryAccess :: ImageRegistryConfig -> String -> IO ()
+ensureKindRegistryAccess config clusterName =
+  when (isLocalRegistryConfig config) $ do
+    ensureLocalRegistryRunning
+    dockerNetworkConnectIfNeeded "kind" localRegistryContainerName
+    configureKindNodeRegistry clusterName
+
+dockerNetworkConnectIfNeeded :: String -> String -> IO ()
+dockerNetworkConnectIfNeeded networkName containerName = do
+  connected <- dockerContainerOnNetwork networkName containerName
+  unless connected $
+    callProcess "docker" ["network", "connect", networkName, containerName]
+
+dockerContainerOnNetwork :: String -> String -> IO Bool
+dockerContainerOnNetwork networkName containerName = do
+  (exitCode, stdoutText, _) <-
+    readProcessWithExitCode
+      "docker"
+      ["network", "inspect", networkName, "--format", "{{json .Containers}}"]
+      ""
+  case exitCode of
+    ExitFailure _ -> pure False
+    ExitSuccess -> pure (("\"Name\":\"" <> containerName <> "\"") `isInfixOf` stdoutText)
+
+configureKindNodeRegistry :: String -> IO ()
+configureKindNodeRegistry clusterName = do
+  let nodeName = clusterName <> "-control-plane"
+      registryDir = "/etc/containerd/certs.d/" <> localRegistryHost
+      hostsToml =
+        unlines
+          [ "server = \"http://" <> localRegistryHost <> "\""
+          , ""
+          , "[host.\"http://" <> localRegistryContainerName <> ":5000\"]"
+          , "  capabilities = [\"pull\", \"resolve\"]"
+          ]
+  callProcess "docker" ["exec", nodeName, "mkdir", "-p", registryDir]
+  (exitCode, _, stderrText) <-
+    readProcessWithExitCode
+      "docker"
+      ["exec", "-i", nodeName, "sh", "-c", "cat > " <> registryDir <> "/hosts.toml"]
+      hostsToml
+  case exitCode of
+    ExitSuccess -> pure ()
+    ExitFailure _ -> die stderrText
+
 buildServerImage :: IO ()
 buildServerImage = do
   skipBuild <- lookupEnv "STUDIOMCP_SKIP_IMAGE_BUILD"
@@ -2789,9 +3096,7 @@ data RequiredPortMapping = RequiredPortMapping
 requiredPortMappings :: [RequiredPortMapping]
 requiredPortMappings =
   [ RequiredPortMapping 80 8081 "HTTP Ingress"
-  , RequiredPortMapping 443 8444 "HTTPS Ingress"
   , RequiredPortMapping 32000 9000 "MinIO S3 API"
-  , RequiredPortMapping 32001 9001 "MinIO Console"
   ]
 
 renderKindConfig :: String -> FilePath -> LBS.ByteString
@@ -2800,6 +3105,10 @@ renderKindConfig clusterName dataRoot =
     [ "kind: Cluster"
     , "apiVersion: kind.x-k8s.io/v1alpha4"
     , "name: " <> LBS.pack clusterName
+    , "containerdConfigPatches:"
+    , "  - |-"
+    , "    [plugins.\"io.containerd.grpc.v1.cri\".registry.mirrors.\"" <> LBS.pack localRegistryHost <> "\"]"
+    , "      endpoint = [\"http://" <> LBS.pack localRegistryContainerName <> ":5000\"]"
     , "nodes:"
     , "  - role: control-plane"
     , "    extraPortMappings:"
@@ -2831,7 +3140,7 @@ inspectKindNodePortBindings clusterName = do
     ExitSuccess -> pure (parsePortBindings (trimWhitespace stdoutText))
 
 -- | Parse Docker PortBindings JSON into a map from container port to host ports
--- Input format: {"80/tcp":[{"HostIp":"","HostPort":"8081"}],"443/tcp":[{"HostIp":"","HostPort":"8444"}]}
+-- Input format: {"80/tcp":[{"HostIp":"","HostPort":"8081"}],"32000/tcp":[{"HostIp":"","HostPort":"9000"}]}
 parsePortBindings :: String -> Map.Map String [Int]
 parsePortBindings jsonStr =
   case decode (LBS.pack jsonStr) of
@@ -3105,6 +3414,12 @@ lookupString path value =
   case lookupPath path value of
     Just (String textValue) -> Just (Text.unpack textValue)
     _ -> Nothing
+
+lookupNonEmptyString :: [String] -> Value -> String -> String
+lookupNonEmptyString path value fallback =
+  case fmap trimWhitespace (lookupString path value) of
+    Just textValue | not (null textValue) -> textValue
+    _ -> fallback
 
 lookupInt :: [String] -> Value -> Maybe Int
 lookupInt path value =

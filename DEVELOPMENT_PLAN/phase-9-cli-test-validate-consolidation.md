@@ -22,13 +22,13 @@ interface for running unit tests, integration tests, and all validators.
 ### Deliverables
 
 1. **Test Commands**
-   - `studiomcp test` - Run all tests (unit + integration)
-   - `studiomcp test all` - Run all tests (unit + integration)
-   - `studiomcp test unit` - Run unit tests only
-   - `studiomcp test integration` - Run integration tests only
+   - `docker compose run --rm studiomcp studiomcp test` - Run all tests (unit + integration)
+   - `docker compose run --rm studiomcp studiomcp test all` - Run all tests (unit + integration)
+   - `docker compose run --rm studiomcp studiomcp test unit` - Run unit tests only
+   - `docker compose run --rm studiomcp studiomcp test integration` - Run integration tests only
 
 2. **Validate All Command**
-   - `studiomcp validate all` - Run all 28 validators with aggregate reporting
+   - `docker compose run --rm studiomcp studiomcp validate all` - Run all 28 validators with aggregate reporting
 
 3. **CLI Reference Documentation**
    - Multi-tiered, category-organized CLI reference at `documents/reference/cli_reference.md`
@@ -43,22 +43,22 @@ interface for running unit tests, integration tests, and all validators.
 All validation commands run inside the outer container after bootstrap:
 
 ```bash
-docker compose up -d
+docker compose build
 ```
 
 #### Validation Gates
 
 ```bash
 # Verify test commands
-docker compose exec studiomcp-env studiomcp test unit
-docker compose exec studiomcp-env studiomcp test integration
-docker compose exec studiomcp-env studiomcp test all
+docker compose run --rm studiomcp studiomcp test unit
+docker compose run --rm studiomcp studiomcp test integration
+docker compose run --rm studiomcp studiomcp test all
 
 # Verify validate all command
-docker compose exec studiomcp-env studiomcp validate all
+docker compose run --rm studiomcp studiomcp validate all
 
 # Verify docs
-docker compose exec studiomcp-env studiomcp validate docs
+docker compose run --rm studiomcp studiomcp validate docs
 ```
 
 ### Remaining Work
@@ -97,14 +97,14 @@ None.
 
 ### Command Implementation
 
-The test commands invoke `cabal test` directly:
+The test commands invoke Cabal internally with the isolated build directory:
 
 ```haskell
 runTestUnit :: IO ()
 runTestUnit = do
   putStrLn "Running unit tests..."
   (exitCode, _, _) <- readProcessWithExitCode "cabal"
-    ["test", "unit-tests", "--test-show-details=direct"]
+    ["--builddir=/opt/build/studiomcp", "test", "unit-tests", "--test-show-details=direct"]
     ""
   -- Handle exit code
 ```
@@ -126,10 +126,10 @@ validateAll = do
 
 | Command | Test Suite |
 |---------|------------|
-| `studiomcp test unit` | `unit-tests` (844 tests) |
-| `studiomcp test integration` | `integration-tests` (16 tests) |
-| `studiomcp test all` | Both suites |
-| `studiomcp validate all` | All 28 validators |
+| `docker compose run --rm studiomcp studiomcp test unit` | `unit-tests` (846 tests) |
+| `docker compose run --rm studiomcp studiomcp test integration` | `integration-tests` (16 tests) |
+| `docker compose run --rm studiomcp studiomcp test all` | Both suites |
+| `docker compose run --rm studiomcp studiomcp validate all` | All 28 validators |
 
 ## Cross-References
 

@@ -36,7 +36,7 @@ The CLI is expected to run inside the outer development container, not directly 
 Canonical invocation shape:
 
 ```bash
-docker compose -f docker-compose.yaml exec studiomcp-env studiomcp <subcommand...>
+docker compose -f docker-compose.yaml run --rm studiomcp studiomcp <subcommand...>
 ```
 
 The CLI may internally call external tools such as `kind`, `kubectl`, and `helm`, but those calls must be orchestrated from Haskell rather than delegated to checked-in shell scripts.
@@ -54,14 +54,15 @@ The CLI command surface should be organized into clear families:
 
 The exact spellings live in the CLI reference document, but the architectural split matters:
 
-- `cluster` owns kind lifecycle, Helm-backed deployment, and kubeconfig-oriented flows
+- `cluster` owns kind lifecycle, registry image population, CLI-managed secrets, Helm-backed deployment, and kubeconfig-oriented flows
 - `cluster storage ...` owns manual PV reconciliation and `.data/`-backed storage setup
 - `validate` owns repo and runtime verification paths
 
 ## Responsibilities
 
 - manage the local kind cluster lifecycle
-- configure the cluster to host the MCP server image
+- configure the cluster to pull application images from the configured registry
+- create or update fixed-name Kubernetes secrets before Helm deployment
 - create and reconcile manual PVs for local Helm releases that request persistence
 - deploy or reconcile sidecars through Helm
 - expose native validation commands instead of repository shell wrappers
@@ -76,7 +77,7 @@ The exact spellings live in the CLI reference document, but the architectural sp
 
 ## Current Repo Note
 
-The implemented CLI surface already covers DAG validation, cluster lifecycle, cluster reset, storage reconciliation and deletion, sidecar deployment, server deployment, stdio and HTTP MCP runtime entrypoints, auth validation, session scaling validation, inference validation, observability validation, and conformance validation.
+The implemented CLI surface already covers DAG validation, cluster lifecycle, cluster reset, registry image push, CLI-managed secrets, storage reconciliation and deletion, sidecar deployment, server deployment, stdio and HTTP MCP runtime entrypoints, auth validation, session scaling validation, inference validation, observability validation, and conformance validation.
 
 ## Cross-References
 

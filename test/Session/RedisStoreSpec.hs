@@ -4,11 +4,13 @@ module Session.RedisStoreSpec (spec) where
 
 import Control.Concurrent (threadDelay)
 import Control.Exception (SomeException, try)
+import Data.Text (pack)
 import Data.Time (addUTCTime, getCurrentTime)
 import StudioMCP.MCP.Session.RedisConfig
 import StudioMCP.MCP.Session.RedisStore
 import StudioMCP.MCP.Session.Store
 import StudioMCP.MCP.Session.Types
+import System.Directory (doesFileExist)
 import System.Exit (ExitCode (..))
 import System.Process (readProcessWithExitCode)
 import Test.Hspec
@@ -305,32 +307,70 @@ specWith redisConfig = do
       storeGetCursor store (sessionId session) "events" `shouldReturn` Right Nothing
       closeRedisSessionStore store
 
+-- | Container name for test Redis (fixed name for idempotent cleanup)
+testRedisContainerName :: String
+testRedisContainerName = "studiomcp-test-redis"
+
 startRedisFixture :: IO (String, RedisConfig)
 startRedisFixture = do
+  -- Clean up any existing container with this name (idempotent)
+  _ <- readProcessWithExitCode "docker" ["rm", "-f", testRedisContainerName] ""
+  -- Start new container with fixed name
   (exitCode, stdoutText, stderrText) <-
-    readProcessWithExitCode "docker" ["run", "-d", "-P", "redis:7-alpine"] ""
+    readProcessWithExitCode "docker" ["run", "-d", "-P", "--name", testRedisContainerName, "redis:7-alpine"] ""
   case exitCode of
     ExitFailure _ -> fail stderrText
     ExitSuccess -> do
       let containerId = trimLine stdoutText
       portNumber <- resolvePublishedPort containerId
+      -- When running inside outer container with mounted Docker socket,
+      -- 127.0.0.1 doesn't reach the host. Use host.docker.internal for
+      -- Docker Desktop or resolve the host gateway IP.
+      hostIp <- resolveDockerHost
       let redisConfig =
             defaultRedisConfig
-              { rcHost = "127.0.0.1"
+              { rcHost = pack hostIp
               , rcPort = portNumber
               }
       waitForRedisReady redisConfig
       pure (containerId, redisConfig)
 
+-- | Resolve the Docker host IP for connecting to containers
+-- When running inside a container with mounted Docker socket, we need
+-- to connect to the host machine where Docker is running.
+resolveDockerHost :: IO String
+resolveDockerHost = do
+  -- Check if we're running in the outer container
+  inContainer <- isRunningInContainer
+  if inContainer
+    then do
+      -- Try host.docker.internal first (Docker Desktop)
+      (exitCode, _, _) <- readProcessWithExitCode "getent" ["hosts", "host.docker.internal"] ""
+      case exitCode of
+        ExitSuccess -> pure "host.docker.internal"
+        ExitFailure _ -> do
+          -- Fall back to default gateway (Linux Docker)
+          (gwExit, gwOut, _) <- readProcessWithExitCode "sh" ["-c", "ip route | awk '/default/ {print $3}'"] ""
+          case gwExit of
+            ExitSuccess -> pure (trimLine gwOut)
+            ExitFailure _ -> pure "172.17.0.1"  -- Docker default gateway
+    else pure "127.0.0.1"
+
+-- | Check if we're running inside the outer development container
+isRunningInContainer :: IO Bool
+isRunningInContainer = do
+  dockerenvResult <- try (doesFileExist "/.dockerenv") :: IO (Either SomeException Bool)
+  pure (either (const False) id dockerenvResult)
+
 stopRedisFixture :: (String, RedisConfig) -> IO ()
-stopRedisFixture (containerId, _) = do
-  _ <- readProcessWithExitCode "docker" ["rm", "-f", containerId] ""
+stopRedisFixture _ = do
+  _ <- readProcessWithExitCode "docker" ["rm", "-f", testRedisContainerName] ""
   pure ()
 
 flushRedisFixture :: String -> IO ()
-flushRedisFixture containerId = do
+flushRedisFixture _ = do
   (exitCode, _, stderrText) <-
-    readProcessWithExitCode "docker" ["exec", containerId, "redis-cli", "FLUSHDB"] ""
+    readProcessWithExitCode "docker" ["exec", testRedisContainerName, "redis-cli", "FLUSHDB"] ""
   case exitCode of
     ExitSuccess -> pure ()
     ExitFailure _ -> fail stderrText

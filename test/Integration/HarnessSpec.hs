@@ -5,7 +5,7 @@ where
 
 import Control.Monad (unless)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import System.Environment (lookupEnv)
+import System.Directory (doesFileExist)
 import System.Exit (ExitCode (ExitSuccess, ExitFailure))
 import System.IO.Unsafe (unsafePerformIO)
 import System.Process (readProcessWithExitCode)
@@ -104,16 +104,7 @@ ensureOuterContainer = do
         _ <- runShellExpectSuccess outerContainerBuildCommand
         pure ()
       else do
-        _ <- runComposeExpectSuccess ["up", "-d", "studiomcp-env"]
-        _ <-
-          runComposeExpectSuccess
-            [ "exec",
-              "-T",
-              "studiomcp-env",
-              "sh",
-              "-lc",
-              outerContainerBuildCommand
-            ]
+        _ <- runComposeExpectSuccess ["build", "studiomcp"]
         pure ()
     writeIORef outerContainerReadyRef True
 
@@ -149,7 +140,7 @@ runOuterCliExpectSuccess args = do
       else
         readProcessWithExitCode
           "docker"
-          ( ["compose", "-f", "docker-compose.yaml", "exec", "-T", "studiomcp-env", "studiomcp"]
+          ( ["compose", "-f", "docker-compose.yaml", "run", "--rm", "studiomcp", "studiomcp"]
               <> args
           )
           ""
@@ -169,7 +160,7 @@ runOuterCliExpectSuccessWithDiagnostics args = do
       else
         readProcessWithExitCode
           "docker"
-          ( ["compose", "-f", "docker-compose.yaml", "exec", "-T", "studiomcp-env", "studiomcp"]
+          ( ["compose", "-f", "docker-compose.yaml", "run", "--rm", "studiomcp", "studiomcp"]
               <> args
           )
           ""
@@ -196,13 +187,7 @@ outerContainerBuildCommand =
   "rm -rf /opt/build/studiomcp-cli && mkdir -p /opt/build/studiomcp-cli && cabal --builddir=/opt/build/studiomcp-cli build all && cabal --builddir=/opt/build/studiomcp-cli install exe:studiomcp --installdir /usr/local/bin --overwrite-policy=always"
 
 isInsideOuterContainer :: IO Bool
-isInsideOuterContainer = do
-  envValue <- lookupEnv "STUDIOMCP_OUTER_CONTAINER"
-  case envValue of
-    Just "1" -> pure True
-    Just "true" -> pure True
-    Just "TRUE" -> pure True
-    _ -> pure False
+isInsideOuterContainer = doesFileExist "/.dockerenv"
 
 runShellExpectSuccess :: String -> IO String
 runShellExpectSuccess command = do

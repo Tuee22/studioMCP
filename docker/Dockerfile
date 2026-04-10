@@ -79,6 +79,7 @@ RUN if [ -z "${TARGETARCH}" ]; then TARGETARCH="$(dpkg --print-architecture)"; f
 
 ENV LANG="C.UTF-8" \
     LC_ALL="C.UTF-8" \
+    CABAL_BUILDDIR="/opt/build/studiomcp" \
     PATH="/root/.ghcup/bin:/root/.cabal/bin:/usr/local/bin:${PATH}"
 
 WORKDIR /workspace
@@ -89,8 +90,6 @@ RUN mkdir -p /opt/build/studiomcp && \
     cabal update && \
     cabal --builddir=/opt/build/studiomcp build all && \
     cabal --builddir=/opt/build/studiomcp install exe:studiomcp --installdir /usr/local/bin --overwrite-policy=always
-
-CMD ["sleep", "infinity"]
 
 FROM os-base AS production
 

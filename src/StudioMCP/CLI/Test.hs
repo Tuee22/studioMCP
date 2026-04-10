@@ -6,7 +6,11 @@ where
 import Control.Monad (unless)
 import StudioMCP.CLI.Command (TestCommand (..))
 import System.Exit (ExitCode (..), exitFailure, exitWith)
-import System.Process (callProcess, readProcessWithExitCode)
+import System.Process (createProcess, proc, waitForProcess)
+
+-- | Build directory for cabal artifacts (must stay outside workspace bind mount)
+cabalBuildDir :: String
+cabalBuildDir = "/opt/build/studiomcp"
 
 -- | Run test command
 runTestCommand :: TestCommand -> IO ()
@@ -20,9 +24,7 @@ runTestCommand command =
 runTestUnit :: IO ()
 runTestUnit = do
   putStrLn "Running unit tests..."
-  (exitCode, _, _) <- readProcessWithExitCode "cabal"
-    ["test", "unit-tests", "--test-show-details=direct"]
-    ""
+  exitCode <- runCabalTest "unit-tests"
   case exitCode of
     ExitSuccess -> putStrLn "Unit tests passed."
     ExitFailure code -> do
@@ -33,9 +35,7 @@ runTestUnit = do
 runTestIntegration :: IO ()
 runTestIntegration = do
   putStrLn "Running integration tests..."
-  (exitCode, _, _) <- readProcessWithExitCode "cabal"
-    ["test", "integration-tests", "--test-show-details=direct"]
-    ""
+  exitCode <- runCabalTest "integration-tests"
   case exitCode of
     ExitSuccess -> putStrLn "Integration tests passed."
     ExitFailure code -> do
@@ -48,15 +48,11 @@ runTestAll = do
   putStrLn "Running all tests..."
   putStrLn ""
   putStrLn "=== Unit Tests ==="
-  (unitExit, _, _) <- readProcessWithExitCode "cabal"
-    ["test", "unit-tests", "--test-show-details=direct"]
-    ""
+  unitExit <- runCabalTest "unit-tests"
   let unitPassed = unitExit == ExitSuccess
   putStrLn ""
   putStrLn "=== Integration Tests ==="
-  (integrationExit, _, _) <- readProcessWithExitCode "cabal"
-    ["test", "integration-tests", "--test-show-details=direct"]
-    ""
+  integrationExit <- runCabalTest "integration-tests"
   let integrationPassed = integrationExit == ExitSuccess
   putStrLn ""
   putStrLn "=== Test Summary ==="
@@ -67,3 +63,16 @@ runTestAll = do
     putStrLn "Some tests failed."
     exitFailure
   putStrLn "All tests passed."
+
+runCabalTest :: String -> IO ExitCode
+runCabalTest suiteName = do
+  (_, _, _, processHandle) <-
+    createProcess $
+      proc
+        "cabal"
+        [ "--builddir=" <> cabalBuildDir
+        , "test"
+        , suiteName
+        , "--test-show-details=direct"
+        ]
+  waitForProcess processHandle

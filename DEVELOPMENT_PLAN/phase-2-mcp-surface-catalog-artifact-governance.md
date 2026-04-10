@@ -42,25 +42,25 @@ storage rules, and observability hooks.
 All validation commands run inside the outer container after bootstrap:
 
 ```bash
-docker compose up -d
+docker compose build
 ```
 
 #### Validation Gates
 
 | Check | Command | Expected |
 |-------|---------|----------|
-| MCP stdio | `docker compose exec studiomcp-env studiomcp validate mcp-stdio` | PASS |
-| MCP HTTP | `docker compose exec studiomcp-env studiomcp validate mcp-http` | PASS |
-| Artifact storage | `docker compose exec studiomcp-env studiomcp validate artifact-storage` | PASS |
-| Artifact governance | `docker compose exec studiomcp-env studiomcp validate artifact-governance` | PASS |
-| MCP tools | `docker compose exec studiomcp-env studiomcp validate mcp-tools` | PASS |
-| MCP resources | `docker compose exec studiomcp-env studiomcp validate mcp-resources` | PASS |
-| MCP prompts | `docker compose exec studiomcp-env studiomcp validate mcp-prompts` | PASS |
-| Observability | `docker compose exec studiomcp-env studiomcp validate observability` | PASS |
-| Audit | `docker compose exec studiomcp-env studiomcp validate audit` | PASS |
-| Quotas | `docker compose exec studiomcp-env studiomcp validate quotas` | PASS |
-| Rate limit | `docker compose exec studiomcp-env studiomcp validate rate-limit` | PASS |
-| MCP conformance | `docker compose exec studiomcp-env studiomcp validate mcp-conformance` | PASS on the phase-close path |
+| MCP stdio | `docker compose run --rm studiomcp studiomcp validate mcp-stdio` | PASS |
+| MCP HTTP | `docker compose run --rm studiomcp studiomcp validate mcp-http` | PASS |
+| Artifact storage | `docker compose run --rm studiomcp studiomcp validate artifact-storage` | PASS |
+| Artifact governance | `docker compose run --rm studiomcp studiomcp validate artifact-governance` | PASS |
+| MCP tools | `docker compose run --rm studiomcp studiomcp validate mcp-tools` | PASS |
+| MCP resources | `docker compose run --rm studiomcp studiomcp validate mcp-resources` | PASS |
+| MCP prompts | `docker compose run --rm studiomcp studiomcp validate mcp-prompts` | PASS |
+| Observability | `docker compose run --rm studiomcp studiomcp validate observability` | PASS |
+| Audit | `docker compose run --rm studiomcp studiomcp validate audit` | PASS |
+| Quotas | `docker compose run --rm studiomcp studiomcp validate quotas` | PASS |
+| Rate limit | `docker compose run --rm studiomcp studiomcp validate rate-limit` | PASS |
+| MCP conformance | `docker compose run --rm studiomcp studiomcp validate mcp-conformance` | PASS on the phase-close path |
 
 ### Test Mapping
 

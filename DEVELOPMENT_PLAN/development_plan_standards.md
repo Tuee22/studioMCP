@@ -27,8 +27,9 @@ The plan is intentionally concrete.
 - Include real files, commands, validation gates, and contract notes where they materially clarify
   what is implemented or still open.
 - Command examples should use the canonical binary name `studiomcp`.
-- Command examples that invoke `cabal` must either rely on `cabal.project` builddir or pass
-  `--builddir=/opt/build/studiomcp` explicitly. Build artifacts must never land in the repo tree.
+- Command examples that invoke `cabal` must pass `--builddir=/opt/build/studiomcp` explicitly.
+  Note: `cabal.project` builddir and `CABAL_BUILDDIR` environment variable do not work for
+  nix-style builds. Build artifacts must never land in the repo tree.
 - Examples do not need to be verbatim copies of implementation files, but they must not contradict
   the supported architecture or validation surface.
 
@@ -77,6 +78,7 @@ DEVELOPMENT_PLAN/
 ├── phase-7-keycloak-realm-bootstrap.md
 ├── phase-8-final-closure-regression-gate.md
 ├── phase-9-cli-test-validate-consolidation.md
+├── phase-10-build-artifact-isolation.md
 └── legacy-tracking-for-deletion.md
 ```
 
@@ -173,43 +175,47 @@ rendering rules defined in
 
 ### L. Container Execution Context
 
-The supported development workflow uses the outer `studiomcp-env` container. All commands in
+The supported development workflow uses ephemeral containers. All commands in
 `DEVELOPMENT_PLAN/` must specify their execution context.
 
-**Bootstrap** (run on host):
+**All commands** (ephemeral container):
 ```bash
-docker compose up -d
+docker compose run --rm studiomcp studiomcp <subcommand>
+docker compose run --rm studiomcp cabal --builddir=/opt/build/studiomcp <subcommand>
 ```
 
-**All other commands** (run inside outer container):
+**Interactive sessions**:
 ```bash
-docker compose exec studiomcp-env studiomcp <subcommand>
-docker compose exec studiomcp-env cabal <subcommand>
+docker compose run --rm -it studiomcp sh
 ```
 
 Rules:
-- Validation tables must use the full `docker compose exec studiomcp-env` invocation pattern.
-- The canonical bootstrap is `docker compose up -d` followed by container commands.
+- No long-running container; every command creates an ephemeral container.
+- Container removed after command completes (`--rm` flag).
+- Validation tables must use the full `docker compose run --rm studiomcp` invocation pattern.
 - Never show bare `studiomcp` or `cabal` commands without container context in phase docs.
+- The Dockerfile `env` target has no `CMD`; docker-compose.yaml has no `command`.
+- The production image may retain its runtime `ENTRYPOINT`/`CMD` because it runs in-cluster, not
+  as the outer development container.
 - Cross-reference [../documents/engineering/docker_policy.md](../documents/engineering/docker_policy.md)
   for the complete container workflow and LLM operating rules.
 
 ## CLI-First Testing Policy
 
-All test and validation entrypoints are available through the `studiomcp` CLI inside the outer
-container:
+All test and validation entrypoints are available through the `studiomcp` CLI in ephemeral
+containers:
 
 | Command | Description |
 |---------|-------------|
-| `docker compose exec studiomcp-env studiomcp test` | Run all tests (unit + integration) |
-| `docker compose exec studiomcp-env studiomcp test unit` | Run unit tests only |
-| `docker compose exec studiomcp-env studiomcp test integration` | Run integration tests only |
-| `docker compose exec studiomcp-env studiomcp validate all` | Run all validators |
+| `docker compose run --rm studiomcp studiomcp test` | Run all tests (unit + integration) |
+| `docker compose run --rm studiomcp studiomcp test unit` | Run unit tests only |
+| `docker compose run --rm studiomcp studiomcp test integration` | Run integration tests only |
+| `docker compose run --rm studiomcp studiomcp validate all` | Run all validators |
 
 Rules:
 - The `studiomcp` CLI is the canonical interface for test and validation execution.
-- The CLI runs inside the outer `studiomcp-env` container, not on the host.
-- The CLI invokes `cabal test` internally for test suites.
+- The CLI runs inside ephemeral containers, not on the host.
+- The CLI invokes `cabal test` internally for test suites with `--builddir=/opt/build/studiomcp`.
 - The authoritative CLI reference lives at [../documents/reference/cli_reference.md](../documents/reference/cli_reference.md).
 
 ## Cross-Reference Conventions
@@ -229,7 +235,7 @@ Rules:
 4. Update [legacy-tracking-for-deletion.md](legacy-tracking-for-deletion.md) whenever compatibility
    cleanup scope changes.
 5. Keep [../DEVELOPMENT_PLAN.md](../DEVELOPMENT_PLAN.md) aligned as the compatibility index.
-6. Run `docker compose exec studiomcp-env studiomcp validate docs` before closing the work.
+6. Run `docker compose run --rm studiomcp studiomcp validate docs` before closing the work.
 7. If Mermaid changed, validate the diagram subset after the edit.
 
 ## Cross-References

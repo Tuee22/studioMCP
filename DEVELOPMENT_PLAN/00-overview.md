@@ -29,10 +29,11 @@
 | 3 | Done | Keycloak-backed auth and shared Redis session behavior are implemented and validated |
 | 4 | Done | Control-plane route split and object-storage public endpoint contract are explicit and validated |
 | 5 | Done | Browser login, session, refresh, and logout behavior are cookie-first and validated |
-| 6 | Done | Kind and Helm expose the canonical control-plane contract |
+| 6 | Done | Kind and Helm expose the canonical control-plane contract through unified ingress, registry-backed image pulls, CLI-managed secrets, and CLI-owned storage reconciliation |
 | 7 | Done | Keycloak realm bootstrap is automated and idempotent on the default cluster path |
 | 8 | Done | The full regression gate now passes on the supported outer-container and Kind-based workflow |
 | 9 | Done | CLI test and validate commands consolidated with unified interface and documentation |
+| 10 | Done | Build artifact isolation, ephemeral container operation, and minimal compose mounts are implemented |
 
 ## Public Topology Baseline
 
@@ -46,6 +47,7 @@ The supported local and cluster topology is:
 - Keycloak uses its own PostgreSQL store
 - MCP listener nodes externalize resumable session state to Redis
 - runtime services use Pulsar and MinIO for eventing and immutable artifact storage
+- local cluster persistence uses CLI-reconciled PVs backed by `./.data/` through the `studiomcp-manual` StorageClass
 - all durable local filesystem state lives under `./.data/`
 
 ## Design Decisions
@@ -53,14 +55,23 @@ The supported local and cluster topology is:
 - Browser auth is intentionally simplified to login/password over TLS to the BFF plus an HTTP-only
   session cookie. Redirect-based OAuth/PKCE is deferred.
 - Keycloak remains the identity backend and JWT issuer.
-- `docker-compose.yaml` launches only the outer development container. The `env` image installs
-  `studiomcp` to `/usr/local/bin`, and application services run in Kind via Helm.
+- `docker-compose.yaml` runs ephemeral containers via `docker compose run --rm -it studiomcp <cmd>`.
+  No persistent daemon; the `env` image has no CMD and compose has no command.
+- Environment variables (`LANG`, `LC_ALL`) are set only in the Dockerfile; compose inherits from image.
+- Compose mounts are minimal: workspace, `.data`, and docker socket only.
+- Web portals route through the ingress control-plane port: `/mcp`, `/api`, `/kc`, and `/minio`.
+- Helm deploys pull application containers from the configured Harbor-compatible registry; the CLI
+  idempotently pushes images on change when the registry exposes a comparable manifest digest.
+- Cluster secrets are managed by the CLI on deploy; no env files.
+- Stateful Helm workloads bind only to the CLI-reconciled `studiomcp-manual` StorageClass; no
+  default dynamic storage class remains on the supported local path.
 - The control-plane route split is fixed: `/mcp` for MCP, `/api` for the BFF, `/kc` for Keycloak.
 - Bulk artifact bytes stay off the control plane. The BFF authorizes access and returns presigned
   object-storage URLs.
 - Durable repo-local state must live under `./.data/`; `.studiomcp-data/` is a removed legacy path.
-- Build artifacts are isolated to `/opt/build/studiomcp` via `cabal.project` builddir. The repo
-  tree must remain free of compiled output.
+- Build artifacts are isolated to `/opt/build/studiomcp` via explicit `--builddir` flags on all
+  cabal invocations. The `CABAL_BUILDDIR` environment variable and `cabal.project` builddir
+  directive do not work for nix-style builds. The repo tree must remain free of compiled output.
 
 ## Completion Rules
 
@@ -85,3 +96,4 @@ The supported local and cluster topology is:
 - [phase-5-browser-session-contract.md](phase-5-browser-session-contract.md)
 - [phase-8-final-closure-regression-gate.md](phase-8-final-closure-regression-gate.md)
 - [phase-9-cli-test-validate-consolidation.md](phase-9-cli-test-validate-consolidation.md)
+- [phase-10-build-artifact-isolation.md](phase-10-build-artifact-isolation.md)

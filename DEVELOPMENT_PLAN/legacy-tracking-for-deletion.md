@@ -26,6 +26,14 @@ None.
 | `exchangeCodeForTokens` | `src/StudioMCP/Auth/PKCE.hs` | Removed |
 | Legacy durable-state root | `.studiomcp-data/` | Replaced by `./.data/` |
 | Kebab-case governed docs | `documents/*.md` legacy naming | Replaced by snake_case naming |
+| Persistent outer container command | `docker-compose.yaml` | Removed for the ephemeral `docker compose run --rm` model |
+| Persistent env-stage Dockerfile command | `docker/Dockerfile` | Removed for the ephemeral `docker compose run --rm` model |
+| Compose-level locale environment | `docker-compose.yaml` | Removed; locale is inherited from Dockerfile `ENV` |
+| Host Docker config bind mount | `docker-compose.yaml` | Removed; registry auth is supplied through CLI-managed login inputs when needed |
+| `docker compose up` and `docker compose exec` plan examples | `DEVELOPMENT_PLAN/*.md` | Replaced with `docker compose run --rm studiomcp ...` examples |
+| Separate Keycloak ingress | `chart/templates/ingress.yaml` | Consolidated into the unified ingress |
+| MinIO console NodePort | `chart/values-kind.yaml` | Replaced by the `/minio` ingress path; the MinIO S3 data-plane NodePort remains intentionally retained for presigned URLs |
+| Local image loading to Kind | `src/StudioMCP/CLI/Cluster.hs` | Replaced by registry push and Helm registry image references |
 
 ## Intentionally Retained Active Surfaces
 

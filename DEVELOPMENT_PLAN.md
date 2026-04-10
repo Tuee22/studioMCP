@@ -16,18 +16,22 @@ This root file remains as a compatibility index for existing links, tooling, and
 | 7 | Done | [DEVELOPMENT_PLAN/phase-7-keycloak-realm-bootstrap.md](DEVELOPMENT_PLAN/phase-7-keycloak-realm-bootstrap.md) |
 | 8 | Done | [DEVELOPMENT_PLAN/phase-8-final-closure-regression-gate.md](DEVELOPMENT_PLAN/phase-8-final-closure-regression-gate.md) |
 | 9 | Done | [DEVELOPMENT_PLAN/phase-9-cli-test-validate-consolidation.md](DEVELOPMENT_PLAN/phase-9-cli-test-validate-consolidation.md) |
+| 10 | Done | [DEVELOPMENT_PLAN/phase-10-build-artifact-isolation.md](DEVELOPMENT_PLAN/phase-10-build-artifact-isolation.md) |
 
 ## Current Validation State
 
-All commands run inside the outer container after `docker compose up -d`:
+All commands run inside an ephemeral outer container:
 
-- `docker compose exec studiomcp-env cabal build all` passes.
-- `docker compose exec studiomcp-env studiomcp test unit` passes with 844 unit tests.
-- `docker compose exec studiomcp-env studiomcp test integration` passes with 16 integration tests.
-- `docker compose exec studiomcp-env studiomcp test all` passes end to end on the supported outer-container path.
-- `docker compose exec studiomcp-env studiomcp validate all` runs all validators with aggregate reporting.
-- `docker compose exec studiomcp-env studiomcp validate docs` passes.
-- The outer `studiomcp-env` container resolves `studiomcp` on `PATH` at `/usr/local/bin/studiomcp`.
+- `docker compose run --rm studiomcp cabal --builddir=/opt/build/studiomcp build all` passes.
+- `docker compose run --rm studiomcp studiomcp test unit` passes with 846 unit tests.
+- `docker compose run --rm studiomcp studiomcp test integration` passes with 16 integration tests.
+- `docker compose run --rm studiomcp studiomcp validate all` passes with 28 of 28 validators.
+- Build artifacts go to `/opt/build/studiomcp/` and never leak to the workspace bind mount.
+- The outer `studiomcp` container resolves `studiomcp` on `PATH` at `/usr/local/bin/studiomcp`.
+
+**Cluster-Dependent:**
+- `docker compose run --rm studiomcp studiomcp test integration` requires Kind cluster via `studiomcp cluster ensure`.
+- Integration tests validate cluster services (Keycloak, MinIO, Pulsar, etc.) through the outer-container CLI.
 
 ## Public Topology Baseline
 
@@ -57,6 +61,7 @@ topology and component inventory.
 - [Phase 7 Keycloak bootstrap automation](DEVELOPMENT_PLAN/phase-7-keycloak-realm-bootstrap.md)
 - [Phase 8 final closure and regression gate](DEVELOPMENT_PLAN/phase-8-final-closure-regression-gate.md)
 - [Phase 9 CLI test and validate consolidation](DEVELOPMENT_PLAN/phase-9-cli-test-validate-consolidation.md)
+- [Phase 10 build artifact isolation](DEVELOPMENT_PLAN/phase-10-build-artifact-isolation.md)
 - [Legacy tracking for deletion](DEVELOPMENT_PLAN/legacy-tracking-for-deletion.md)
 
 ## Documentation Governance

@@ -11,14 +11,14 @@ The `studiomcp` CLI is the canonical interface for all development, validation, 
 
 ## Execution Context
 
-All CLI commands run inside the outer `studiomcp-env` container. Bootstrap and invoke as follows:
+All CLI commands run inside the outer `studiomcp` container. Bootstrap and invoke as follows:
 
 ```bash
 # Bootstrap (run on host)
-docker compose up -d
+docker compose build
 
 # Invoke CLI commands (run inside container)
-docker compose exec studiomcp-env studiomcp <command>
+docker compose run --rm studiomcp studiomcp <command>
 ```
 
 See [DEVELOPMENT_PLAN/development_plan_standards.md](../../DEVELOPMENT_PLAN/development_plan_standards.md#l-container-execution-context) for the complete container workflow.
@@ -107,6 +107,8 @@ Kubernetes cluster lifecycle management.
 | `studiomcp cluster reset` | Reset the cluster to clean state |
 | `studiomcp cluster status` | Show cluster status |
 | `studiomcp cluster ensure` | Idempotent: up + sidecars + wait for all services |
+| `studiomcp cluster push-images` | Build and push application images to the configured registry |
+| `studiomcp cluster ensure-secrets` | Create/update CLI-managed Kubernetes secrets |
 | `studiomcp cluster deploy sidecars` | Deploy sidecar services (Redis, MinIO, Pulsar, etc.) |
 | `studiomcp cluster deploy server` | Deploy the MCP server |
 | `studiomcp cluster storage reconcile` | Reconcile storage resources |
@@ -114,52 +116,52 @@ Kubernetes cluster lifecycle management.
 
 ## Usage Examples
 
-All examples assume `docker compose up -d` has been run on the host first.
+All examples assume `docker compose build` has been run on the host first.
 
 ### Running Tests
 
 ```bash
 # Run all tests
-docker compose exec studiomcp-env studiomcp test
+docker compose run --rm studiomcp studiomcp test
 
 # Run only unit tests
-docker compose exec studiomcp-env studiomcp test unit
+docker compose run --rm studiomcp studiomcp test unit
 
 # Run only integration tests (requires cluster)
-docker compose exec studiomcp-env studiomcp test integration
+docker compose run --rm studiomcp studiomcp test integration
 ```
 
 ### Validation Workflow
 
 ```bash
 # Ensure cluster is ready
-docker compose exec studiomcp-env studiomcp cluster ensure
+docker compose run --rm studiomcp studiomcp cluster ensure
 
 # Run all validators
-docker compose exec studiomcp-env studiomcp validate all
+docker compose run --rm studiomcp studiomcp validate all
 
 # Or run specific validators
-docker compose exec studiomcp-env studiomcp validate docs
-docker compose exec studiomcp-env studiomcp validate mcp-http
+docker compose run --rm studiomcp studiomcp validate docs
+docker compose run --rm studiomcp studiomcp validate mcp-http
 ```
 
 ### Development Workflow
 
 ```bash
 # Start the cluster
-docker compose exec studiomcp-env studiomcp cluster up
+docker compose run --rm studiomcp studiomcp cluster up
 
 # Deploy sidecars
-docker compose exec studiomcp-env studiomcp cluster deploy sidecars
+docker compose run --rm studiomcp studiomcp cluster deploy sidecars
 
 # Deploy server
-docker compose exec studiomcp-env studiomcp cluster deploy server
+docker compose run --rm studiomcp studiomcp cluster deploy server
 
 # Run tests
-docker compose exec studiomcp-env studiomcp test all
+docker compose run --rm studiomcp studiomcp test all
 
 # Validate everything
-docker compose exec studiomcp-env studiomcp validate all
+docker compose run --rm studiomcp studiomcp validate all
 ```
 
 ## Cross-References

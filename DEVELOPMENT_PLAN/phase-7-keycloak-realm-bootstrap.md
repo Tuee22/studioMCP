@@ -25,7 +25,7 @@ ensure` runs idempotent.
 |------|---------|--------|
 | Realm JSON | `docker/keycloak/realm/studiomcp-realm.json` | Done |
 | CLI bootstrap | `src/StudioMCP/CLI/Cluster.hs` | Done |
-| Idempotent import | `studiomcp cluster ensure` waits and imports safely | Done |
+| Idempotent import | `docker compose run --rm studiomcp studiomcp cluster ensure` waits and imports safely | Done |
 
 ### Validation
 
@@ -34,16 +34,16 @@ ensure` runs idempotent.
 All validation commands run inside the outer container after bootstrap:
 
 ```bash
-docker compose up -d
+docker compose build
 ```
 
 #### Validation Gates
 
 | Check | Command | Expected |
 |-------|---------|----------|
-| Fresh cluster bootstrap | `docker compose exec studiomcp-env studiomcp cluster ensure` on a new cluster | Realm ready |
-| Idempotent re-run | `docker compose exec studiomcp-env studiomcp cluster ensure` twice | Still healthy |
-| Keycloak validate | `docker compose exec studiomcp-env studiomcp validate keycloak` | PASS on the live path |
+| Fresh cluster bootstrap | `docker compose run --rm studiomcp studiomcp cluster ensure` on a new cluster | Realm ready |
+| Idempotent re-run | `docker compose run --rm studiomcp studiomcp cluster ensure` twice | Still healthy |
+| Keycloak validate | `docker compose run --rm studiomcp studiomcp validate keycloak` | PASS on the live path |
 
 ### Remaining Work
 

@@ -69,6 +69,7 @@ validateDocsCommand = do
         , "DEVELOPMENT_PLAN/phase-7-keycloak-realm-bootstrap.md"
         , "DEVELOPMENT_PLAN/phase-8-final-closure-regression-gate.md"
         , "DEVELOPMENT_PLAN/phase-9-cli-test-validate-consolidation.md"
+        , "DEVELOPMENT_PLAN/phase-10-build-artifact-isolation.md"
         , "DEVELOPMENT_PLAN/legacy-tracking-for-deletion.md"
         ]
   requiredProblems <- fmap concat $

@@ -94,6 +94,14 @@ spec =
       parseCommand ["cluster", "deploy", "server"]
         `shouldBe` Right (ClusterCommand (ClusterDeployCommand DeployServer))
 
+    it "parses cluster push-images" $
+      parseCommand ["cluster", "push-images"]
+        `shouldBe` Right (ClusterCommand ClusterPushImagesCommand)
+
+    it "parses cluster ensure-secrets" $
+      parseCommand ["cluster", "ensure-secrets"]
+        `shouldBe` Right (ClusterCommand ClusterEnsureSecretsCommand)
+
     it "parses cluster storage reconcile" $
       parseCommand ["cluster", "storage", "reconcile"]
         `shouldBe` Right (ClusterCommand (ClusterStorageCommand ClusterStorageReconcile))

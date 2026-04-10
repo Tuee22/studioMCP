@@ -12,14 +12,18 @@
 
 | Component | Technology | Deployment | Purpose | Durable State |
 |-----------|------------|------------|---------|---------------|
-| Outer dev container | Docker Compose | `studiomcp-env` | Build/test shell and cluster control entrypoint with `studiomcp` on `PATH` | bind-mounted repo plus `./.data/` |
+| Outer dev container | Docker Compose | ephemeral via `run --rm` | Build/test shell and cluster control entrypoint with `studiomcp` on `PATH` | bind-mounted repo plus `./.data/` |
 | Local cluster | Kind | Docker-backed Kubernetes | Hosts the application and supporting services | host-backed volumes under `./.data/` |
-| Edge router | ingress-nginx | Helm release | Public entrypoint for `/mcp`, `/api`, and `/kc` | none |
+| Container registry | Harbor-compatible OCI registry | Local Docker container or external Harbor | Stores application images; Helm pulls from the configured registry | Registry storage |
+| Edge router | ingress-nginx | Helm release | Unified entrypoint for web services: `/mcp`, `/api`, `/kc`, `/minio` | none |
 | Identity provider | Keycloak | Helm release | Login/password auth and token issuance | Keycloak PostgreSQL |
 | Keycloak database | PostgreSQL | Helm release | Durable auth data | cluster storage |
 | Session store | Redis | Helm release | Shared MCP and browser-adjacent session coordination | in-cluster runtime state |
+| Local storage policy | `studiomcp-manual` StorageClass plus CLI-managed PVs | Kind cluster plus `studiomcp cluster storage reconcile` | Enforces explicit persistence for local stateful workloads | host-backed volumes under `./.data/` |
 | Object storage | MinIO | Helm release | Immutable artifact and memo storage | cluster storage |
 | Event transport | Pulsar | Helm release | Runtime eventing and validation lifecycle transport | cluster storage |
+| Metrics collection | MCP `/metrics` endpoint and optional Prometheus-compatible tooling | Runtime service or cluster add-on | Time-series metrics for cluster and application | cluster storage when enabled |
+| Metrics dashboards | Optional Grafana-compatible tooling | Cluster add-on | Visualization of Prometheus metrics | cluster storage when enabled |
 | Application database | PostgreSQL where applicable | repo/runtime services | Durable application state for implemented flows | repo-specific runtime storage |
 
 ## Runtime and Application Components
@@ -58,12 +62,13 @@
 | State Class | Authority | Durable Home | Notes |
 |-------------|-----------|--------------|-------|
 | Build artifacts | cabal.project | `/opt/build/studiomcp` | All cabal build output; must never land in repo tree |
-| Repo-local runtime state | local development environment | `./.data/` | Only supported repo-root durable path |
+| Repo-local runtime state | local development environment | `./.data/` | Only supported repo-root durable path; also backs CLI-reconciled local PVs |
 | Keycloak realm and auth data | Keycloak | PostgreSQL | Backing store for auth contracts |
 | Shared resumable session state | MCP session layer | Redis | Required for horizontal scale validation |
 | Immutable artifacts and memo objects | storage adapters | MinIO | Bulk bytes stay on the data plane |
-| Cluster deployment config | Helm values and chart templates | `chart/` | Defines the canonical route split and service topology |
-| Outer container workflow | Compose and Dockerfile | `docker-compose.yaml`, `docker/` | Compose starts only the outer container, and the `env` image installs `studiomcp` to `/usr/local/bin` |
+| Cluster deployment config | Helm values and chart templates | `chart/` | Defines the canonical route split, registry image flow, and `studiomcp-manual` storage settings |
+| Outer container workflow | Compose and Dockerfile | `docker-compose.yaml`, `docker/` | Ephemeral containers via `docker compose run --rm`; Dockerfile has no CMD, compose has no command |
+| Image registry | Harbor-compatible OCI registry | `STUDIOMCP_HARBOR_REGISTRY` or local `localhost:5001` | Application images; CLI pushes on change |
 | Validation assets | repo fixtures | `examples/`, `test/` | Deterministic inputs for runtime validation |
 
 ## Cross-References

@@ -114,6 +114,8 @@ The supported command surface must converge on one Haskell CLI with at least the
 | `studiomcp cluster reset` | Reset the kind cluster to a clean Kubernetes state while preserving host-backed volumes |
 | `studiomcp cluster status` | Show cluster status |
 | `studiomcp cluster ensure` | Idempotent setup: up + ingress edge + sidecars + Keycloak realm bootstrap + readiness waits (recommended for automation) |
+| `studiomcp cluster push-images` | Build and push application images to the configured registry |
+| `studiomcp cluster ensure-secrets` | Create/update CLI-managed Kubernetes secrets |
 | `studiomcp cluster storage reconcile` | Reconcile storage resources |
 | `studiomcp cluster storage delete <name>` | Delete a storage resource |
 | `studiomcp cluster deploy sidecars` | Deploy sidecar services |
@@ -128,8 +130,10 @@ All cluster management commands are idempotent and safe to run repeatedly:
 | `cluster up` | Creates cluster only if it doesn't exist; ensures network connectivity |
 | `cluster down` | Deletes cluster only if it exists |
 | `cluster reset` | Uninstalls the Helm release when present, recreates the kind cluster, and preserves host-backed volume contents |
-| `cluster deploy sidecars` | Uses `helm upgrade --install`, ensures ingress-nginx, and bootstraps the checked-in Keycloak realm (idempotent) |
-| `cluster deploy server` | Uses `helm upgrade --install`, ensures ingress-nginx, bootstraps the checked-in Keycloak realm, and rolls server/BFF workloads (idempotent) |
+| `cluster push-images` | Builds the production image, tags it for the configured registry, and pushes when the remote digest differs or is absent |
+| `cluster ensure-secrets` | Applies the required Kubernetes secrets with fixed names and stable keys |
+| `cluster deploy sidecars` | Ensures registry image availability, applies CLI-managed secrets, uses `helm upgrade --install`, ensures ingress-nginx, and bootstraps the checked-in Keycloak realm |
+| `cluster deploy server` | Ensures registry image availability, applies CLI-managed secrets, uses `helm upgrade --install`, bootstraps the checked-in Keycloak realm, and rolls server/BFF workloads |
 | `cluster storage reconcile` | Uses `kubectl apply` (idempotent) |
 | `cluster storage delete <name>` | Deletes the named PV if it exists |
 | `cluster ensure` | Single idempotent command: brings up the kind cluster, applies ingress-nginx, deploys sidecars, imports the checked-in Keycloak realm if missing, and waits for Redis, PostgreSQL, MinIO, Pulsar, and Keycloak. Recommended for automation and tests. |
@@ -348,17 +352,17 @@ For local development and LLM-driven operations, the CLI runs inside the outer d
 
 ```bash
 # Bootstrap (run on host)
-docker compose up -d
+docker compose build
 
 # Invoke CLI commands (run inside container)
-docker compose exec studiomcp-env studiomcp <subcommand...>
+docker compose run --rm studiomcp studiomcp <subcommand...>
 ```
 
 Kind-edge validation uses the same outer-container entrypoint. Set `STUDIOMCP_VALIDATE_KIND_EDGE=true` to make `validate keycloak`, `validate mcp-auth`, `validate mcp-http`, and `validate web-bff` target the kind ingress edge after cluster provisioning.
 
 ## Current Repo Note
 
-This reference now matches the implemented command surface. The Haskell CLI covers cluster lifecycle, ingress-backed kind deployment, Keycloak realm bootstrap, storage reconciliation and deletion, DAG validation, documentation validation, executor and end-to-end validation, worker-runtime validation, Pulsar, MinIO, boundary, FFmpeg-adapter, MCP transport validation, auth validation, session scaling validation, BFF validation, artifact validation, MCP catalog validation, inference, observability, quotas, rate limiting, MCP conformance validation, and consolidated test/validate-all entrypoints (Phase 9).
+This reference now matches the implemented command surface. The Haskell CLI covers cluster lifecycle, registry image population, CLI-managed secrets, ingress-backed kind deployment, Keycloak realm bootstrap, storage reconciliation and deletion, DAG validation, documentation validation, executor and end-to-end validation, worker-runtime validation, Pulsar, MinIO, boundary, FFmpeg-adapter, MCP transport validation, auth validation, session scaling validation, BFF validation, artifact validation, MCP catalog validation, inference, observability, quotas, rate limiting, MCP conformance validation, and consolidated test/validate-all entrypoints.
 
 ## Cross-References
 

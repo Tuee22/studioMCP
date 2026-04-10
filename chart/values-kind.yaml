@@ -64,9 +64,6 @@ minio:
   service:
     type: NodePort
     nodePort: 32000
-  consoleService:
-    type: NodePort
-    nodePort: 32001
   persistence:
     enabled: true
     storageClass: "studiomcp-manual"
@@ -169,17 +166,9 @@ llmReference:
 ingress:
   enabled: true
   className: nginx
-  # NOTE: Keycloak requires a separate ingress due to different rewrite requirements.
-  # Keycloak is configured with KEYCLOAK_HTTP_RELATIVE_PATH=/kc, so the /kc prefix
-  # must be preserved. MCP and BFF should have their prefix stripped.
-  #
-  # IMPORTANT: The regex pattern /prefix(/|$)(.*) with rewrite /$2 correctly handles:
-  # - /mcp -> / (group 1 = $, group 2 = empty)
-  # - /mcp/ -> / (group 1 = /, group 2 = empty)
-  # - /mcp/health/live -> /health/live (group 1 = /, group 2 = health/live)
+  # Prefixes are preserved at the edge. MCP, BFF, and Keycloak all accept
+  # their canonical public prefixes directly.
   annotations:
-    nginx.ingress.kubernetes.io/use-regex: "true"
-    nginx.ingress.kubernetes.io/rewrite-target: /$2
     # Enable session affinity based on Mcp-Session-Id header for stateful MCP sessions
     # This ensures requests with the same MCP session go to the same pod
     nginx.ingress.kubernetes.io/upstream-hash-by: "$http_mcp_session_id"
@@ -191,29 +180,20 @@ ingress:
   hosts:
     - host: ""
       paths:
-        - path: /mcp(/|$)(.*)
-          pathType: ImplementationSpecific
+        - path: /mcp
+          pathType: Prefix
           service: studiomcp
           port: 3000
-        - path: /api(/|$)(.*)
-          pathType: ImplementationSpecific
+        - path: /api
+          pathType: Prefix
           service: bff
           port: 3002
-  tls: []
-
-# Separate ingress for Keycloak to preserve /kc path prefix
-keycloakIngress:
-  enabled: true
-  className: nginx
-  annotations:
-    nginx.ingress.kubernetes.io/use-regex: "true"
-    # Preserve /kc prefix for Keycloak which expects KEYCLOAK_HTTP_RELATIVE_PATH=/kc
-    nginx.ingress.kubernetes.io/rewrite-target: /kc$1
-  hosts:
-    - host: ""
-      paths:
-        - path: /kc(.*)
-          pathType: ImplementationSpecific
+        - path: /kc
+          pathType: Prefix
           service: keycloak
           port: 80
+        - path: /minio
+          pathType: Prefix
+          service: minio-console
+          port: 9001
   tls: []

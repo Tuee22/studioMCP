@@ -20,7 +20,7 @@ Keycloak deployment baseline:
 - Keycloak behind the shared nginx or ingress edge at `/kc`
 - kind cluster deployment behind ingress-nginx for development and chart-backed validation
 - dedicated PostgreSQL database for Keycloak only
-- cluster ingress with TLS
+- cluster ingress over HTTP for local kind development; TLS belongs to non-local ingress deployments
 - automated realm bootstrap from the checked-in realm JSON
 
 Helm-first packaging baseline:
@@ -35,7 +35,7 @@ Helm-first packaging baseline:
 The current repo default for kind-backed validation is CLI-driven bootstrap:
 
 ```bash
-docker compose -f docker-compose.yaml exec -T studiomcp-env studiomcp cluster ensure
+docker compose -f docker-compose.yaml run --rm studiomcp studiomcp cluster ensure
 ```
 
 `cluster ensure` and the related `cluster deploy sidecars` and `cluster deploy server` paths now:
@@ -449,19 +449,19 @@ spec:
 
 ```bash
 # 1. Provision the cluster edge and bootstrap Keycloak
-docker compose -f docker-compose.yaml exec -T studiomcp-env studiomcp cluster ensure
+docker compose -f docker-compose.yaml run --rm studiomcp studiomcp cluster ensure
 
 # 2. Verify realm exists through the kind ingress edge
 curl -sf "http://localhost:8081/kc/realms/studiomcp" | jq '.realm'
 
 # 3. Validate the realm through the automated kind-edge path
-docker compose -f docker-compose.yaml exec -T studiomcp-env studiomcp validate keycloak
+docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate keycloak
 
 # 4. Validate authenticated MCP access through the kind ingress edge
-docker compose -f docker-compose.yaml exec -T studiomcp-env studiomcp validate mcp-auth
+docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate mcp-auth
 
 # 5. Validate browser session and BFF flows through the kind ingress edge
-docker compose -f docker-compose.yaml exec -T studiomcp-env studiomcp validate web-bff
+docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate web-bff
 ```
 
 ### Automated Validation

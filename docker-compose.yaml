@@ -6,33 +6,16 @@
 # See: documents/engineering/k8s_native_dev_policy.md
 
 services:
-  studiomcp-env:
+  studiomcp:
     build:
       context: .
       dockerfile: docker/Dockerfile
       target: env
-    command: ["sleep", "infinity"]
     init: true
     stdin_open: true
     tty: true
     working_dir: /workspace
-    environment:
-      # Docker context
-      DOCKER_HOST: unix:///var/run/docker.sock
-      LANG: C.UTF-8
-      LC_ALL: C.UTF-8
-      STUDIOMCP_OUTER_CONTAINER: "1"
-      # Kind cluster configuration
-      STUDIOMCP_KIND_CLUSTER: ${STUDIOMCP_KIND_CLUSTER:-studiomcp}
-      STUDIOMCP_KIND_HOST_DATA_PATH: ${STUDIOMCP_KIND_HOST_DATA_PATH:-}
-      # Skip Docker image rebuilds inside container (image already in kind cluster)
-      STUDIOMCP_SKIP_IMAGE_BUILD: "1"
-      # Validation defaults - kind-edge is the only supported path
-      STUDIOMCP_VALIDATE_KIND_EDGE: "true"
-      STUDIOMCP_VALIDATE_KEYCLOAK_USERNAME: testuser1
-      STUDIOMCP_VALIDATE_KEYCLOAK_PASSWORD: testpassword1
     volumes:
       - .:/workspace
       - ./.data:/.data
-      - ${HOME}/.docker:/root/.docker:ro
       - /var/run/docker.sock:/var/run/docker.sock

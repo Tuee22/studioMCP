@@ -39,16 +39,16 @@ than receiving raw token details in the primary JSON surface.
 All validation commands run inside the outer container after bootstrap:
 
 ```bash
-docker compose up -d
-docker compose exec studiomcp-env studiomcp cluster ensure
+docker compose build
+docker compose run --rm studiomcp studiomcp cluster ensure
 ```
 
 #### Validation Gates
 
 | Check | Command | Expected |
 |-------|---------|----------|
-| Web BFF | `docker compose exec studiomcp-env studiomcp validate web-bff` | PASS |
-| Unit: BFF | `docker compose exec studiomcp-env cabal test unit-tests --match "Web/"` | Pass |
+| Web BFF | `docker compose run --rm studiomcp studiomcp validate web-bff` | PASS |
+| Unit: BFF | `docker compose run --rm studiomcp studiomcp test unit` | Pass |
 | Login returns cookie | live login test | Sets `studiomcp_session` |
 | Login omits tokens | response JSON | No `sessionId`; no tokens |
 | `/session/me` works | live test with cookie | Returns session info |

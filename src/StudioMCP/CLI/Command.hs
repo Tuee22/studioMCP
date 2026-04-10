@@ -66,6 +66,8 @@ data ClusterCommand
   | ClusterResetCommand
   | ClusterStatusCommand
   | ClusterEnsureCommand
+  | ClusterPushImagesCommand
+  | ClusterEnsureSecretsCommand
   | ClusterDeployCommand ClusterDeployTarget
   | ClusterStorageCommand ClusterStorageCommand
   deriving (Eq, Show)
@@ -133,6 +135,8 @@ parseCommand args =
     ["cluster", "reset"] -> Right (ClusterCommand ClusterResetCommand)
     ["cluster", "status"] -> Right (ClusterCommand ClusterStatusCommand)
     ["cluster", "ensure"] -> Right (ClusterCommand ClusterEnsureCommand)
+    ["cluster", "push-images"] -> Right (ClusterCommand ClusterPushImagesCommand)
+    ["cluster", "ensure-secrets"] -> Right (ClusterCommand ClusterEnsureSecretsCommand)
     ["cluster", "deploy", "sidecars"] -> Right (ClusterCommand (ClusterDeployCommand DeploySidecars))
     ["cluster", "deploy", "server"] -> Right (ClusterCommand (ClusterDeployCommand DeployServer))
     ["cluster", "storage", "reconcile"] -> Right (ClusterCommand (ClusterStorageCommand ClusterStorageReconcile))
@@ -191,6 +195,8 @@ usageText =
     , "  studiomcp cluster reset"
     , "  studiomcp cluster status"
     , "  studiomcp cluster ensure            # Idempotent: up + sidecars + wait for all services"
+    , "  studiomcp cluster push-images       # Build and push application images to the configured registry"
+    , "  studiomcp cluster ensure-secrets    # Create/update CLI-managed Kubernetes secrets"
     , "  studiomcp cluster deploy sidecars"
     , "  studiomcp cluster deploy server"
     , "  studiomcp cluster storage reconcile"
