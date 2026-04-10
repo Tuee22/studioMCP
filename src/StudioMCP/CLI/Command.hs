@@ -5,6 +5,7 @@ module StudioMCP.CLI.Command
     ClusterDeployTarget (..),
     ClusterStorageCommand (..),
     ValidateCommand (..),
+    TestCommand (..),
     parseCommand,
     usageText,
   )
@@ -20,6 +21,7 @@ data Command
   | DagCommand DagCommand
   | ValidateCommand ValidateCommand
   | ClusterCommand ClusterCommand
+  | TestCommand TestCommand
   deriving (Eq, Show)
 
 data DagCommand
@@ -27,7 +29,8 @@ data DagCommand
   deriving (Eq, Show)
 
 data ValidateCommand
-  = ValidateDocsCommand
+  = ValidateAllCommand -- Run all validators
+  | ValidateDocsCommand
   | ValidateClusterCommand
   | ValidateE2ECommand
   | ValidateWorkerCommand
@@ -77,6 +80,12 @@ data ClusterStorageCommand
   | ClusterStorageDelete String
   deriving (Eq, Show)
 
+data TestCommand
+  = TestAllCommand
+  | TestUnitCommand
+  | TestIntegrationCommand
+  deriving (Eq, Show)
+
 parseCommand :: [String] -> Either String Command
 parseCommand args =
   case args of
@@ -88,6 +97,7 @@ parseCommand args =
     ["validate-dag", dagPath] -> Right (ValidateDagCommand dagPath)
     ["dag", "validate", dagPath] -> Right (ValidateDagCommand dagPath)
     ["dag", "validate-fixtures"] -> Right (DagCommand DagValidateFixturesCommand)
+    ["validate", "all"] -> Right (ValidateCommand ValidateAllCommand)
     ["validate", "docs"] -> Right (ValidateCommand ValidateDocsCommand)
     ["validate", "cluster"] -> Right (ValidateCommand ValidateClusterCommand)
     ["validate", "e2e"] -> Right (ValidateCommand ValidateE2ECommand)
@@ -127,6 +137,10 @@ parseCommand args =
     ["cluster", "deploy", "server"] -> Right (ClusterCommand (ClusterDeployCommand DeployServer))
     ["cluster", "storage", "reconcile"] -> Right (ClusterCommand (ClusterStorageCommand ClusterStorageReconcile))
     ["cluster", "storage", "delete", name] -> Right (ClusterCommand (ClusterStorageCommand (ClusterStorageDelete name)))
+    ["test"] -> Right (TestCommand TestAllCommand)
+    ["test", "all"] -> Right (TestCommand TestAllCommand)
+    ["test", "unit"] -> Right (TestCommand TestUnitCommand)
+    ["test", "integration"] -> Right (TestCommand TestIntegrationCommand)
     _ -> Left usageText
 
 usageText :: String
@@ -141,6 +155,7 @@ usageText =
     , "  studiomcp validate-dag <path>"
     , "  studiomcp dag validate <path>"
     , "  studiomcp dag validate-fixtures"
+    , "  studiomcp validate all             # Run all validators"
     , "  studiomcp validate docs"
     , "  studiomcp validate cluster"
     , "  studiomcp validate e2e"
@@ -180,4 +195,8 @@ usageText =
     , "  studiomcp cluster deploy server"
     , "  studiomcp cluster storage reconcile"
     , "  studiomcp cluster storage delete <name>"
+    , "  studiomcp test                     # Run all tests (unit + integration)"
+    , "  studiomcp test all                 # Run all tests (unit + integration)"
+    , "  studiomcp test unit                # Run unit tests only"
+    , "  studiomcp test integration         # Run integration tests only"
     ]

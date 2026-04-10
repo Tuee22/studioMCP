@@ -5,7 +5,7 @@
 **Supersedes**: N/A
 **Referenced by**: [../README.md](../README.md#documentation-suite), [../development/local_dev.md](../development/local_dev.md#cross-references), [../operations/runbook_local_debugging.md](../operations/runbook_local_debugging.md#cross-references), [../architecture/cli_architecture.md](../architecture/cli_architecture.md#cross-references), [../engineering/k8s_storage.md](../engineering/k8s_storage.md#cross-references), [../../DEVELOPMENT_PLAN.md](../../DEVELOPMENT_PLAN.md#current-validation-state)
 
-> **Purpose**: Canonical reference for the supported current `studiomcp` CLI surface.
+> **Purpose**: Detailed command surface reference. See [cli_reference.md](cli_reference.md) for a concise multi-tiered reference.
 
 ## Current Implemented Commands
 
@@ -16,6 +16,11 @@ The codebase currently implements this subset:
 - `studiomcp bff`
 - `studiomcp inference`
 - `studiomcp worker`
+- `studiomcp test`
+- `studiomcp test all`
+- `studiomcp test unit`
+- `studiomcp test integration`
+- `studiomcp validate all`
 - `studiomcp validate-dag <path>`
 - `studiomcp dag validate <path>`
 - `studiomcp dag validate-fixtures`
@@ -76,6 +81,21 @@ The supported command surface must converge on one Haskell CLI with at least the
 | `studiomcp inference` | Start inference mode server | ✅ Implemented |
 | `studiomcp worker` | Start worker mode server | ✅ Implemented |
 | `studiomcp bff` | Start BFF server | ✅ Implemented |
+
+### Test Commands
+
+| Command | Description | Status |
+|---------|-------------|--------|
+| `studiomcp test` | Run all tests (unit + integration) | ✅ Implemented |
+| `studiomcp test all` | Run all tests (unit + integration) | ✅ Implemented |
+| `studiomcp test unit` | Run unit tests only | ✅ Implemented |
+| `studiomcp test integration` | Run integration tests only | ✅ Implemented |
+
+### Aggregate Validation
+
+| Command | Description | Status |
+|---------|-------------|--------|
+| `studiomcp validate all` | Run all validators with aggregate reporting | ✅ Implemented |
 
 ### DAG Commands
 
@@ -308,6 +328,7 @@ The default validated kind edge is:
 | 4 | Validation uses `cluster ensure` and kind-edge curl checks |
 | 5 | `validate web-bff` |
 | 6 | No dedicated deployment-alignment command yet; the development plan currently uses Helm, ingress, and runbook validation |
+| 9 | `test`, `test all`, `test unit`, `test integration`, `validate all` |
 
 ## Legacy Alias Retirement
 
@@ -323,21 +344,27 @@ The exact final taxonomy may evolve, but the repository must not reintroduce she
 
 ## Usage Context
 
-For local development and LLM-driven operations, the CLI is expected to run inside the outer development container:
+For local development and LLM-driven operations, the CLI runs inside the outer development container:
 
 ```bash
-docker compose -f docker-compose.yaml exec studiomcp-env studiomcp <subcommand...>
+# Bootstrap (run on host)
+docker compose up -d
+
+# Invoke CLI commands (run inside container)
+docker compose exec studiomcp-env studiomcp <subcommand...>
 ```
 
 Kind-edge validation uses the same outer-container entrypoint. Set `STUDIOMCP_VALIDATE_KIND_EDGE=true` to make `validate keycloak`, `validate mcp-auth`, `validate mcp-http`, and `validate web-bff` target the kind ingress edge after cluster provisioning.
 
 ## Current Repo Note
 
-This reference now matches the implemented command surface. The Haskell CLI covers cluster lifecycle, ingress-backed kind deployment, Keycloak realm bootstrap, storage reconciliation and deletion, DAG validation, documentation validation, executor and end-to-end validation, worker-runtime validation, Pulsar, MinIO, boundary, FFmpeg-adapter, MCP transport validation, auth validation, session scaling validation, BFF validation, artifact validation, MCP catalog validation, inference, observability, quotas, rate limiting, and MCP conformance validation.
+This reference now matches the implemented command surface. The Haskell CLI covers cluster lifecycle, ingress-backed kind deployment, Keycloak realm bootstrap, storage reconciliation and deletion, DAG validation, documentation validation, executor and end-to-end validation, worker-runtime validation, Pulsar, MinIO, boundary, FFmpeg-adapter, MCP transport validation, auth validation, session scaling validation, BFF validation, artifact validation, MCP catalog validation, inference, observability, quotas, rate limiting, MCP conformance validation, and consolidated test/validate-all entrypoints (Phase 9).
 
 ## Cross-References
 
+- [CLI Reference](cli_reference.md#studiomcp-cli-reference) - Concise multi-tiered command reference
 - [CLI Architecture](../architecture/cli_architecture.md#cli-architecture)
 - [Docker Policy](../engineering/docker_policy.md#docker-policy)
 - [Kubernetes Storage Policy](../engineering/k8s_storage.md#kubernetes-storage-policy)
 - [Local Development](../development/local_dev.md#local-development)
+- [Phase 9: CLI Test and Validate Consolidation](../../DEVELOPMENT_PLAN/phase-9-cli-test-validate-consolidation.md#phase-9-cli-test-and-validate-consolidation)

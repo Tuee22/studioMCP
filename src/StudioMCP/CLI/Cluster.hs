@@ -10,7 +10,7 @@ import Control.Exception (SomeException, bracket, bracket_, try)
 import GHC.IO.Handle.Lock (LockMode (..), hLock, hUnlock)
 import System.IO (IOMode (..), hClose, openFile)
 import Control.Concurrent (forkIO, killThread, threadDelay)
-import Control.Monad (foldM, forM_, unless, when)
+import Control.Monad (foldM, forM, forM_, unless, when)
 import Data.Aeson (FromJSON, Value (..), decode, encode, fromJSON, object, (.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as Key
@@ -351,7 +351,7 @@ import System.Directory
     removeFile,
   )
 import System.Environment (lookupEnv, setEnv, unsetEnv)
-import System.Exit (ExitCode (..), die)
+import System.Exit (ExitCode (..), die, exitFailure)
 import System.FilePath ((</>))
 import System.IO (openTempFile)
 import System.Process
@@ -381,6 +381,7 @@ runClusterCommand command =
 runValidateCommand :: ValidateCommand -> IO ()
 runValidateCommand command =
   case command of
+    ValidateAllCommand -> validateAll
     ValidateClusterCommand -> validateCluster
     ValidateDocsCommand -> validateDocsCommand
     ValidateE2ECommand -> validateE2E
@@ -1152,6 +1153,63 @@ lookupSecretValue secretName jsonPath = do
               case Base64.decode (BS.pack encoded) of
                 Left _ -> pure Nothing
                 Right decoded -> pure (Just (BS.unpack decoded))
+
+-- | Run all validators sequentially with aggregate reporting
+validateAll :: IO ()
+validateAll = do
+  putStrLn "Running all validators..."
+  putStrLn ""
+  let validators =
+        [ ("docs", validateDocsCommand)
+        , ("cluster", validateCluster)
+        , ("e2e", validateE2E)
+        , ("worker", validateWorker)
+        , ("pulsar", validatePulsar)
+        , ("minio", validateMinio)
+        , ("boundary", validateBoundary)
+        , ("ffmpeg-adapter", validateFFmpeg)
+        , ("executor", validateExecutor)
+        , ("mcp-stdio", validateMcpStdio)
+        , ("mcp-http", validateMcpHttp)
+        , ("keycloak", validateKeycloak)
+        , ("mcp-auth", validateMcpAuth)
+        , ("session-store", validateSessionStore)
+        , ("horizontal-scale", validateHorizontalScale)
+        , ("web-bff", validateWebBff)
+        , ("artifact-storage", validateArtifactStorage)
+        , ("artifact-governance", validateArtifactGovernance)
+        , ("mcp-tools", validateMcpTools)
+        , ("mcp-resources", validateMcpResources)
+        , ("mcp-prompts", validateMcpPrompts)
+        , ("inference", validateInference)
+        , ("observability", validateObservability)
+        , ("audit", validateAudit)
+        , ("quotas", validateQuotas)
+        , ("rate-limit", validateRateLimit)
+        , ("mcp-conformance", validateMcpConformance)
+        , ("storage-policy", validateStoragePolicy)
+        ]
+  results <- forM validators $ \(name, validator) -> do
+    putStrLn $ "--- validate " <> name <> " ---"
+    result <- try validator :: IO (Either SomeException ())
+    case result of
+      Left err -> do
+        putStrLn $ "FAILED: " <> name <> " - " <> show err
+        pure (name, False)
+      Right () -> do
+        putStrLn $ "PASSED: " <> name
+        pure (name, True)
+  putStrLn ""
+  putStrLn "=== Validation Summary ==="
+  let passed = filter snd results
+      failed = filter (not . snd) results
+  putStrLn $ "Passed: " <> show (length passed) <> "/" <> show (length results)
+  forM_ failed $ \(name, _) -> putStrLn $ "  FAILED: " <> name
+  unless (null failed) $ do
+    putStrLn ""
+    putStrLn "Some validators failed."
+    exitFailure
+  putStrLn "All validators passed."
 
 validateCluster :: IO ()
 validateCluster = do
@@ -2162,8 +2220,22 @@ withMinioPortForwardConfig :: AppConfig -> (AppConfig -> IO a) -> IO a
 withMinioPortForwardConfig appConfig action =
   withPortForward "service/studiomcp-minio" 39010 9000 $ \baseUrl -> do
     manager <- newManager defaultManagerSettings
-    waitForHttpStatus manager (baseUrl <> "/minio/health/live") [200]
+    waitForMinioReady manager baseUrl
     action appConfig {minioEndpoint = Text.pack baseUrl}
+
+-- | Multi-stage MinIO readiness check ensuring write quorum is available.
+-- This prevents transient failures during cluster rollouts where MinIO may
+-- be alive but not yet ready to accept writes.
+waitForMinioReady :: Manager -> String -> IO ()
+waitForMinioReady manager baseUrl = do
+  -- Stage 1: Server process is alive (fast check, 30s timeout)
+  waitForHttpStatusWithTimeout 30 manager (baseUrl <> "/minio/health/live") [200]
+  -- Stage 2: Server is ready to accept requests (60s timeout)
+  waitForHttpStatusWithTimeout 60 manager (baseUrl <> "/minio/health/ready") [200]
+  -- Stage 3: Write quorum available (60s timeout)
+  -- 200 = Full write quorum available
+  -- 412 = HA would be lost but writes still work (single-node or degraded scenario)
+  waitForHttpStatusWithTimeout 60 manager (baseUrl <> "/minio/health/cluster") [200, 412]
 
 kindPulsarBinaryEndpoint :: Text
 kindPulsarBinaryEndpoint = "pulsar://studiomcp-pulsar-proxy:6650"

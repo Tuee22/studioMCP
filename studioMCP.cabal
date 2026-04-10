@@ -30,6 +30,7 @@ library
     StudioMCP.CLI.Cluster
     StudioMCP.CLI.Dag
     StudioMCP.CLI.Docs
+    StudioMCP.CLI.Test
     StudioMCP.MCP.Server
     StudioMCP.MCP.Protocol
     StudioMCP.MCP.Handlers

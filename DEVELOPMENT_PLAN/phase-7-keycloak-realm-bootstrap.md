@@ -29,11 +29,21 @@ ensure` runs idempotent.
 
 ### Validation
 
+#### Validation Prerequisites
+
+All validation commands run inside the outer container after bootstrap:
+
+```bash
+docker compose up -d
+```
+
+#### Validation Gates
+
 | Check | Command | Expected |
 |-------|---------|----------|
-| Fresh cluster bootstrap | `studiomcp cluster ensure` on a new cluster | Realm ready |
-| Idempotent re-run | `studiomcp cluster ensure` twice | Still healthy |
-| Keycloak validate | `studiomcp validate keycloak` | PASS on the live path |
+| Fresh cluster bootstrap | `docker compose exec studiomcp-env studiomcp cluster ensure` on a new cluster | Realm ready |
+| Idempotent re-run | `docker compose exec studiomcp-env studiomcp cluster ensure` twice | Still healthy |
+| Keycloak validate | `docker compose exec studiomcp-env studiomcp validate keycloak` | PASS on the live path |
 
 ### Remaining Work
 

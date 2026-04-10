@@ -76,6 +76,7 @@ DEVELOPMENT_PLAN/
 ├── phase-6-cluster-control-plane-parity.md
 ├── phase-7-keycloak-realm-bootstrap.md
 ├── phase-8-final-closure-regression-gate.md
+├── phase-9-cli-test-validate-consolidation.md
 └── legacy-tracking-for-deletion.md
 ```
 
@@ -170,6 +171,47 @@ If a change adds or edits Mermaid under `DEVELOPMENT_PLAN/`, it must follow the 
 rendering rules defined in
 [../documents/documentation_standards.md](../documents/documentation_standards.md#7-mermaid-rendering-rules).
 
+### L. Container Execution Context
+
+The supported development workflow uses the outer `studiomcp-env` container. All commands in
+`DEVELOPMENT_PLAN/` must specify their execution context.
+
+**Bootstrap** (run on host):
+```bash
+docker compose up -d
+```
+
+**All other commands** (run inside outer container):
+```bash
+docker compose exec studiomcp-env studiomcp <subcommand>
+docker compose exec studiomcp-env cabal <subcommand>
+```
+
+Rules:
+- Validation tables must use the full `docker compose exec studiomcp-env` invocation pattern.
+- The canonical bootstrap is `docker compose up -d` followed by container commands.
+- Never show bare `studiomcp` or `cabal` commands without container context in phase docs.
+- Cross-reference [../documents/engineering/docker_policy.md](../documents/engineering/docker_policy.md)
+  for the complete container workflow and LLM operating rules.
+
+## CLI-First Testing Policy
+
+All test and validation entrypoints are available through the `studiomcp` CLI inside the outer
+container:
+
+| Command | Description |
+|---------|-------------|
+| `docker compose exec studiomcp-env studiomcp test` | Run all tests (unit + integration) |
+| `docker compose exec studiomcp-env studiomcp test unit` | Run unit tests only |
+| `docker compose exec studiomcp-env studiomcp test integration` | Run integration tests only |
+| `docker compose exec studiomcp-env studiomcp validate all` | Run all validators |
+
+Rules:
+- The `studiomcp` CLI is the canonical interface for test and validation execution.
+- The CLI runs inside the outer `studiomcp-env` container, not on the host.
+- The CLI invokes `cabal test` internally for test suites.
+- The authoritative CLI reference lives at [../documents/reference/cli_reference.md](../documents/reference/cli_reference.md).
+
 ## Cross-Reference Conventions
 
 - Links inside `DEVELOPMENT_PLAN/` use relative paths.
@@ -187,7 +229,7 @@ rendering rules defined in
 4. Update [legacy-tracking-for-deletion.md](legacy-tracking-for-deletion.md) whenever compatibility
    cleanup scope changes.
 5. Keep [../DEVELOPMENT_PLAN.md](../DEVELOPMENT_PLAN.md) aligned as the compatibility index.
-6. Run `cabal run studiomcp -- validate docs` before closing the work.
+6. Run `docker compose exec studiomcp-env studiomcp validate docs` before closing the work.
 7. If Mermaid changed, validate the diagram subset after the edit.
 
 ## Cross-References

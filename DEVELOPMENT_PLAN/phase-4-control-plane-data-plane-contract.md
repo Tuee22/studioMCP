@@ -32,14 +32,25 @@ contracts explicit in configuration, routing, and validation.
 
 ### Validation
 
+#### Validation Prerequisites
+
+All validation commands run inside the outer container after bootstrap:
+
+```bash
+docker compose up -d
+docker compose exec studiomcp-env studiomcp cluster ensure
+```
+
+#### Validation Gates
+
 | Check | Command | Expected |
 |-------|---------|----------|
-| Helm lint | `helm lint chart -f chart/values.yaml -f chart/values-kind.yaml` | Success |
-| Helm template | `helm template studiomcp chart ...` | Renders |
-| Cluster ensure | `studiomcp cluster ensure` | Success |
-| Keycloak OIDC | `curl localhost:8081/kc/realms/studiomcp/.well-known/openid-configuration` | HTTP 200 |
-| MCP endpoint | `curl localhost:8081/mcp` | Responds |
-| BFF endpoint | `curl localhost:8081/api/health` | HTTP 200 |
+| Helm lint | `docker compose exec studiomcp-env helm lint chart -f chart/values.yaml -f chart/values-kind.yaml` | Success |
+| Helm template | `docker compose exec studiomcp-env helm template studiomcp chart ...` | Renders |
+| Cluster ensure | `docker compose exec studiomcp-env studiomcp cluster ensure` | Success |
+| Keycloak OIDC | `docker compose exec studiomcp-env curl localhost:8081/kc/realms/studiomcp/.well-known/openid-configuration` | HTTP 200 |
+| MCP endpoint | `docker compose exec studiomcp-env curl localhost:8081/mcp` | Responds |
+| BFF endpoint | `docker compose exec studiomcp-env curl localhost:8081/api/health` | HTTP 200 |
 | Upload presigned URL | `POST /api/v1/upload/request` returns `localhost:9000` rooted URL | Correct root |
 | Persistence root | unit test for `./.data/studiomcp` default | Pass |
 

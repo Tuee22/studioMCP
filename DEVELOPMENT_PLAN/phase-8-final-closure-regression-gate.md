@@ -31,22 +31,33 @@ outer-container and Kind-based workflow.
 
 ### Validation
 
+#### Validation Prerequisites
+
+All validation commands run inside the outer container after bootstrap:
+
+```bash
+docker compose up -d
+docker compose exec studiomcp-env studiomcp cluster ensure
+```
+
+#### Validation Gates
+
 | Check | Command | Expected | Current state |
 |-------|---------|----------|---------------|
-| Build | `cabal build all` | Success | Pass |
-| Unit tests | `cabal test unit-tests` | Success | 844 pass |
-| Integration tests | `cabal test integration-tests` | 0 failures | 16 pass, 0 fail |
-| Full regression gate | `cabal test all --test-show-details=direct` | 0 failures | Pass |
-| Outer container CLI availability | `docker compose -f docker-compose.yaml exec studiomcp-env studiomcp --help` | Success | Pass |
+| Build | `docker compose exec studiomcp-env cabal build all` | Success | Pass |
+| Unit tests | `docker compose exec studiomcp-env cabal test unit-tests` | Success | 844 pass |
+| Integration tests | `docker compose exec studiomcp-env cabal test integration-tests` | 0 failures | 16 pass, 0 fail |
+| Full regression gate | `docker compose exec studiomcp-env cabal test all --test-show-details=direct` | 0 failures | Pass |
+| Outer container CLI availability | `docker compose exec studiomcp-env studiomcp --help` | Success | Pass |
 | Kind edge matrix | cluster validators through `/kc`, `/mcp`, `/api` | PASS | PASS |
-| Docs validation | `studiomcp validate docs` | PASS | Pass |
+| Docs validation | `docker compose exec studiomcp-env studiomcp validate docs` | PASS | Pass |
 
 ### Current Validation State
 
 - 844 unit tests pass.
 - 16 of 16 integration tests pass.
-- `cabal test all --test-show-details=direct` passes on the supported outer-container path.
-- `cabal run studiomcp -- validate docs` passes.
+- `docker compose exec studiomcp-env cabal test all --test-show-details=direct` passes on the supported outer-container path.
+- `docker compose exec studiomcp-env studiomcp validate docs` passes.
 - The outer `studiomcp-env` container resolves `studiomcp` on `PATH` at `/usr/local/bin/studiomcp`.
 - Passing integration coverage includes deterministic helper processes, FFmpeg adapter validation,
   sequential executor validation, worker runtime validation, cluster validation, Keycloak bootstrap
@@ -70,6 +81,9 @@ outer-container and Kind-based workflow.
   `401`, `502`, `503`, and `504` responses.
 - The live horizontal-scale validator accepts both existing-session recovery and clean
   post-recovery MCP session re-establishment after a Redis outage.
+- MinIO readiness checks wait for write quorum (`/minio/health/cluster`) before DAG execution
+  begins, preventing transient failures during cluster rollouts where MinIO may be alive but
+  not yet ready to accept writes.
 
 ### Remaining Work
 

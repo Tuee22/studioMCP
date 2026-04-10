@@ -35,12 +35,23 @@ scale and browser/MCP auth flows.
 
 ### Validation
 
+#### Validation Prerequisites
+
+All validation commands run inside the outer container after bootstrap:
+
+```bash
+docker compose up -d
+docker compose exec studiomcp-env studiomcp cluster ensure  # For cluster-based validators
+```
+
+#### Validation Gates
+
 | Check | Command | Expected |
 |-------|---------|----------|
-| MCP auth | `studiomcp validate mcp-auth` | PASS |
-| Session store | `studiomcp validate session-store` | PASS |
-| Horizontal scale | `studiomcp validate horizontal-scale` | PASS |
-| Keycloak | `studiomcp validate keycloak` | PASS |
+| MCP auth | `docker compose exec studiomcp-env studiomcp validate mcp-auth` | PASS |
+| Session store | `docker compose exec studiomcp-env studiomcp validate session-store` | PASS |
+| Horizontal scale | `docker compose exec studiomcp-env studiomcp validate horizontal-scale` | PASS |
+| Keycloak | `docker compose exec studiomcp-env studiomcp validate keycloak` | PASS |
 
 ### Test Mapping
 

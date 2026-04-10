@@ -30,13 +30,23 @@ described by the plan and the governed docs.
 
 ### Validation
 
+#### Validation Prerequisites
+
+All validation commands run inside the outer container after bootstrap:
+
+```bash
+docker compose up -d
+```
+
+#### Validation Gates
+
 | Check | Command | Expected |
 |-------|---------|----------|
-| Helm lint | `helm lint ...` | Success |
-| Helm template | `helm template ...` | Renders ingress |
-| Cluster ensure | `studiomcp cluster ensure` | All services ready |
-| Cluster deploy server | `studiomcp cluster deploy server` | Server pods running |
-| Integration tests | `cabal test integration-tests` | Pass on the supported parity path |
+| Helm lint | `docker compose exec studiomcp-env helm lint chart -f chart/values.yaml -f chart/values-kind.yaml` | Success |
+| Helm template | `docker compose exec studiomcp-env helm template studiomcp chart -f chart/values.yaml -f chart/values-kind.yaml` | Renders ingress |
+| Cluster ensure | `docker compose exec studiomcp-env studiomcp cluster ensure` | All services ready |
+| Cluster deploy server | `docker compose exec studiomcp-env studiomcp cluster deploy server` | Server pods running |
+| Integration tests | `docker compose exec studiomcp-env cabal test integration-tests` | Pass on the supported parity path |
 | Edge reachability | `/kc`, `/mcp`, `/api` reachable | HTTP 200 |
 
 ### Remaining Work

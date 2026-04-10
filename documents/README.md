@@ -39,6 +39,7 @@
 - [Documentation Standards](documentation_standards.md#studiomcp-documentation-standards)
 - [Local Debugging Runbook](operations/runbook_local_debugging.md#local-debugging-runbook)
 - [Keycloak Realm Bootstrap Runbook](operations/keycloak_realm_bootstrap_runbook.md#keycloak-realm-bootstrap-runbook)
+- [CLI Reference](reference/cli_reference.md#studiomcp-cli-reference)
 - [CLI Surface Reference](reference/cli_surface.md#cli-surface-reference)
 - [MCP Surface Reference](reference/mcp_surface.md#mcp-surface-reference)
 - [MCP Tool Catalog](reference/mcp_tool_catalog.md#mcp-tool-catalog)

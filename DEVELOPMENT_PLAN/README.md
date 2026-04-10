@@ -28,6 +28,7 @@ govern this plan.
 | [phase-6-cluster-control-plane-parity.md](phase-6-cluster-control-plane-parity.md) | Kind and Helm control-plane parity |
 | [phase-7-keycloak-realm-bootstrap.md](phase-7-keycloak-realm-bootstrap.md) | Keycloak realm bootstrap automation |
 | [phase-8-final-closure-regression-gate.md](phase-8-final-closure-regression-gate.md) | Final regression closure and clean validation gate |
+| [phase-9-cli-test-validate-consolidation.md](phase-9-cli-test-validate-consolidation.md) | CLI test and validate command consolidation |
 | [legacy-tracking-for-deletion.md](legacy-tracking-for-deletion.md) | Cleanup and compatibility removal ledger |
 
 ## Status Vocabulary
@@ -47,7 +48,7 @@ A phase can move to `Done` only when all of the following are true:
 2. The listed validation gates pass on the supported path.
 3. The governed docs listed in `Docs to update` are aligned with the implementation.
 4. No `Remaining Work` section remains open.
-5. `cabal run studiomcp -- validate docs` passes after the documentation change.
+5. `docker compose exec studiomcp-env studiomcp validate docs` passes after the documentation change.
 6. Cleanup promised by the phase is reflected in [legacy-tracking-for-deletion.md](legacy-tracking-for-deletion.md).
 
 ## Phase Overview
@@ -62,14 +63,16 @@ A phase can move to `Done` only when all of the following are true:
 | 6 | Cluster Control-Plane Parity | Done | [phase-6-cluster-control-plane-parity.md](phase-6-cluster-control-plane-parity.md) |
 | 7 | Keycloak Realm Bootstrap Automation | Done | [phase-7-keycloak-realm-bootstrap.md](phase-7-keycloak-realm-bootstrap.md) |
 | 8 | Final Closure and Regression Gate | Done | [phase-8-final-closure-regression-gate.md](phase-8-final-closure-regression-gate.md) |
+| 9 | CLI Test and Validate Consolidation | Done | [phase-9-cli-test-validate-consolidation.md](phase-9-cli-test-validate-consolidation.md) |
 
 ## Current Validation State
 
-- `cabal build all` passes.
-- `cabal test unit-tests --test-show-details=direct` passes with 844 unit tests.
-- `cabal test integration-tests --test-show-details=direct` passes with 16 integration tests.
-- `cabal test all --test-show-details=direct` passes end to end on the supported outer-container path.
-- `cabal run studiomcp -- validate docs` passes.
+- `docker compose exec studiomcp-env cabal build all` passes.
+- `docker compose exec studiomcp-env studiomcp test unit` passes with 844 unit tests.
+- `docker compose exec studiomcp-env studiomcp test integration` passes with 16 integration tests.
+- `docker compose exec studiomcp-env studiomcp test all` passes end to end on the supported outer-container path.
+- `docker compose exec studiomcp-env studiomcp validate all` runs all validators with aggregate reporting.
+- `docker compose exec studiomcp-env studiomcp validate docs` passes.
 - The outer `studiomcp-env` container resolves `studiomcp` on `PATH` at `/usr/local/bin/studiomcp`.
 
 ## Phase Details
@@ -84,6 +87,7 @@ A phase can move to `Done` only when all of the following are true:
 | 6 | Done | None | `documents/engineering/k8s_native_dev_policy.md`, `documents/operations/runbook_local_debugging.md` |
 | 7 | Done | None | `documents/operations/keycloak_realm_bootstrap_runbook.md` |
 | 8 | Done | None | `README.md`, `documents/documentation_standards.md`, plan index files as needed |
+| 9 | Done | None | `documents/reference/cli_reference.md`, `DEVELOPMENT_PLAN/development_plan_standards.md` |
 
 ## Compatibility Entry Point
 

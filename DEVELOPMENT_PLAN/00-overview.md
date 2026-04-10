@@ -32,6 +32,7 @@
 | 6 | Done | Kind and Helm expose the canonical control-plane contract |
 | 7 | Done | Keycloak realm bootstrap is automated and idempotent on the default cluster path |
 | 8 | Done | The full regression gate now passes on the supported outer-container and Kind-based workflow |
+| 9 | Done | CLI test and validate commands consolidated with unified interface and documentation |
 
 ## Public Topology Baseline
 
@@ -83,3 +84,4 @@ The supported local and cluster topology is:
 - [phase-4-control-plane-data-plane-contract.md](phase-4-control-plane-data-plane-contract.md)
 - [phase-5-browser-session-contract.md](phase-5-browser-session-contract.md)
 - [phase-8-final-closure-regression-gate.md](phase-8-final-closure-regression-gate.md)
+- [phase-9-cli-test-validate-consolidation.md](phase-9-cli-test-validate-consolidation.md)

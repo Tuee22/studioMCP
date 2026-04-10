@@ -39,6 +39,7 @@
 | Inference runtime | `src/StudioMCP/Inference/*.hs` | Advisory inference service and related validation path |
 | Cluster CLI | `src/StudioMCP/CLI/Cluster.hs` | Cluster ensure/deploy/bootstrap operations |
 | Docs validator | `src/StudioMCP/CLI/Docs.hs` | Documentation validation entrypoint |
+| Test CLI | `src/StudioMCP/CLI/Test.hs` | Test command handlers for unit and integration tests |
 
 ## External and Browser-Facing Boundaries
 
@@ -72,3 +73,4 @@
 - [phase-2-mcp-surface-catalog-artifact-governance.md](phase-2-mcp-surface-catalog-artifact-governance.md)
 - [phase-3-keycloak-auth-shared-sessions.md](phase-3-keycloak-auth-shared-sessions.md)
 - [phase-4-control-plane-data-plane-contract.md](phase-4-control-plane-data-plane-contract.md)
+- [phase-9-cli-test-validate-consolidation.md](phase-9-cli-test-validate-consolidation.md)

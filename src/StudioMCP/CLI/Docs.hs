@@ -68,6 +68,7 @@ validateDocsCommand = do
         , "DEVELOPMENT_PLAN/phase-6-cluster-control-plane-parity.md"
         , "DEVELOPMENT_PLAN/phase-7-keycloak-realm-bootstrap.md"
         , "DEVELOPMENT_PLAN/phase-8-final-closure-regression-gate.md"
+        , "DEVELOPMENT_PLAN/phase-9-cli-test-validate-consolidation.md"
         , "DEVELOPMENT_PLAN/legacy-tracking-for-deletion.md"
         ]
   requiredProblems <- fmap concat $
@@ -143,13 +144,29 @@ validateDocText path content =
            | isDocumentsPath && not (hasLinePrefix "> **Purpose**: ")
            ]
 
+    isPlanPath = "DEVELOPMENT_PLAN/" `isPrefixOf` path
+
     statusProblems =
       case statusLine of
         Nothing -> []
-        Just "Authoritative source" -> []
-        Just "Reference only" -> []
-        Just "Deprecated" -> []
-        Just other -> ["Unsupported documentation status in " <> packedPath <> ": " <> other]
+        Just status
+          | isDocumentsPath -> validateDocStatus status
+          | isPlanPath -> validatePlanStatus status
+          | otherwise -> []
+
+    validateDocStatus :: Text -> [DocProblem]
+    validateDocStatus "Authoritative source" = []
+    validateDocStatus "Reference only" = []
+    validateDocStatus "Deprecated" = []
+    validateDocStatus other = ["Unsupported documentation status in " <> packedPath <> ": " <> other]
+
+    validatePlanStatus :: Text -> [DocProblem]
+    validatePlanStatus "Done" = []
+    validatePlanStatus "Active" = []
+    validatePlanStatus "Planned" = []
+    validatePlanStatus "Blocked" = []
+    validatePlanStatus "Authoritative source" = []  -- For standards docs in DEVELOPMENT_PLAN
+    validatePlanStatus other = ["Unsupported plan status in " <> packedPath <> ": " <> other]
 
     referenceProblems =
       case statusLine of

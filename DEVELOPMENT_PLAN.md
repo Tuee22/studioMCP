@@ -15,14 +15,18 @@ This root file remains as a compatibility index for existing links, tooling, and
 | 6 | Done | [DEVELOPMENT_PLAN/phase-6-cluster-control-plane-parity.md](DEVELOPMENT_PLAN/phase-6-cluster-control-plane-parity.md) |
 | 7 | Done | [DEVELOPMENT_PLAN/phase-7-keycloak-realm-bootstrap.md](DEVELOPMENT_PLAN/phase-7-keycloak-realm-bootstrap.md) |
 | 8 | Done | [DEVELOPMENT_PLAN/phase-8-final-closure-regression-gate.md](DEVELOPMENT_PLAN/phase-8-final-closure-regression-gate.md) |
+| 9 | Done | [DEVELOPMENT_PLAN/phase-9-cli-test-validate-consolidation.md](DEVELOPMENT_PLAN/phase-9-cli-test-validate-consolidation.md) |
 
 ## Current Validation State
 
-- `cabal build all` passes.
-- `cabal test unit-tests --test-show-details=direct` passes with 844 unit tests.
-- `cabal test integration-tests --test-show-details=direct` passes with 16 integration tests.
-- `cabal test all --test-show-details=direct` passes on the supported outer-container path.
-- `cabal run studiomcp -- validate docs` passes.
+All commands run inside the outer container after `docker compose up -d`:
+
+- `docker compose exec studiomcp-env cabal build all` passes.
+- `docker compose exec studiomcp-env studiomcp test unit` passes with 844 unit tests.
+- `docker compose exec studiomcp-env studiomcp test integration` passes with 16 integration tests.
+- `docker compose exec studiomcp-env studiomcp test all` passes end to end on the supported outer-container path.
+- `docker compose exec studiomcp-env studiomcp validate all` runs all validators with aggregate reporting.
+- `docker compose exec studiomcp-env studiomcp validate docs` passes.
 - The outer `studiomcp-env` container resolves `studiomcp` on `PATH` at `/usr/local/bin/studiomcp`.
 
 ## Public Topology Baseline
@@ -52,6 +56,7 @@ topology and component inventory.
 - [Phase 6 cluster parity](DEVELOPMENT_PLAN/phase-6-cluster-control-plane-parity.md)
 - [Phase 7 Keycloak bootstrap automation](DEVELOPMENT_PLAN/phase-7-keycloak-realm-bootstrap.md)
 - [Phase 8 final closure and regression gate](DEVELOPMENT_PLAN/phase-8-final-closure-regression-gate.md)
+- [Phase 9 CLI test and validate consolidation](DEVELOPMENT_PLAN/phase-9-cli-test-validate-consolidation.md)
 - [Legacy tracking for deletion](DEVELOPMENT_PLAN/legacy-tracking-for-deletion.md)
 
 ## Documentation Governance

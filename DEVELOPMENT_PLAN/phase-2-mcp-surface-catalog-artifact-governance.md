@@ -37,20 +37,30 @@ storage rules, and observability hooks.
 
 ### Validation
 
+#### Validation Prerequisites
+
+All validation commands run inside the outer container after bootstrap:
+
+```bash
+docker compose up -d
+```
+
+#### Validation Gates
+
 | Check | Command | Expected |
 |-------|---------|----------|
-| MCP stdio | `studiomcp validate mcp-stdio` | PASS |
-| MCP HTTP | `studiomcp validate mcp-http` | PASS |
-| Artifact storage | `studiomcp validate artifact-storage` | PASS |
-| Artifact governance | `studiomcp validate artifact-governance` | PASS |
-| MCP tools | `studiomcp validate mcp-tools` | PASS |
-| MCP resources | `studiomcp validate mcp-resources` | PASS |
-| MCP prompts | `studiomcp validate mcp-prompts` | PASS |
-| Observability | `studiomcp validate observability` | PASS |
-| Audit | `studiomcp validate audit` | PASS |
-| Quotas | `studiomcp validate quotas` | PASS |
-| Rate limit | `studiomcp validate rate-limit` | PASS |
-| MCP conformance | `studiomcp validate mcp-conformance` | PASS on the phase-close path |
+| MCP stdio | `docker compose exec studiomcp-env studiomcp validate mcp-stdio` | PASS |
+| MCP HTTP | `docker compose exec studiomcp-env studiomcp validate mcp-http` | PASS |
+| Artifact storage | `docker compose exec studiomcp-env studiomcp validate artifact-storage` | PASS |
+| Artifact governance | `docker compose exec studiomcp-env studiomcp validate artifact-governance` | PASS |
+| MCP tools | `docker compose exec studiomcp-env studiomcp validate mcp-tools` | PASS |
+| MCP resources | `docker compose exec studiomcp-env studiomcp validate mcp-resources` | PASS |
+| MCP prompts | `docker compose exec studiomcp-env studiomcp validate mcp-prompts` | PASS |
+| Observability | `docker compose exec studiomcp-env studiomcp validate observability` | PASS |
+| Audit | `docker compose exec studiomcp-env studiomcp validate audit` | PASS |
+| Quotas | `docker compose exec studiomcp-env studiomcp validate quotas` | PASS |
+| Rate limit | `docker compose exec studiomcp-env studiomcp validate rate-limit` | PASS |
+| MCP conformance | `docker compose exec studiomcp-env studiomcp validate mcp-conformance` | PASS on the phase-close path |
 
 ### Test Mapping
 
