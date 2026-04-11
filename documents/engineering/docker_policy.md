@@ -88,13 +88,12 @@ All cabal build artifacts must remain inside the container and never leak to the
 
 ### Enforcement Mechanism
 
-Cabal's nix-style builds (v2-commands) do not respect the `CABAL_BUILDDIR` environment variable or `builddir` settings in `cabal.project`. The only reliable enforcement is the explicit `--builddir` command-line flag.
+Cabal's nix-style builds (v2-commands) do not respect the `CABAL_BUILDDIR` environment variable or `builddir` settings in `cabal.project`. The only reliable enforcement is the explicit `--builddir` command-line flag, so the repository does not rely on either compatibility hint.
 
 Build artifact isolation is enforced through:
 
 1. **Dockerfile build commands**: Use `--builddir=/opt/build/studiomcp` explicitly
 2. **CLI test commands**: The `studiomcp` CLI passes `--builddir=/opt/build/studiomcp` to all cabal invocations
-3. **Documentation**: The `cabal.project` file declares `builddir: /opt/build/studiomcp` as documentation (though it's not enforced for nix-style builds)
 
 This ensures:
 
@@ -104,7 +103,7 @@ This ensures:
 
 ### Important Note
 
-The `CABAL_BUILDDIR` environment variable is set in the Dockerfile but **does not affect nix-style builds**. It exists for potential legacy v1-style commands but the primary enforcement is via explicit `--builddir` flags.
+The repository intentionally does not set `CABAL_BUILDDIR` or a `cabal.project` `builddir` value because they do not affect nix-style builds. The primary and only supported enforcement is the explicit `--builddir` flag.
 
 Forbidden:
 
@@ -133,7 +132,7 @@ Rules:
 
 ## Environment Variable Policy
 
-Environment variables (`LANG`, `LC_ALL`, `CABAL_BUILDDIR`, `PATH`) are set only in the Dockerfile `ENV` block.
+Environment variables (`LANG`, `LC_ALL`, `PATH`) are set only in the Dockerfile `ENV` block.
 
 Rules:
 - docker-compose.yaml has no `environment` block (inherits from image)

@@ -45,17 +45,17 @@ docker compose run --rm studiomcp studiomcp cluster ensure
 | Check | Command | Expected | Current state |
 |-------|---------|----------|---------------|
 | Build | `docker compose run --rm studiomcp cabal --builddir=/opt/build/studiomcp build all` | Success | Pass |
-| Unit tests | `docker compose run --rm studiomcp studiomcp test unit` | Success | 846 pass |
+| Unit tests | `docker compose run --rm studiomcp studiomcp test unit` | Success | 867 pass |
 | Integration tests | `docker compose run --rm studiomcp studiomcp test integration` | 0 failures | 16 pass, 0 fail |
 | Full regression gate | `docker compose run --rm studiomcp studiomcp test all` | 0 failures | Pass |
-| Outer container CLI availability | `docker compose run --rm studiomcp studiomcp --help` | Success | Pass |
+| Outer container CLI availability | `docker compose run --rm studiomcp sh -lc 'command -v studiomcp'` | `/usr/local/bin/studiomcp` | Pass |
 | Kind edge matrix | cluster validators through `/kc`, `/mcp`, `/api` | PASS | PASS |
 | Docs validation | `docker compose run --rm studiomcp studiomcp validate docs` | PASS | Pass |
 | Full validation | `docker compose run --rm studiomcp studiomcp validate all` | PASS | 28/28 pass |
 
 ### Current Validation State
 
-- 846 unit tests pass.
+- 867 unit tests pass.
 - 16 of 16 integration tests pass.
 - `docker compose run --rm studiomcp studiomcp test all` passes on the supported outer-container path.
 - `docker compose run --rm studiomcp studiomcp validate all` passes with 28 of 28 validators.

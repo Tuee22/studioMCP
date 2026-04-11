@@ -95,6 +95,7 @@ library
     StudioMCP.Util.Logging
     StudioMCP.Util.Json
     StudioMCP.Util.Exceptions
+    StudioMCP.Util.Startup
     StudioMCP.Observability.CorrelationId
     StudioMCP.Observability.Quotas
     StudioMCP.Observability.RateLimiting
@@ -248,6 +249,7 @@ test-suite unit-tests
     Auth.ScopesSpec
     Auth.JwksSpec
     Auth.MiddlewareSpec
+    Auth.PassthroughGuardSpec
     Session.StoreSpec
     Session.RedisConfigSpec
     Session.RedisStoreSpec
@@ -287,6 +289,7 @@ test-suite unit-tests
     Util.ExceptionsSpec
     Util.JsonSpec
     Util.LoggingSpec
+    Util.StartupSpec
     Util.TimeSpec
     Worker.ServerSpec
   build-depends:
@@ -299,6 +302,7 @@ test-suite unit-tests
     , http-client
     , http-types
     , process
+    , QuickCheck
     , studioMCP
     , text
     , time

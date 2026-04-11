@@ -12,7 +12,8 @@ module StudioMCP.CLI.Command
 where
 
 data Command
-  = ServerCommand
+  = HelpCommand
+  | ServerCommand
   | StdioCommand
   | BffCommand
   | InferenceCommand
@@ -91,6 +92,9 @@ data TestCommand
 parseCommand :: [String] -> Either String Command
 parseCommand args =
   case args of
+    ["help"] -> Right HelpCommand
+    ["--help"] -> Right HelpCommand
+    ["-h"] -> Right HelpCommand
     ["server"] -> Right ServerCommand
     ["stdio"] -> Right StdioCommand
     ["bff"] -> Right BffCommand
@@ -194,11 +198,11 @@ usageText =
     , "  studiomcp cluster down"
     , "  studiomcp cluster reset"
     , "  studiomcp cluster status"
-    , "  studiomcp cluster ensure            # Idempotent: up + sidecars + wait for all services"
+    , "  studiomcp cluster ensure            # Idempotent: up + Helm dependency reconcile + sidecars + wait for all services"
     , "  studiomcp cluster push-images       # Build and push application images to the configured registry"
     , "  studiomcp cluster ensure-secrets    # Create/update CLI-managed Kubernetes secrets"
-    , "  studiomcp cluster deploy sidecars"
-    , "  studiomcp cluster deploy server"
+    , "  studiomcp cluster deploy sidecars   # Reconcile Helm dependencies and deploy sidecar services"
+    , "  studiomcp cluster deploy server     # Reconcile Helm dependencies and deploy server workloads"
     , "  studiomcp cluster storage reconcile"
     , "  studiomcp cluster storage delete <name>"
     , "  studiomcp test                     # Run all tests (unit + integration)"

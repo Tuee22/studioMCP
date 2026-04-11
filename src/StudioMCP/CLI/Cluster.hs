@@ -885,7 +885,8 @@ clusterStatus = do
       let contextName = "kind-" <> clusterName
       callProcess "kubectl" ["cluster-info", "--context", contextName]
 
--- | Idempotent cluster setup: brings up cluster, deploys sidecars, waits for all services.
+-- | Idempotent cluster setup: brings up cluster, reconciles Helm dependencies,
+-- deploys sidecars, and waits for all services.
 -- This is the recommended entry point for automation and integration tests.
 clusterEnsure :: IO ()
 clusterEnsure = do
@@ -967,7 +968,9 @@ clusterDeploy target = do
                 , "pulsar.proxy.podMonitor.enabled=false"
                 ]
           DeployServer -> baseArgs <> upgradeCredentialArgs
-  withHelmLock $ callProcess "helm" args
+  withHelmLock $ do
+    ensureHelmChartDependencies
+    callProcess "helm" args
   waitForWorkloadRollout "statefulset/studiomcp-keycloak" "480s"
   bootstrapClusterKeycloakRealm
   ensureRedisStatefulSetReady
@@ -986,7 +989,6 @@ clusterEnsureSecretsCommand = do
 ensureRedisStatefulSetReady :: IO ()
 ensureRedisStatefulSetReady = do
   let redisWorkload = "statefulset/studiomcp-redis-node"
-  restartWorkloadIfExists redisWorkload
   waitForWorkloadRollout redisWorkload "480s"
 
 restartWorkloadIfExists :: String -> IO ()
@@ -1228,6 +1230,16 @@ withHelmLock action = bracket
     result <- action
     hUnlock h
     pure result)
+
+ensureHelmChartDependencies :: IO ()
+ensureHelmChartDependencies = do
+  putStrLn "Reconciling Helm repositories..."
+  callProcess "helm" ["repo", "add", "minio", "https://charts.min.io/", "--force-update"]
+  callProcess "helm" ["repo", "add", "pulsar", "https://pulsar.apache.org/charts", "--force-update"]
+  callProcess "helm" ["repo", "add", "bitnami", "https://charts.bitnami.com/bitnami", "--force-update"]
+  callProcess "helm" ["repo", "update"]
+  putStrLn "Reconciling Helm chart dependencies..."
+  callProcess "helm" ["dependency", "build", "chart"]
 
 helmReleaseExists :: String -> IO Bool
 helmReleaseExists releaseName = do

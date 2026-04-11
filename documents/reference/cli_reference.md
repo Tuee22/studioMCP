@@ -25,7 +25,17 @@ See [DEVELOPMENT_PLAN/development_plan_standards.md](../../DEVELOPMENT_PLAN/deve
 
 ## Command Categories
 
-### Root Commands
+### Usage Commands
+
+Usage and help entrypoints for the CLI surface.
+
+| Command | Description |
+|---------|-------------|
+| `studiomcp help` | Print usage text |
+| `studiomcp --help` | Print usage text |
+| `studiomcp -h` | Print usage text |
+
+### Runtime Commands
 
 Runtime modes for the StudioMCP server.
 
@@ -106,11 +116,11 @@ Kubernetes cluster lifecycle management.
 | `studiomcp cluster down` | Stop and delete the Kind cluster |
 | `studiomcp cluster reset` | Reset the cluster to clean state |
 | `studiomcp cluster status` | Show cluster status |
-| `studiomcp cluster ensure` | Idempotent: up + sidecars + wait for all services |
+| `studiomcp cluster ensure` | Idempotent: up + Helm dependency reconcile + sidecars + wait for all services |
 | `studiomcp cluster push-images` | Build and push application images to the configured registry |
 | `studiomcp cluster ensure-secrets` | Create/update CLI-managed Kubernetes secrets |
-| `studiomcp cluster deploy sidecars` | Deploy sidecar services (Redis, MinIO, Pulsar, etc.) |
-| `studiomcp cluster deploy server` | Deploy the MCP server |
+| `studiomcp cluster deploy sidecars` | Reconcile Helm dependencies and deploy sidecar services (Redis, MinIO, Pulsar, etc.) |
+| `studiomcp cluster deploy server` | Reconcile Helm dependencies and deploy the MCP server |
 | `studiomcp cluster storage reconcile` | Reconcile storage resources |
 | `studiomcp cluster storage delete <name>` | Delete a named storage resource |
 

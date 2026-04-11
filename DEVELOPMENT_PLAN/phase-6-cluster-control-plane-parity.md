@@ -27,7 +27,7 @@ Ensure the Kind and Helm workflow exposes the canonical control-plane contract w
 
 | Item | File(s) | Status |
 |------|---------|--------|
-| Helm chart dependencies | `chart/Chart.yaml` | Done |
+| Helm chart dependencies | `chart/Chart.yaml`, `src/StudioMCP/CLI/Cluster.hs` | Done |
 | Ingress templates | `chart/templates/ingress.yaml` | Done |
 | Kind config | `kind/kind_config.yaml` | Done |
 | Cluster CLI | `src/StudioMCP/CLI/Cluster.hs` | Done |
@@ -108,6 +108,10 @@ The CLI compares local image digests with the registry manifest:
 2. Query the registry for existing image digest
 3. Push only if digest differs or image not present
 4. Helm values reference the registry repository and tag
+
+Before `helm upgrade --install`, the CLI reconciles chart dependencies with
+`helm dependency build chart` so the supported `cluster ensure`, `cluster deploy sidecars`, and
+`cluster deploy server` flows do not depend on a pre-populated `chart/charts/` directory.
 
 ## CLI-Owned Storage Reconciliation
 

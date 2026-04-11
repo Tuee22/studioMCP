@@ -61,7 +61,7 @@
 
 | State Class | Authority | Durable Home | Notes |
 |-------------|-----------|--------------|-------|
-| Build artifacts | cabal.project | `/opt/build/studiomcp` | All cabal build output; must never land in repo tree |
+| Build artifacts | explicit `cabal --builddir=/opt/build/studiomcp` flags in the Dockerfile and CLI | `/opt/build/studiomcp` | All cabal build output; must never land in repo tree |
 | Repo-local runtime state | local development environment | `./.data/` | Only supported repo-root durable path; also backs CLI-reconciled local PVs |
 | Keycloak realm and auth data | Keycloak | PostgreSQL | Backing store for auth contracts |
 | Shared resumable session state | MCP session layer | Redis | Required for horizontal scale validation |

@@ -84,7 +84,7 @@ The studioMCP Helm chart is responsible for:
 
 1. Declaring chart dependencies in `Chart.yaml`
 2. Configuring subchart values for HA and null storage class
-3. Running `helm dependency update` before deployment
+3. Running `helm dependency build` before deployment so `Chart.lock` and `chart/charts/` are reconciled from `Chart.yaml`
 
 The CLI is responsible for:
 

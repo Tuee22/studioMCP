@@ -34,7 +34,7 @@ adapters, worker entrypoints, and foundational validation commands.
 | MinIO storage | `src/StudioMCP/Storage/MinIO.hs` | Done |
 | Worker entrypoint | `src/StudioMCP/Worker/Server.hs` | Done |
 | Inference entrypoint | `src/StudioMCP/Inference/Host.hs`, `src/StudioMCP/Inference/ReferenceModel.hs` | Done |
-| Build artifact isolation | `cabal.project`, `Makefile` | Done |
+| Repository build scaffold | `studioMCP.cabal`, `cabal.project`, `Makefile` | Done |
 
 ### Validation
 

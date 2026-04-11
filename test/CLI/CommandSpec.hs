@@ -9,14 +9,15 @@ import StudioMCP.CLI.Command
     ClusterStorageCommand (..),
     Command (..),
     DagCommand (..),
+    TestCommand (..),
     ValidateCommand (..),
     parseCommand,
     usageText,
   )
-import Test.Hspec (Spec, describe, it, shouldBe)
+import Test.Hspec (Spec, describe, it, shouldBe, shouldContain)
 
 spec :: Spec
-spec =
+spec = do
   describe "parseCommand" $ do
     it "parses bff mode" $
       parseCommand ["bff"]
@@ -26,9 +27,25 @@ spec =
       parseCommand ["stdio"]
         `shouldBe` Right StdioCommand
 
+    it "parses help" $
+      parseCommand ["help"]
+        `shouldBe` Right HelpCommand
+
+    it "parses --help" $
+      parseCommand ["--help"]
+        `shouldBe` Right HelpCommand
+
+    it "parses -h" $
+      parseCommand ["-h"]
+        `shouldBe` Right HelpCommand
+
     it "parses validate docs" $
       parseCommand ["validate", "docs"]
         `shouldBe` Right (ValidateCommand ValidateDocsCommand)
+
+    it "parses validate all" $
+      parseCommand ["validate", "all"]
+        `shouldBe` Right (ValidateCommand ValidateAllCommand)
 
     it "parses validate pulsar" $
       parseCommand ["validate", "pulsar"]
@@ -110,6 +127,22 @@ spec =
       parseCommand ["cluster", "storage", "delete", "studiomcp-minio-0"]
         `shouldBe` Right (ClusterCommand (ClusterStorageCommand (ClusterStorageDelete "studiomcp-minio-0")))
 
+    it "parses test with implicit all" $
+      parseCommand ["test"]
+        `shouldBe` Right (TestCommand TestAllCommand)
+
+    it "parses test all" $
+      parseCommand ["test", "all"]
+        `shouldBe` Right (TestCommand TestAllCommand)
+
+    it "parses test unit" $
+      parseCommand ["test", "unit"]
+        `shouldBe` Right (TestCommand TestUnitCommand)
+
+    it "parses test integration" $
+      parseCommand ["test", "integration"]
+        `shouldBe` Right (TestCommand TestIntegrationCommand)
+
     it "parses dag validate path" $
       parseCommand ["dag", "validate", "examples/dags/transcode-basic.yaml"]
         `shouldBe` Right (ValidateDagCommand "examples/dags/transcode-basic.yaml")
@@ -120,3 +153,7 @@ spec =
 
     it "returns usage text on invalid input" $
       parseCommand ["cluster", "deploy"] `shouldBe` Left usageText
+
+  describe "usageText" $ do
+    it "documents Helm dependency reconciliation on cluster ensure" $
+      usageText `shouldContain` "Helm dependency reconcile"

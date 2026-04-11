@@ -11,7 +11,7 @@
 ## Phase Summary
 
 **Status**: Done
-**Implementation**: `src/StudioMCP/Auth/Middleware.hs`, `src/StudioMCP/Auth/Jwks.hs`, `src/StudioMCP/MCP/Session/RedisStore.hs`
+**Implementation**: `src/StudioMCP/Auth/Middleware.hs`, `src/StudioMCP/Auth/Jwks.hs`, `src/StudioMCP/Auth/PassthroughGuard.hs`, `src/StudioMCP/MCP/Session/RedisStore.hs`
 **Docs to update**: `documents/architecture/multi_tenant_saas_mcp_auth_architecture.md`, `documents/engineering/security_model.md`, `documents/engineering/session_scaling.md`
 
 ### Goal
@@ -27,9 +27,10 @@ scale and browser/MCP auth flows.
 | Claims extraction | `src/StudioMCP/Auth/Claims.hs` | Done |
 | JWT validation | `src/StudioMCP/Auth/Middleware.hs` | Done |
 | JWKS fetch | `src/StudioMCP/Auth/Jwks.hs` | Done |
+| Token passthrough guard utilities | `src/StudioMCP/Auth/PassthroughGuard.hs` | Done |
 | Scope enforcement | `src/StudioMCP/Auth/Scopes.hs` | Done |
 | Auth config | `src/StudioMCP/Auth/Config.hs` | Done |
-| Password grant | `src/StudioMCP/Auth/PKCE.hs` | Done |
+| Password and refresh-token helpers | `src/StudioMCP/Auth/PKCE.hs` | Done |
 | Redis session store | `src/StudioMCP/MCP/Session/RedisStore.hs` | Done |
 | Session types | `src/StudioMCP/MCP/Session/Types.hs` | Done |
 
@@ -61,6 +62,7 @@ docker compose run --rm studiomcp studiomcp cluster ensure  # For cluster-based 
 | Claims | `test/Auth/ClaimsSpec.hs` |
 | Middleware | `test/Auth/MiddlewareSpec.hs` |
 | JWKS | `test/Auth/JwksSpec.hs` |
+| Passthrough guard | `test/Auth/PassthroughGuardSpec.hs` |
 | Scopes | `test/Auth/ScopesSpec.hs` |
 | Config | `test/Auth/ConfigSpec.hs` |
 | Redis store | `test/Session/RedisStoreSpec.hs` |

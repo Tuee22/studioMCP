@@ -11,6 +11,9 @@
 
 The codebase currently implements this subset:
 
+- `studiomcp help`
+- `studiomcp --help`
+- `studiomcp -h`
 - `studiomcp server`
 - `studiomcp stdio`
 - `studiomcp bff`
@@ -53,11 +56,14 @@ The codebase currently implements this subset:
 - `studiomcp validate quotas`
 - `studiomcp validate rate-limit`
 - `studiomcp validate mcp-conformance`
+- `studiomcp validate storage-policy`
 - `studiomcp cluster up`
 - `studiomcp cluster down`
 - `studiomcp cluster reset`
 - `studiomcp cluster status`
 - `studiomcp cluster ensure`
+- `studiomcp cluster push-images`
+- `studiomcp cluster ensure-secrets`
 - `studiomcp cluster deploy sidecars`
 - `studiomcp cluster deploy server`
 - `studiomcp cluster storage reconcile`
@@ -71,6 +77,14 @@ Current note:
 ## Required Target Surface
 
 The supported command surface must converge on one Haskell CLI with at least these families:
+
+### Usage Commands
+
+| Command | Description | Status |
+|---------|-------------|--------|
+| `studiomcp help` | Print usage text | ✅ Implemented |
+| `studiomcp --help` | Print usage text | ✅ Implemented |
+| `studiomcp -h` | Print usage text | ✅ Implemented |
 
 ### Server Modes
 
@@ -113,13 +127,13 @@ The supported command surface must converge on one Haskell CLI with at least the
 | `studiomcp cluster down` | Stop local Kubernetes cluster |
 | `studiomcp cluster reset` | Reset the kind cluster to a clean Kubernetes state while preserving host-backed volumes |
 | `studiomcp cluster status` | Show cluster status |
-| `studiomcp cluster ensure` | Idempotent setup: up + ingress edge + sidecars + Keycloak realm bootstrap + readiness waits (recommended for automation) |
+| `studiomcp cluster ensure` | Idempotent setup: up + Helm dependency reconcile + ingress edge + sidecars + Keycloak realm bootstrap + readiness waits (recommended for automation) |
 | `studiomcp cluster push-images` | Build and push application images to the configured registry |
 | `studiomcp cluster ensure-secrets` | Create/update CLI-managed Kubernetes secrets |
 | `studiomcp cluster storage reconcile` | Reconcile storage resources |
 | `studiomcp cluster storage delete <name>` | Delete a storage resource |
-| `studiomcp cluster deploy sidecars` | Deploy sidecar services |
-| `studiomcp cluster deploy server` | Deploy MCP server |
+| `studiomcp cluster deploy sidecars` | Reconcile Helm dependencies and deploy sidecar services |
+| `studiomcp cluster deploy server` | Reconcile Helm dependencies and deploy MCP server workloads |
 
 ### Idempotency Guarantees
 
@@ -132,11 +146,11 @@ All cluster management commands are idempotent and safe to run repeatedly:
 | `cluster reset` | Uninstalls the Helm release when present, recreates the kind cluster, and preserves host-backed volume contents |
 | `cluster push-images` | Builds the production image, tags it for the configured registry, and pushes when the remote digest differs or is absent |
 | `cluster ensure-secrets` | Applies the required Kubernetes secrets with fixed names and stable keys |
-| `cluster deploy sidecars` | Ensures registry image availability, applies CLI-managed secrets, uses `helm upgrade --install`, ensures ingress-nginx, and bootstraps the checked-in Keycloak realm |
-| `cluster deploy server` | Ensures registry image availability, applies CLI-managed secrets, uses `helm upgrade --install`, bootstraps the checked-in Keycloak realm, and rolls server/BFF workloads |
+| `cluster deploy sidecars` | Ensures Helm dependencies are reconciled, ensures registry image availability, applies CLI-managed secrets, uses `helm upgrade --install`, ensures ingress-nginx, and bootstraps the checked-in Keycloak realm |
+| `cluster deploy server` | Ensures Helm dependencies are reconciled, ensures registry image availability, applies CLI-managed secrets, uses `helm upgrade --install`, bootstraps the checked-in Keycloak realm, and rolls server/BFF workloads |
 | `cluster storage reconcile` | Uses `kubectl apply` (idempotent) |
 | `cluster storage delete <name>` | Deletes the named PV if it exists |
-| `cluster ensure` | Single idempotent command: brings up the kind cluster, applies ingress-nginx, deploys sidecars, imports the checked-in Keycloak realm if missing, and waits for Redis, PostgreSQL, MinIO, Pulsar, and Keycloak. Recommended for automation and tests. |
+| `cluster ensure` | Single idempotent command: brings up the kind cluster, reconciles Helm dependencies, applies ingress-nginx, deploys sidecars, imports the checked-in Keycloak realm if missing, and waits for Redis, PostgreSQL, MinIO, Pulsar, and Keycloak. Recommended for automation and tests. |
 
 Running any of these commands multiple times produces the same result as running once. This design supports:
 - **Developer workflow**: Run `cluster ensure` at any point to guarantee a working environment

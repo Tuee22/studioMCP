@@ -27,7 +27,6 @@ import Data.Aeson
     (.=),
   )
 import qualified Data.ByteString as BS
-import qualified Data.ByteString.Char8 as BSC
 import Data.CaseInsensitive (CI)
 import qualified Data.CaseInsensitive as CI
 import Data.Text (Text)
@@ -134,17 +133,21 @@ detectTokenPatterns content =
   ]
 
 -- | Assert that content does not contain token patterns
-assertNoTokenPassthrough :: Text -> Maybe PassthroughViolation
+assertNoTokenPassthrough :: Text -> IO (Maybe PassthroughViolation)
 assertNoTokenPassthrough content = do
-  let detected = detectTokenPatterns content
-  case detected of
+  now <- getCurrentTime
+  pure (mkBodyViolation now content)
+
+mkBodyViolation :: UTCTime -> Text -> Maybe PassthroughViolation
+mkBodyViolation detectedAt content =
+  case detectTokenPatterns content of
     [] -> Nothing
     (pattern : _) ->
       Just
         PassthroughViolation
           { pvLocation = BodyLocation,
             pvPattern = pattern,
-            pvDetectedAt = undefined, -- Will be set by caller
+            pvDetectedAt = detectedAt,
             pvCorrelationId = Nothing,
             pvTargetService = Nothing
           }
@@ -247,21 +250,3 @@ auditOutboundRequest headers mBody mQuery correlationId targetService = do
   violations <- checkRequestForTokenLeakage headers mBody mQuery correlationId targetService
   mapM_ logPassthroughViolation violations
   pure $ null violations
-
--- | Sanitize and audit outbound request headers
---
--- This is a convenience function that both sanitizes headers
--- and checks for violations in the non-sanitized headers.
-sanitizeAndAudit ::
-  -- | Original request headers
-  [Header] ->
-  -- | Correlation ID for audit
-  Maybe Text ->
-  -- | Target service name
-  Maybe Text ->
-  IO [Header]
-sanitizeAndAudit headers correlationId targetService = do
-  -- First audit the original headers
-  _ <- auditOutboundRequest headers Nothing Nothing correlationId targetService
-  -- Return sanitized headers
-  pure $ sanitizeOutboundHeaders headers

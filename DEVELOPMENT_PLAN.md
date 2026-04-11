@@ -23,14 +23,14 @@ This root file remains as a compatibility index for existing links, tooling, and
 All commands run inside an ephemeral outer container:
 
 - `docker compose run --rm studiomcp cabal --builddir=/opt/build/studiomcp build all` passes.
-- `docker compose run --rm studiomcp studiomcp test unit` passes with 846 unit tests.
+- `docker compose run --rm studiomcp studiomcp test unit` passes with 867 unit tests.
 - `docker compose run --rm studiomcp studiomcp test integration` passes with 16 integration tests.
 - `docker compose run --rm studiomcp studiomcp validate all` passes with 28 of 28 validators.
 - Build artifacts go to `/opt/build/studiomcp/` and never leak to the workspace bind mount.
 - The outer `studiomcp` container resolves `studiomcp` on `PATH` at `/usr/local/bin/studiomcp`.
 
 **Cluster-Dependent:**
-- `docker compose run --rm studiomcp studiomcp test integration` requires Kind cluster via `studiomcp cluster ensure`.
+- `docker compose run --rm studiomcp studiomcp test integration` requires Kind cluster via `docker compose run --rm studiomcp studiomcp cluster ensure`.
 - Integration tests validate cluster services (Keycloak, MinIO, Pulsar, etc.) through the outer-container CLI.
 
 ## Public Topology Baseline

@@ -13,7 +13,7 @@ import StudioMCP.Inference.Host (runInferenceMode)
 import StudioMCP.MCP.Server (runServer, runServerStdio)
 import StudioMCP.Worker.Server (runWorkerMode)
 import System.Environment (getArgs)
-import System.Exit (die)
+import System.Exit (die, exitSuccess)
 
 main :: IO ()
 main = do
@@ -22,6 +22,7 @@ main = do
     Left _ -> die usageText
     Right command ->
       case command of
+        HelpCommand -> putStrLn usageText >> exitSuccess
         ServerCommand -> runServer
         StdioCommand -> runServerStdio
         BffCommand -> runBffMode

@@ -79,7 +79,6 @@ RUN if [ -z "${TARGETARCH}" ]; then TARGETARCH="$(dpkg --print-architecture)"; f
 
 ENV LANG="C.UTF-8" \
     LC_ALL="C.UTF-8" \
-    CABAL_BUILDDIR="/opt/build/studiomcp" \
     PATH="/root/.ghcup/bin:/root/.cabal/bin:/usr/local/bin:${PATH}"
 
 WORKDIR /workspace

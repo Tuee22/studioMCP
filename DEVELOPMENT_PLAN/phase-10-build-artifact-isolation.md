@@ -12,129 +12,77 @@
 
 **Status**: Done
 **Implementation**: `docker/Dockerfile`, `docker-compose.yaml`, `src/StudioMCP/CLI/Test.hs`, `test/Session/RedisStoreSpec.hs`
-**Docs to update**: `documents/engineering/docker_policy.md`
+**Docs to update**: `documents/engineering/docker_policy.md`, `DEVELOPMENT_PLAN/system-components.md`, `DEVELOPMENT_PLAN/legacy-tracking-for-deletion.md`
 
 ### Goal
 
-Enforce build artifact isolation and establish the canonical container configuration doctrine:
-- Build artifacts isolated to `/opt/build/studiomcp`
-- Ephemeral container model (no persistent daemon)
-- Minimal mount policy (workspace, .data, docker socket only)
-- Environment variables set in Dockerfile only
+Keep all cabal build artifacts out of the workspace bind mount and define the supported outer
+development container as an ephemeral, minimal-mount environment.
 
 ### Deliverables
 
-| Item | Status |
-|------|--------|
-| Explicit --builddir flag in CLI | Done |
-| Dockerfile build commands use --builddir | Done |
-| Ephemeral outer-container model (`env` target has no `CMD`; compose service has no `command`) | Done |
-| Minimal mount policy | Done |
-| Environment in Dockerfile only | Done |
+| Item | File(s) | Status |
+|------|---------|--------|
+| Explicit `--builddir=/opt/build/studiomcp` in Dockerfile build and install steps | `docker/Dockerfile` | Done |
+| Explicit `--builddir=/opt/build/studiomcp` in CLI test entrypoints | `src/StudioMCP/CLI/Test.hs` | Done |
+| Ephemeral outer-container contract (`env` target has no `CMD`; compose service has no `command`) | `docker/Dockerfile`, `docker-compose.yaml` | Done |
+| Minimal compose mount policy (`/workspace`, `/.data`, Docker socket only) | `docker-compose.yaml` | Done |
+| Dockerfile-owned locale and PATH environment | `docker/Dockerfile`, `docker-compose.yaml` | Done |
+| Outer-container Redis test harness compatibility | `test/Session/RedisStoreSpec.hs` | Done |
 
-## Build Artifact Isolation
+## Build Artifact Authority
 
-### Explicit --builddir Flag in CLI
+- The supported workflow relies on explicit `cabal --builddir=/opt/build/studiomcp` flags in the
+  Dockerfile and CLI.
+- The repo does not carry `CABAL_BUILDDIR` or a `cabal.project` `builddir` compatibility hint
+  because nix-style builds ignore them.
+- Build output, test logs, and compiled artifacts must stay under `/opt/build/studiomcp` and never
+  land in the repo tree.
 
-- The `studiomcp` CLI passes `--builddir=/opt/build/studiomcp` to all cabal invocations
-- This is the canonical enforcement mechanism for nix-style builds
+## Outer-Container Contract
 
-### Dockerfile Build Commands
-
-- Dockerfile build commands use `--builddir=/opt/build/studiomcp` explicitly
-- The `CABAL_BUILDDIR` environment variable is also set (for documentation/legacy v1 commands)
-
-### Important Note on CABAL_BUILDDIR
-
-Cabal's nix-style builds (v2-commands, which are the default in modern cabal) **do not respect**
-the `CABAL_BUILDDIR` environment variable or `builddir` settings in `cabal.project`.
-
-The only reliable enforcement is the explicit `--builddir` command-line flag passed to each
-cabal invocation.
-
-## Ephemeral Container Model
-
-The outer development container operates in ephemeral mode:
-
-- Dockerfile `env` target has no `CMD`
-- docker-compose.yaml service has no `command`
-- All operations use `docker compose run --rm -it studiomcp <cmd>`
-- No long-running container; container removed after each command
-- Interactive sessions: `docker compose run --rm -it studiomcp sh`
-
-The production image is separate from this rule. It retains its runtime `ENTRYPOINT`/`CMD`
-because it runs inside the cluster as the application image, not as the outer development
-container.
-
-This model ensures:
-- Clean state for each command
-- No stale processes or state accumulation
-- Consistent behavior across invocations
-
-## Minimal Mount Policy
-
-docker-compose.yaml volumes are limited to:
-
-| Mount | Purpose |
-|-------|---------|
-| `.:/workspace` | Source code access |
-| `./.data:/.data` | Persistent state |
-| `/var/run/docker.sock:/var/run/docker.sock` | Docker operations |
-
-Removed:
-- `${HOME}/.docker:/root/.docker:ro` - not needed
-
-## Environment Configuration
-
-- `LANG` and `LC_ALL` set only in Dockerfile `ENV`
-- docker-compose.yaml has no `environment` block (inherits from image)
-- No `env_file` references
+- The `env` image target has no `CMD`, and `docker-compose.yaml` defines no long-running service
+  `command`.
+- The outer development path uses `docker compose run --rm studiomcp ...` for each operation.
+- Compose mounts only the workspace, `./.data/`, and the Docker socket.
+- Locale configuration is defined in Dockerfile `ENV`; compose inherits it and does not add an
+  `environment` block or `env_file`.
+- The production image remains separate from this rule and keeps its runtime `ENTRYPOINT`/`CMD`
+  because it runs in-cluster, not as the outer development container.
 
 ### Validation
 
-All validation commands use the ephemeral container pattern:
+#### Validation Prerequisites
+
+All validation commands use the ephemeral outer-container pattern:
 
 ```bash
-# Build container
 docker compose build
-
-# Run unit tests
-docker compose run --rm studiomcp studiomcp test unit
-
-# Run doc validators
-docker compose run --rm studiomcp studiomcp validate docs
-
-# Verify no dist-newstyle on host (run on host, not in container)
-ls -la dist-newstyle 2>/dev/null && echo "FAIL: dist-newstyle exists" || echo "PASS: no dist-newstyle"
-
-# Interactive session
-docker compose run --rm -it studiomcp sh
 ```
 
-### Redis Test Infrastructure Fix
+#### Validation Gates
 
-The unit tests previously failed with "Timed out waiting for temporary Redis container to
-become ready" because the test infrastructure did not correctly resolve Docker host networking
-when running inside the outer container.
+| Check | Command | Expected |
+|-------|---------|----------|
+| Container build | `docker compose build` | `env` image builds and installs `studiomcp` |
+| Unit tests | `docker compose run --rm studiomcp studiomcp test unit` | 867 examples, 0 failures on the current worktree |
+| Docs validation | `docker compose run --rm studiomcp studiomcp validate docs` | PASS |
+| CLI availability | `docker compose run --rm studiomcp sh -lc 'command -v studiomcp'` | `/usr/local/bin/studiomcp` |
+| Artifact leak check | `docker compose run --rm studiomcp sh -lc 'test ! -d /workspace/dist-newstyle'` | Success |
 
-**Fix applied to `test/Session/RedisStoreSpec.hs`:**
-- Added `resolveDockerHost` to detect container environment and use appropriate host address
-- Uses `host.docker.internal` for Docker Desktop or default gateway for Linux Docker
-- Uses `/.dockerenv` detection for container context
-- Fixed container naming with `testRedisContainerName` for idempotent cleanup
+### Current Validation State
 
-### Verified Working
+- `docker compose run --rm studiomcp studiomcp test unit` passes with 867 examples and 0 failures on the current worktree.
+- Build and test output lands under `/opt/build/studiomcp/...`, not under `dist-newstyle/` in the workspace bind mount.
+- The outer `studiomcp` container resolves `studiomcp` on `PATH` at `/usr/local/bin/studiomcp`.
+- `test/Session/RedisStoreSpec.hs` uses container-aware Docker host resolution so the Redis-backed unit path works from the outer container.
 
-- Build artifacts correctly go to `/opt/build/studiomcp/` (confirmed in test output paths)
-- No `dist-newstyle` directory leaks to the workspace bind mount
-- `docker compose run --rm studiomcp studiomcp validate docs` passes
-- `docker compose run --rm studiomcp studiomcp test unit` passes (846 examples, 0 failures)
-- The CLI correctly passes `--builddir=/opt/build/studiomcp` to all cabal invocations
+### Test Mapping
 
-### Integration Tests
-
-Integration tests require a full Kind cluster setup (`docker compose run --rm studiomcp studiomcp cluster ensure`) and are
-validated separately through the cluster infrastructure path.
+| Test | File |
+|------|------|
+| Redis-backed outer-container unit path | `test/Session/RedisStoreSpec.hs` |
+| CLI test entrypoint with explicit builddir | `src/StudioMCP/CLI/Test.hs` exercised by `docker compose run --rm studiomcp studiomcp test unit` |
 
 ### Remaining Work
 
@@ -143,61 +91,20 @@ None. This phase is complete on the current supported path.
 ## Documentation Requirements
 
 **Engineering docs to create/update:**
-- `documents/engineering/docker_policy.md` - Document build artifact isolation, ephemeral model, minimal mounts
+- `documents/engineering/docker_policy.md` - outer-container workflow, builddir isolation, and mount policy
+- `DEVELOPMENT_PLAN/system-components.md` - authoritative build-artifact inventory entry
+- `DEVELOPMENT_PLAN/legacy-tracking-for-deletion.md` - completed cleanup for stale builddir compatibility settings
 
 **Product docs to create/update:**
 - None.
 
 **Cross-references to add:**
-- `DEVELOPMENT_PLAN/README.md` - Phase 10 already in phase overview table
-- `DEVELOPMENT_PLAN/development_plan_standards.md` - Update container execution context
-
-## Implementation Details
-
-### docker-compose.yaml Target State
-
-```yaml
-services:
-  studiomcp:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
-      target: env
-    init: true
-    stdin_open: true
-    tty: true
-    working_dir: /workspace
-    volumes:
-      - .:/workspace
-      - ./.data:/.data
-      - /var/run/docker.sock:/var/run/docker.sock
-```
-
-Note: No `command`, no `environment` block (inherits from Dockerfile).
-
-### Dockerfile Target State (env target)
-
-```dockerfile
-ENV LANG="C.UTF-8" \
-    LC_ALL="C.UTF-8" \
-    CABAL_BUILDDIR="/opt/build/studiomcp" \
-    PATH="/root/.ghcup/bin:/root/.cabal/bin:/usr/local/bin:${PATH}"
-
-# No CMD - ephemeral outer-container model
-```
-
-### Why --builddir Flag is Required
-
-- `CABAL_BUILDDIR` environment variable does **not** affect nix-style builds (v2-build, build, etc.)
-- The `builddir` setting in `cabal.project` is ignored for nix-style builds with a warning
-- Only the explicit `--builddir=<path>` command-line flag reliably redirects build artifacts
-- The Dockerfile already used `--builddir` in its build commands; this phase ensures the CLI does too
+- Keep [README.md](README.md) and [00-overview.md](00-overview.md) aligned if the outer-container contract changes.
+- Keep [development_plan_standards.md](development_plan_standards.md#l-container-execution-context) aligned if command context rules change.
 
 ## Cross-References
 
 - [README.md](README.md#phase-overview)
 - [00-overview.md](00-overview.md)
-- [development_plan_standards.md](development_plan_standards.md#container-execution-context)
+- [development_plan_standards.md](development_plan_standards.md#l-container-execution-context)
 - [legacy-tracking-for-deletion.md](legacy-tracking-for-deletion.md)
-- [Cabal builddir issue #2484](https://github.com/haskell/cabal/issues/2484)
-- [Cabal builddir not honoured #6849](https://github.com/haskell/cabal/issues/6849)

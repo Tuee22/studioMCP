@@ -16,6 +16,8 @@ None.
 
 | Item | Former location | Verification |
 |------|-----------------|--------------|
+| `builddir: /opt/build/studiomcp` compatibility hint | `cabal.project` | Removed; explicit `--builddir` flags in the Dockerfile and CLI remain authoritative |
+| `CABAL_BUILDDIR=/opt/build/studiomcp` compatibility hint | `docker/Dockerfile` | Removed; nix-style builds rely only on explicit `--builddir` flags |
 | BFF redirect URIs | `docker/keycloak/realm/studiomcp-realm.json` | Removed from the imported realm definition |
 | `studiomcp-cli` Keycloak client | `docker/keycloak/realm/studiomcp-realm.json` | Removed from the imported realm definition |
 | `PKCEChallenge` type | `src/StudioMCP/Auth/PKCE.hs` | Removed |

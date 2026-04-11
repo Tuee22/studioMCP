@@ -71,14 +71,14 @@ A phase can move to `Done` only when all of the following are true:
 
 **Passing:**
 - `docker compose run --rm studiomcp cabal --builddir=/opt/build/studiomcp build all` passes.
-- `docker compose run --rm studiomcp studiomcp test unit` passes (846 examples, 0 failures).
+- `docker compose run --rm studiomcp studiomcp test unit` passes (867 examples, 0 failures).
 - `docker compose run --rm studiomcp studiomcp test integration` passes (16 examples, 0 failures).
 - `docker compose run --rm studiomcp studiomcp validate all` passes (28/28 validators).
 - Build artifacts go to `/opt/build/studiomcp/` and never leak to the workspace bind mount.
 - The outer `studiomcp` container resolves `studiomcp` on `PATH` at `/usr/local/bin/studiomcp`.
 
 **Cluster-Dependent:**
-- `docker compose run --rm studiomcp studiomcp test integration` requires Kind cluster via `studiomcp cluster ensure`.
+- `docker compose run --rm studiomcp studiomcp test integration` requires Kind cluster via `docker compose run --rm studiomcp studiomcp cluster ensure`.
 - Integration tests validate cluster services (Keycloak, MinIO, Pulsar, etc.) through the outer-container CLI.
 
 ## Phase Details

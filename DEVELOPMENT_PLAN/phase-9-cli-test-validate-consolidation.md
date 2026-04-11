@@ -11,30 +11,25 @@
 ## Phase Summary
 
 **Status**: Done
-**Implementation**: `src/StudioMCP/CLI/Test.hs`, `src/StudioMCP/CLI/Command.hs`, `src/StudioMCP/CLI/Cluster.hs`
-**Docs to update**: `documents/reference/cli_reference.md`, `DEVELOPMENT_PLAN/development_plan_standards.md`
+**Implementation**: `app/Main.hs`, `src/StudioMCP/CLI/Command.hs`, `src/StudioMCP/CLI/Test.hs`, `src/StudioMCP/CLI/Cluster.hs`, `studioMCP.cabal`
+**Docs to update**: `documents/reference/cli_reference.md`, `documents/reference/cli_surface.md`, `DEVELOPMENT_PLAN/development_plan_standards.md`
 
 ### Goal
 
-Consolidate all test and validation entrypoints into the `studiomcp` CLI, providing a unified
-interface for running unit tests, integration tests, and all validators.
+Expose one canonical CLI surface for test and validation execution so the supported workflow uses
+`studiomcp`, not direct `cabal test` or scattered validator entrypoints.
 
 ### Deliverables
 
-1. **Test Commands**
-   - `docker compose run --rm studiomcp studiomcp test` - Run all tests (unit + integration)
-   - `docker compose run --rm studiomcp studiomcp test all` - Run all tests (unit + integration)
-   - `docker compose run --rm studiomcp studiomcp test unit` - Run unit tests only
-   - `docker compose run --rm studiomcp studiomcp test integration` - Run integration tests only
-
-2. **Validate All Command**
-   - `docker compose run --rm studiomcp studiomcp validate all` - Run all 28 validators with aggregate reporting
-
-3. **CLI Reference Documentation**
-   - Multi-tiered, category-organized CLI reference at `documents/reference/cli_reference.md`
-
-4. **CLI-First Testing Policy**
-   - Policy documented in `development_plan_standards.md`
+| Item | File(s) | Status |
+|------|---------|--------|
+| Test command parsing and dispatch | `src/StudioMCP/CLI/Command.hs`, `app/Main.hs` | Done |
+| CLI help and usage aliases | `src/StudioMCP/CLI/Command.hs`, `app/Main.hs` | Done |
+| Unit, integration, and aggregate test handlers with explicit builddir isolation | `src/StudioMCP/CLI/Test.hs` | Done |
+| Aggregate validator runner (`validate all`) | `src/StudioMCP/CLI/Cluster.hs` | Done |
+| CLI module exposure and executable wiring | `studioMCP.cabal`, `app/Main.hs` | Done |
+| CLI reference and detailed command-surface docs | `documents/reference/cli_reference.md`, `documents/reference/cli_surface.md` | Done |
+| CLI-first testing policy in the development-plan standard | `DEVELOPMENT_PLAN/development_plan_standards.md` | Done |
 
 ### Validation
 
@@ -44,96 +39,58 @@ All validation commands run inside the outer container after bootstrap:
 
 ```bash
 docker compose build
+docker compose run --rm studiomcp studiomcp cluster ensure  # Required for integration tests and validate all
 ```
 
 #### Validation Gates
 
-```bash
-# Verify test commands
-docker compose run --rm studiomcp studiomcp test unit
-docker compose run --rm studiomcp studiomcp test integration
-docker compose run --rm studiomcp studiomcp test all
+| Check | Command | Expected |
+|-------|---------|----------|
+| Default test command | `docker compose run --rm studiomcp studiomcp test` | Runs unit and integration suites through the CLI |
+| Aggregate test command | `docker compose run --rm studiomcp studiomcp test all` | Runs unit and integration suites through the CLI |
+| Unit tests | `docker compose run --rm studiomcp studiomcp test unit` | 867 examples, 0 failures on the current worktree |
+| Integration tests | `docker compose run --rm studiomcp studiomcp test integration` | 16 examples, 0 failures on the supported cluster path |
+| Aggregate validation | `docker compose run --rm studiomcp studiomcp validate all` | 28/28 validators pass on the supported cluster path |
+| Docs validation | `docker compose run --rm studiomcp studiomcp validate docs` | PASS |
+| CLI usage text | `docker compose run --rm studiomcp studiomcp --help` | Prints usage text containing `test` and `validate all` commands |
 
-# Verify validate all command
-docker compose run --rm studiomcp studiomcp validate all
+### Current Validation State
 
-# Verify docs
-docker compose run --rm studiomcp studiomcp validate docs
-```
+- `docker compose run --rm studiomcp studiomcp test unit` passes with 867 examples and 0 failures on the current worktree.
+- `validate all` runs 28 validators sequentially and emits an aggregate summary.
+- The canonical `studiomcp` binary exposes `test`, `test all`, `test unit`, `test integration`, and `validate all` as first-class commands.
+- `docker compose run --rm studiomcp studiomcp --help` exits successfully and prints the supported CLI surface, including the reconciled cluster deploy commands.
+
+### Test Mapping
+
+| Test | File |
+|------|------|
+| CLI parser and command aliases | `test/CLI/CommandSpec.hs` |
+| CLI docs structure | `test/CLI/DocsSpec.hs` |
+| Unit-suite composition after CLI additions | `test/Spec.hs` |
 
 ### Remaining Work
 
-None.
+None. This phase is complete on the current supported path.
 
 ## Documentation Requirements
 
 **Engineering docs to create/update:**
-- `documents/reference/cli_reference.md` - New CLI reference organized by command category
+- `documents/reference/cli_reference.md` - concise CLI reference organized by command category
+- `documents/reference/cli_surface.md` - detailed command inventory and behavior notes
+- `DEVELOPMENT_PLAN/development_plan_standards.md` - CLI-first testing policy and container command conventions
 
 **Product docs to create/update:**
 - None.
 
 **Cross-references to add:**
-- `DEVELOPMENT_PLAN/development_plan_standards.md` - CLI-First Testing Policy section
-
-## Implementation Details
-
-### New Files
-
-| File | Description |
-|------|-------------|
-| `src/StudioMCP/CLI/Test.hs` | Test command handlers (`runTestUnit`, `runTestIntegration`, `runTestAll`) |
-| `documents/reference/cli_reference.md` | Category-organized CLI reference |
-
-### Modified Files
-
-| File | Changes |
-|------|---------|
-| `src/StudioMCP/CLI/Command.hs` | Added `TestCommand` type, `ValidateAllCommand`, parser updates |
-| `src/StudioMCP/CLI/Cluster.hs` | Added `validateAll` function |
-| `app/Main.hs` | Wired up `TestCommand` dispatch |
-| `studioMCP.cabal` | Added `StudioMCP.CLI.Test` to exposed-modules |
-| `DEVELOPMENT_PLAN/development_plan_standards.md` | Added CLI-First Testing Policy |
-
-### Command Implementation
-
-The test commands invoke Cabal internally with the isolated build directory:
-
-```haskell
-runTestUnit :: IO ()
-runTestUnit = do
-  putStrLn "Running unit tests..."
-  (exitCode, _, _) <- readProcessWithExitCode "cabal"
-    ["--builddir=/opt/build/studiomcp", "test", "unit-tests", "--test-show-details=direct"]
-    ""
-  -- Handle exit code
-```
-
-The `validateAll` command runs all validators sequentially with error handling:
-
-```haskell
-validateAll :: IO ()
-validateAll = do
-  putStrLn "Running all validators..."
-  let validators = [ ("docs", validateDocsCommand), ... ]
-  results <- forM validators $ \(name, validator) -> do
-    result <- try validator
-    -- Report pass/fail
-  -- Aggregate summary
-```
-
-## Test Mapping
-
-| Command | Test Suite |
-|---------|------------|
-| `docker compose run --rm studiomcp studiomcp test unit` | `unit-tests` (846 tests) |
-| `docker compose run --rm studiomcp studiomcp test integration` | `integration-tests` (16 tests) |
-| `docker compose run --rm studiomcp studiomcp test all` | Both suites |
-| `docker compose run --rm studiomcp studiomcp validate all` | All 28 validators |
+- Keep [README.md](README.md) and [00-overview.md](00-overview.md) aligned when CLI validation entrypoints change.
+- Keep [legacy-tracking-for-deletion.md](legacy-tracking-for-deletion.md) aligned if compatibility aliases are retired.
 
 ## Cross-References
 
 - [README.md](README.md#phase-overview)
 - [00-overview.md](00-overview.md)
 - [development_plan_standards.md](development_plan_standards.md#cli-first-testing-policy)
-- [documents/reference/cli_reference.md](../documents/reference/cli_reference.md#studiomcp-cli-reference)
+- [../documents/reference/cli_reference.md](../documents/reference/cli_reference.md#studiomcp-cli-reference)
+- [../documents/reference/cli_surface.md](../documents/reference/cli_surface.md)

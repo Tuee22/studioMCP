@@ -6,6 +6,7 @@ import qualified Auth.ClaimsSpec
 import qualified Auth.ConfigSpec
 import qualified Auth.JwksSpec
 import qualified Auth.MiddlewareSpec
+import qualified Auth.PassthroughGuardSpec
 import qualified Auth.ScopesSpec
 import qualified Auth.TypesSpec
 import qualified CLI.CommandSpec
@@ -78,6 +79,7 @@ import qualified Tools.TypesSpec
 import qualified Util.ExceptionsSpec
 import qualified Util.JsonSpec
 import qualified Util.LoggingSpec
+import qualified Util.StartupSpec
 import qualified Util.TimeSpec
 import qualified Worker.ServerSpec
 import Test.Hspec (hspec)
@@ -93,6 +95,7 @@ main =
     Auth.ScopesSpec.spec
     Auth.JwksSpec.spec
     Auth.MiddlewareSpec.spec
+    Auth.PassthroughGuardSpec.spec
     CLI.CommandSpec.spec
     CLI.DocsSpec.spec
     DAG.ParserSpec.spec
@@ -163,5 +166,6 @@ main =
     Util.ExceptionsSpec.spec
     Util.JsonSpec.spec
     Util.LoggingSpec.spec
+    Util.StartupSpec.spec
     Util.TimeSpec.spec
     Worker.ServerSpec.spec

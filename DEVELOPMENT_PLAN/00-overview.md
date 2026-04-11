@@ -70,8 +70,9 @@ The supported local and cluster topology is:
   object-storage URLs.
 - Durable repo-local state must live under `./.data/`; `.studiomcp-data/` is a removed legacy path.
 - Build artifacts are isolated to `/opt/build/studiomcp` via explicit `--builddir` flags on all
-  cabal invocations. The `CABAL_BUILDDIR` environment variable and `cabal.project` builddir
-  directive do not work for nix-style builds. The repo tree must remain free of compiled output.
+  cabal invocations. The repo does not rely on `CABAL_BUILDDIR` or a `cabal.project` `builddir`
+  directive because nix-style builds ignore them. The repo tree must remain free of compiled
+  output.
 
 ## Completion Rules
 
