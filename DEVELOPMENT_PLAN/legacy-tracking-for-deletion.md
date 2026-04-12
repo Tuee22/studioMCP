@@ -10,7 +10,7 @@
 
 ## Pending Removal
 
-None.
+None. No pending removal items remain on the current supported path.
 
 ## Completed
 
@@ -33,9 +33,16 @@ None.
 | Compose-level locale environment | `docker-compose.yaml` | Removed; locale is inherited from Dockerfile `ENV` |
 | Host Docker config bind mount | `docker-compose.yaml` | Removed; registry auth is supplied through CLI-managed login inputs when needed |
 | `docker compose up` and `docker compose exec` plan examples | `DEVELOPMENT_PLAN/*.md` | Replaced with `docker compose run --rm studiomcp ...` examples |
+| `docker compose up` and `docker compose exec` workflow examples outside the authoritative plan | `CLAUDE.md` and compatibility guidance | Replaced with the one-command `docker compose run --rm studiomcp ...` model |
+| Multi-stage repository Dockerfile layout | `docker/Dockerfile` | Replaced by the single-stage repository Dockerfile |
+| Default container startup in Dockerfile (`ENTRYPOINT ["studiomcp"]`, `CMD ["server"]`) | `docker/Dockerfile` | Replaced by `ENTRYPOINT ["tini", "--"]`; Kubernetes workloads now own explicit runtime startup and the Dockerfile has no `CMD` |
 | Separate Keycloak ingress | `chart/templates/ingress.yaml` | Consolidated into the unified ingress |
 | MinIO console NodePort | `chart/values-kind.yaml` | Replaced by the `/minio` ingress path; the MinIO S3 data-plane NodePort remains intentionally retained for presigned URLs |
 | Local image loading to Kind | `src/StudioMCP/CLI/Cluster.hs` | Replaced by registry push and Helm registry image references |
+| Host-level Harbor registry fallback | `src/StudioMCP/CLI/Cluster.hs`, `kind/kind_config.yaml`, `documents/engineering/docker_policy.md` | Removed; the supported local path now pushes through `host.docker.internal:32443` and pulls through the Kind mirror at `localhost:32443`, both backed by the in-cluster Harbor deployment |
+| Obsolete manual Keycloak bootstrap appendix | `documents/operations/keycloak_realm_bootstrap_runbook.md` | Removed; the runbook now documents the CLI-driven bootstrap path only |
+| Duplicate authoritative local-development doc | `documents/engineering/local_dev.md` | Resolved; the document is now a reference-only companion and `documents/development/local_dev.md` remains canonical |
+| Duplicate authoritative testing-policy doc | `documents/engineering/testing.md` | Resolved; the document is now a reference-only companion and `documents/development/testing_strategy.md` remains canonical |
 
 ## Intentionally Retained Active Surfaces
 

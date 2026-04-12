@@ -19,6 +19,60 @@ global:
   objectStorage:
     publicEndpoint: "http://localhost:9000"
 
+harbor:
+  enabled: true
+  expose:
+    type: nodePort
+    tls:
+      enabled: false
+      certSource: none
+    nodePort:
+      ports:
+        http:
+          port: 80
+          nodePort: 32443
+        https:
+          port: 443
+          nodePort: 32444
+  externalURL: "http://localhost:32443"
+  existingSecretAdminPassword: studiomcp-harbor-admin
+  existingSecretAdminPasswordKey: HARBOR_ADMIN_PASSWORD
+  imagePullPolicy: IfNotPresent
+  metrics:
+    enabled: false
+  trivy:
+    enabled: false
+  persistence:
+    enabled: false
+    imageChartStorage:
+      disableredirect: true
+      type: s3
+      s3:
+        region: us-east-1
+        bucket: studiomcp-harbor
+        regionendpoint: http://studiomcp-minio:9000
+        accesskey: minioadmin
+        secretkey: minioadmin123
+        secure: false
+        skipverify: true
+        v4auth: true
+  database:
+    type: external
+    external:
+      host: studiomcp-postgresql-ha-pgpool
+      port: "5432"
+      username: harbor
+      coreDatabase: harbor
+      password: harbor123
+      sslmode: disable
+  redis:
+    type: external
+    external:
+      addr: "studiomcp-redis-master:6379"
+      password: redis123
+  jobservice:
+    maxJobWorkers: 2
+
 auth:
   enabled: true
   # Additional issuers for Kind environment to support outer-container test pattern.
@@ -127,8 +181,18 @@ postgresql-ha:
     storageClass: "studiomcp-manual"
     size: 5Gi
   pgpool:
-    replicaCount: 2
+    replicaCount: 1
     podAntiAffinityPreset: soft
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: 500m
+        memory: 768Mi
+    customUsers:
+      usernames: harbor
+      passwords: harbor123
 
 # Redis with Sentinel mode for HA
 # Soft anti-affinity for single-node kind cluster (DEVELOPMENT-ONLY)

@@ -12,7 +12,7 @@
 
 **Status**: Done
 **Implementation**: `src/StudioMCP/Web/Handlers.hs`, `src/StudioMCP/Web/BFF.hs`, `src/StudioMCP/Web/Types.hs`
-**Docs to update**: `documents/reference/web_portal_surface.md`
+**Docs to update**: `documents/reference/web_portal_surface.md`, `documents/architecture/bff_architecture.md`
 
 ### Goal
 
@@ -69,18 +69,21 @@ None. This phase is complete on the current supported path.
 ## Documentation Requirements
 
 **Engineering docs to create/update:**
-- None.
+- `documents/architecture/bff_architecture.md` - BFF-mediated MCP examples and browser-session
+  companion architecture
 
 **Product docs to create/update:**
 - `documents/reference/web_portal_surface.md` - browser auth and session behavior
 
 **Cross-references to add:**
+- Keep [phase-2-mcp-surface-catalog-artifact-governance.md](phase-2-mcp-surface-catalog-artifact-governance.md) aligned when BFF docs name MCP tools.
 - Keep [phase-3-keycloak-auth-shared-sessions.md](phase-3-keycloak-auth-shared-sessions.md) aligned when browser auth transport changes.
 - Keep [legacy-tracking-for-deletion.md](legacy-tracking-for-deletion.md) aligned when deferred OAuth/PKCE surfaces change status.
 
 ## Cross-References
 
 - [00-overview.md](00-overview.md)
+- [phase-2-mcp-surface-catalog-artifact-governance.md](phase-2-mcp-surface-catalog-artifact-governance.md)
 - [phase-3-keycloak-auth-shared-sessions.md](phase-3-keycloak-auth-shared-sessions.md)
 - [legacy-tracking-for-deletion.md](legacy-tracking-for-deletion.md)
 - [../documents/reference/web_portal_surface.md](../documents/reference/web_portal_surface.md)

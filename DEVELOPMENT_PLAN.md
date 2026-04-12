@@ -22,16 +22,21 @@ This root file remains as a compatibility index for existing links, tooling, and
 
 All commands run inside an ephemeral outer container:
 
-- `docker compose run --rm studiomcp cabal --builddir=/opt/build/studiomcp build all` passes.
-- `docker compose run --rm studiomcp studiomcp test unit` passes with 867 unit tests.
-- `docker compose run --rm studiomcp studiomcp test integration` passes with 16 integration tests.
-- `docker compose run --rm studiomcp studiomcp validate all` passes with 28 of 28 validators.
+- `docker compose build` passes for the single-stage outer-container image.
+- `docker compose run --rm studiomcp sh -lc 'command -v tini && command -v studiomcp && command -v mc && test ! -d /workspace/dist-newstyle'` passes.
+- `docker compose run --rm studiomcp studiomcp cluster ensure` passes on the supported Kind path.
+- `docker compose run --rm studiomcp studiomcp test unit` passes with 867 unit tests and 0 failures.
+- `docker compose run --rm studiomcp studiomcp test integration` passes with 16 integration tests and 0 failures.
+- `docker compose run --rm studiomcp studiomcp test` passes through the canonical aggregate CLI entrypoint.
+- `docker compose run --rm studiomcp studiomcp validate docs` passes for structural documentation checks.
+- `docker compose run --rm studiomcp studiomcp validate all` passes with 28/28 validators on the current worktree.
 - Build artifacts go to `/opt/build/studiomcp/` and never leak to the workspace bind mount.
 - The outer `studiomcp` container resolves `studiomcp` on `PATH` at `/usr/local/bin/studiomcp`.
-
-**Cluster-Dependent:**
-- `docker compose run --rm studiomcp studiomcp test integration` requires Kind cluster via `docker compose run --rm studiomcp studiomcp cluster ensure`.
-- Integration tests validate cluster services (Keycloak, MinIO, Pulsar, etc.) through the outer-container CLI.
+- `docker/Dockerfile` is single-stage, uses `tini`, and carries no Dockerfile `CMD`; `docker-compose.yaml` carries no service `command`.
+- Kubernetes workloads own explicit runtime startup, and the supported local cluster deploy path forces fresh pulls of the pushed registry image.
+- The supported cluster path is now clean end to end: `cluster ensure`, integration tests, the full test suite, and `validate all` all pass through the outer-container CLI.
+- `cluster ensure` now recovers stale pending Helm revisions on the supported local path, and the kind-specific pgpool defaults fit the single-node resource envelope used for local validation.
+- Integration tests and aggregate validation continue to exercise Keycloak, MinIO, Pulsar, ingress routing, MCP HTTP, BFF session flows, horizontal scale, observability, and conformance through the live cluster path.
 
 ## Public Topology Baseline
 

@@ -23,7 +23,7 @@ spec:
         - name: worker
           image: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: ["studiomcp", "worker"]
+          command: ["/usr/bin/tini", "--", "studiomcp", "worker"]
           env:
             - name: STUDIO_MCP_MODE
               value: "worker"

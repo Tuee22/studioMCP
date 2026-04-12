@@ -29,7 +29,7 @@ govern this plan.
 | [phase-7-keycloak-realm-bootstrap.md](phase-7-keycloak-realm-bootstrap.md) | Keycloak realm bootstrap automation |
 | [phase-8-final-closure-regression-gate.md](phase-8-final-closure-regression-gate.md) | Final regression closure and clean validation gate |
 | [phase-9-cli-test-validate-consolidation.md](phase-9-cli-test-validate-consolidation.md) | CLI test and validate command consolidation |
-| [phase-10-build-artifact-isolation.md](phase-10-build-artifact-isolation.md) | Build artifact isolation, ephemeral outer-container behavior, and container configuration |
+| [phase-10-build-artifact-isolation.md](phase-10-build-artifact-isolation.md) | Build artifact isolation and one-command container configuration closure |
 | [legacy-tracking-for-deletion.md](legacy-tracking-for-deletion.md) | Cleanup and compatibility removal ledger |
 
 ## Status Vocabulary
@@ -70,16 +70,22 @@ A phase can move to `Done` only when all of the following are true:
 ## Current Validation State
 
 **Passing:**
-- `docker compose run --rm studiomcp cabal --builddir=/opt/build/studiomcp build all` passes.
-- `docker compose run --rm studiomcp studiomcp test unit` passes (867 examples, 0 failures).
-- `docker compose run --rm studiomcp studiomcp test integration` passes (16 examples, 0 failures).
-- `docker compose run --rm studiomcp studiomcp validate all` passes (28/28 validators).
+- `docker compose build` passes for the single-stage outer-container image.
+- `docker compose run --rm studiomcp studiomcp cluster ensure` passes on the supported Kind path.
+- `docker compose run --rm studiomcp sh -lc 'command -v tini && command -v studiomcp && command -v mc && test ! -d /workspace/dist-newstyle'` passes.
+- `docker compose run --rm studiomcp studiomcp test unit` passes with 867 examples and 0 failures on the current worktree.
+- `docker compose run --rm studiomcp studiomcp test integration` passes with 16 examples and 0 failures on the supported cluster path.
+- `docker compose run --rm studiomcp studiomcp test` passes and runs both suites through the canonical CLI entrypoint.
+- `docker compose run --rm studiomcp studiomcp validate docs` passes for structural documentation checks on the current worktree.
+- `docker compose run --rm studiomcp studiomcp validate all` passes with 28/28 validators on the current worktree.
 - Build artifacts go to `/opt/build/studiomcp/` and never leak to the workspace bind mount.
-- The outer `studiomcp` container resolves `studiomcp` on `PATH` at `/usr/local/bin/studiomcp`.
+- `docker/Dockerfile` is single-stage, uses `tini`, and carries no Dockerfile `CMD`; `docker-compose.yaml` carries no service `command`.
+- Helm owns explicit in-cluster startup commands for the server, worker, and BFF workloads.
 
-**Cluster-Dependent:**
-- `docker compose run --rm studiomcp studiomcp test integration` requires Kind cluster via `docker compose run --rm studiomcp studiomcp cluster ensure`.
-- Integration tests validate cluster services (Keycloak, MinIO, Pulsar, etc.) through the outer-container CLI.
+**Cluster-Dependent Coverage:**
+- The supported cluster path is now clean end to end: `cluster ensure`, integration tests, the full test suite, and `validate all` all pass through the outer-container CLI.
+- `cluster ensure` now tolerates stale pending Helm revisions on the supported local path, and the kind-specific PostgreSQL HA pgpool settings fit the single-node resource envelope used for local validation.
+- Integration tests and aggregate validation continue to exercise Keycloak, MinIO, Pulsar, ingress routing, MCP HTTP, BFF session flows, horizontal scale, observability, and conformance through the live cluster path.
 
 ## Phase Details
 
@@ -89,12 +95,12 @@ A phase can move to `Done` only when all of the following are true:
 | 2 | Done | None | `documents/architecture/mcp_protocol_architecture.md`, `documents/reference/mcp_surface.md`, `documents/reference/mcp_tool_catalog.md`, `documents/architecture/artifact_storage_architecture.md` |
 | 3 | Done | None | `documents/architecture/multi_tenant_saas_mcp_auth_architecture.md`, `documents/engineering/security_model.md`, `documents/engineering/session_scaling.md` |
 | 4 | Done | None | `documents/architecture/overview.md`, `documents/reference/web_portal_surface.md` |
-| 5 | Done | None | `documents/reference/web_portal_surface.md` |
-| 6 | Done | None | `documents/engineering/k8s_native_dev_policy.md`, `documents/engineering/k8s_storage.md`, `documents/operations/runbook_local_debugging.md` |
+| 5 | Done | None | `documents/reference/web_portal_surface.md`, `documents/architecture/bff_architecture.md` |
+| 6 | Done | None | `documents/engineering/docker_policy.md`, `documents/engineering/k8s_native_dev_policy.md`, `documents/engineering/k8s_storage.md`, `documents/operations/runbook_local_debugging.md` |
 | 7 | Done | None | `documents/operations/keycloak_realm_bootstrap_runbook.md` |
-| 8 | Done | None | `README.md`, `documents/documentation_standards.md`, plan index files as needed |
-| 9 | Done | None | `documents/reference/cli_reference.md`, `DEVELOPMENT_PLAN/development_plan_standards.md` |
-| 10 | Done | None | `documents/engineering/docker_policy.md` |
+| 8 | Done | None | `README.md`, `documents/README.md`, `documents/documentation_standards.md`, `documents/development/testing_strategy.md`, `documents/engineering/testing.md`, `documents/development/local_dev.md`, `documents/engineering/local_dev.md`, plan index files as needed |
+| 9 | Done | None | `documents/reference/cli_reference.md`, `documents/reference/cli_surface.md`, `DEVELOPMENT_PLAN/development_plan_standards.md` |
+| 10 | Done | None | `README.md`, `documents/engineering/docker_policy.md`, `documents/engineering/k8s_native_dev_policy.md`, `documents/reference/cli_reference.md`, `documents/reference/cli_surface.md`, `documents/development/local_dev.md`, `documents/operations/runbook_local_debugging.md`, `DEVELOPMENT_PLAN.md` |
 
 ## Compatibility Entry Point
 

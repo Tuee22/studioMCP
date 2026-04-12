@@ -11,7 +11,7 @@ import GHC.IO.Handle.Lock (LockMode (..), hLock, hUnlock)
 import System.IO (IOMode (..), hClose, openFile)
 import Control.Concurrent (forkIO, killThread, threadDelay)
 import Control.Monad (foldM, forM, forM_, unless, when)
-import Data.Aeson (FromJSON, Value (..), decode, encode, fromJSON, object, (.=))
+import Data.Aeson (FromJSON, Value (..), decode, encode, fromJSON, object, withObject, (.:), (.:?), (.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KeyMap
@@ -23,10 +23,11 @@ import Data.ByteString.Char8 qualified as BS
 import Data.ByteString.Lazy.Char8 qualified as LBS
 import qualified Data.CaseInsensitive as CI
 import Data.Char (isSpace, toLower)
-import Data.List (intercalate, isInfixOf)
+import Data.List (intercalate, isInfixOf, isPrefixOf)
 import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import qualified Data.Set as Set
-import Data.Time (addUTCTime, getCurrentTime)
+import Data.Time (UTCTime, addUTCTime, diffUTCTime, getCurrentTime)
+import Data.Time.Format.ISO8601 (iso8601ParseM)
 import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -348,6 +349,7 @@ import System.Directory
     getCurrentDirectory,
     getHomeDirectory,
     getTemporaryDirectory,
+    listDirectory,
     removeFile,
   )
 import System.Environment (lookupEnv, setEnv, unsetEnv)
@@ -920,65 +922,103 @@ clusterDeploy :: ClusterDeployTarget -> IO ()
 clusterDeploy target = do
   requireExecutables
     ( case target of
-        DeploySidecars -> ["docker", "kind", "helm", "kubectl"]
-        DeployServer -> ["docker", "kind", "helm", "kubectl"]
+        DeploySidecars -> ["docker", "kind", "helm", "kubectl", "skopeo"]
+        DeployServer -> ["docker", "kind", "helm", "kubectl", "skopeo"]
     )
   clusterUp
   clusterName <- getClusterName
   registryConfig <- loadImageRegistryConfig
-  ensureKindRegistryAccess registryConfig clusterName
+  ensureContainerClusterAccess clusterName
   ensureKindIngressController
   clusterStorageReconcile
   ensureClusterSecrets
-  _ <- clusterPushImagesWithConfig registryConfig
-  upgradeCredentialArgs <- existingHelmUpgradeCredentialArgs
-  let baseArgs =
-        [ "upgrade"
-        , "--install"
-        , "studiomcp"
-        , "chart"
-        , "-f"
-        , "chart/values.yaml"
-        , "-f"
-        , "chart/values-kind.yaml"
-        ]
-        <> helmImageArgs registryConfig
-      args =
-        case target of
-          DeploySidecars ->
-            baseArgs
-              <> upgradeCredentialArgs
-              <>
-                [ "--wait"
-                , "--set"
-                , "studiomcp.replicas=0"
-                , "--set"
-                , "bff.enabled=false"
-                , "--set"
-                , "pulsar.kube-prometheus-stack.enabled=false"
-                , "--set"
-                , "pulsar.zookeeper.podMonitor.enabled=false"
-                , "--set"
-                , "pulsar.bookkeeper.podMonitor.enabled=false"
-                , "--set"
-                , "pulsar.autorecovery.podMonitor.enabled=false"
-                , "--set"
-                , "pulsar.broker.podMonitor.enabled=false"
-                , "--set"
-                , "pulsar.proxy.podMonitor.enabled=false"
-                ]
-          DeployServer -> baseArgs <> upgradeCredentialArgs
-  withHelmLock $ do
-    ensureHelmChartDependencies
-    callProcess "helm" args
+  case target of
+    DeploySidecars ->
+      ensureKindSidecars registryConfig
+    DeployServer -> do
+      sidecarsReady <- kindSidecarsReady registryConfig
+      unless sidecarsReady $
+        ensureKindSidecars registryConfig
+      _ <- clusterPushImagesWithConfig registryConfig
+      runKindHelmUpgrade registryConfig True DeployServer
+      callProcess "kubectl" ["rollout", "restart", "deployment/studiomcp"]
+      restartWorkloadIfExists "deployment/studiomcp-bff"
+      waitForWorkloadRollout "deployment/studiomcp" "480s"
+      waitForWorkloadRollout "deployment/studiomcp-bff" "480s"
+
+kindSidecarsReady :: ImageRegistryConfig -> IO Bool
+kindSidecarsReady registryConfig = do
+  releaseExists <- helmReleaseExists "studiomcp"
+  if not releaseExists
+    then pure False
+    else
+      if imageRegistryManagedHarbor registryConfig
+        then harborDeploymentsPresent
+        else pure True
+
+ensureKindSidecars :: ImageRegistryConfig -> IO ()
+ensureKindSidecars registryConfig = do
+  runKindHelmUpgrade registryConfig False DeploySidecars
   waitForWorkloadRollout "statefulset/studiomcp-keycloak" "480s"
   bootstrapClusterKeycloakRealm
   ensureRedisStatefulSetReady
-  when (target == DeployServer) $ do
-    callProcess "kubectl" ["rollout", "restart", "deployment/studiomcp"]
-    restartWorkloadIfExists "deployment/studiomcp-bff"
-    waitForWorkloadRollout "deployment/studiomcp" "480s"
-    waitForWorkloadRollout "deployment/studiomcp-bff" "480s"
+  when (imageRegistryManagedHarbor registryConfig) $ do
+    ensureHarborDatabase
+    runKindHelmUpgrade registryConfig True DeploySidecars
+    waitForHarborReady
+
+runKindHelmUpgrade :: ImageRegistryConfig -> Bool -> ClusterDeployTarget -> IO ()
+runKindHelmUpgrade registryConfig enableHarbor target =
+  withHelmLock $ do
+    recoverStalePendingHelmRelease "studiomcp"
+    upgradeCredentialArgs <- existingHelmUpgradeCredentialArgs
+    let harborEnabled = imageRegistryManagedHarbor registryConfig && enableHarbor
+        baseArgs =
+          [ "upgrade"
+          , "--install"
+          , "--reset-values"
+          , "studiomcp"
+          , "chart"
+          , "-f"
+          , "chart/values.yaml"
+          , "-f"
+          , "chart/values-kind.yaml"
+          ]
+          <> harborEnableArgs harborEnabled
+          <> helmImageArgs registryConfig
+          <> upgradeCredentialArgs
+        args =
+          case target of
+            DeploySidecars ->
+              baseArgs
+                <>
+                  [ "--wait"
+                  , "--set"
+                  , "studiomcp.replicas=0"
+                  , "--set"
+                  , "worker.enabled=false"
+                  , "--set"
+                  , "bff.enabled=false"
+                  , "--set"
+                  , "pulsar.kube-prometheus-stack.enabled=false"
+                  , "--set"
+                  , "pulsar.zookeeper.podMonitor.enabled=false"
+                  , "--set"
+                  , "pulsar.bookkeeper.podMonitor.enabled=false"
+                  , "--set"
+                  , "pulsar.autorecovery.podMonitor.enabled=false"
+                  , "--set"
+                  , "pulsar.broker.podMonitor.enabled=false"
+                  , "--set"
+                  , "pulsar.proxy.podMonitor.enabled=false"
+                  ]
+            DeployServer -> baseArgs
+    ensureHelmChartDependencies
+    callProcess "helm" args
+
+harborEnableArgs :: Bool -> [String]
+harborEnableArgs enabled =
+  ["--set", "harbor.enabled=" <> if enabled then "true" else "false"]
 
 clusterEnsureSecretsCommand :: IO ()
 clusterEnsureSecretsCommand = do
@@ -1015,7 +1055,7 @@ kubectlResourceExists resourceName = do
 -- | Wait for a Kubernetes Job to complete successfully
 waitForJobCompletion :: String -> String -> String -> IO ()
 waitForJobCompletion jobName namespace timeout = do
-  (exitCode, _, _) <-
+  (exitCode, _, waitStderr) <-
     readProcessWithExitCode
       "kubectl"
       ["wait", "--for=condition=Complete", "job/" <> jobName, "-n", namespace, "--timeout=" <> timeout]
@@ -1023,18 +1063,30 @@ waitForJobCompletion jobName namespace timeout = do
   case exitCode of
     ExitSuccess -> pure ()
     ExitFailure _ -> do
-      -- Job failed or timed out - check why and provide diagnostic info
-      (_, logs, _) <- readProcessWithExitCode "kubectl" ["logs", "job/" <> jobName, "-n", namespace] ""
-      die $
-        unlines
-          [ "Job '" <> jobName <> "' in namespace '" <> namespace <> "' failed."
-          , "Logs:"
-          , logs
-          , ""
-          , "To retry, delete the namespace and run 'cluster ensure' again:"
-          , "  kubectl delete namespace " <> namespace
-          , "  studiomcp cluster ensure"
-          ]
+      let normalizedWaitError = map toLower waitStderr
+      if "not found" `isInfixOf` normalizedWaitError || "notfound" `isInfixOf` normalizedWaitError
+        then putStrLn $
+          "Job '" <> jobName <> "' in namespace '" <> namespace
+            <> "' was already cleaned up before wait completed; continuing."
+        else do
+          -- Job failed or timed out - check why and provide diagnostic info
+          (_, logs, logsStderr) <- readProcessWithExitCode "kubectl" ["logs", "job/" <> jobName, "-n", namespace] ""
+          let failureDetails =
+                if null (trimLine logs)
+                  then trimLine logsStderr
+                  else logs
+          die $
+            unlines
+              [ "Job '" <> jobName <> "' in namespace '" <> namespace <> "' failed."
+              , "Wait error:"
+              , waitStderr
+              , "Logs:"
+              , failureDetails
+              , ""
+              , "To retry, delete the namespace and run 'cluster ensure' again:"
+              , "  kubectl delete namespace " <> namespace
+              , "  studiomcp cluster ensure"
+              ]
 
 -- | Wait for a Kubernetes namespace to be fully deleted
 waitForNamespaceDeletion :: String -> String -> IO ()
@@ -1131,6 +1183,8 @@ ensureClusterSecrets = do
       redisPassword = lookupNonEmptyString ["redis", "auth", "password"] mergedValues "redis123"
       minioRootUser = lookupNonEmptyString ["minio", "rootUser"] mergedValues "minioadmin"
       minioRootPassword = lookupNonEmptyString ["minio", "rootPassword"] mergedValues "minioadmin123"
+      harborAdminPassword = lookupNonEmptyString ["harbor", "harborAdminPassword"] mergedValues "Harbor12345"
+      harborDatabasePassword = lookupNonEmptyString ["harbor", "database", "external", "password"] mergedValues "harbor123"
       keycloakAdminPassword = lookupNonEmptyString ["keycloak", "auth", "adminPassword"] mergedValues "admin123"
       keycloakDbHost = lookupNonEmptyString ["keycloak", "externalDatabase", "host"] mergedValues "studiomcp-postgresql-ha-pgpool"
       keycloakDbPort = lookupNonEmptyString ["keycloak", "externalDatabase", "port"] mergedValues "5432"
@@ -1170,6 +1224,16 @@ ensureClusterSecrets = do
       , ("database", keycloakDbName)
       , ("password", keycloakDbPassword)
       ]
+  applyManifest $
+    renderOpaqueSecret
+      namespaceName
+      "studiomcp-harbor-admin"
+      [("HARBOR_ADMIN_PASSWORD", harborAdminPassword)]
+  applyManifest $
+    renderOpaqueSecret
+      namespaceName
+      "studiomcp-harbor-database"
+      [("password", harborDatabasePassword)]
   putStrLn "CLI-managed Kubernetes secrets applied."
 
 ensureNamespaceIfNeeded :: String -> IO ()
@@ -1222,20 +1286,81 @@ existingHelmUpgradeCredentialArgs = do
 -- This prevents concurrent helm commands from conflicting when multiple
 -- integration tests run in parallel and attempt helm upgrade --install.
 withHelmLock :: IO a -> IO a
-withHelmLock action = bracket
-  (openFile "/tmp/studiomcp-helm.lock" AppendMode)
-  hClose
-  (\h -> do
-    hLock h ExclusiveLock
-    result <- action
-    hUnlock h
-    pure result)
+withHelmLock action = do
+  cliDataRoot <- resolveCliDataRoot
+  let lockDirectory = cliDataRoot </> "studiomcp"
+      lockPath = lockDirectory </> "helm.lock"
+  createDirectoryIfMissing True lockDirectory
+  bracket
+    (openFile lockPath AppendMode)
+    hClose
+    (\h -> do
+        hLock h ExclusiveLock
+        result <- action
+        hUnlock h
+        pure result)
 
 ensureHelmChartDependencies :: IO ()
 ensureHelmChartDependencies = do
+  vendoredDependencies <- missingVendoredHelmDependencies
+  case vendoredDependencies of
+    Just [] ->
+      putStrLn "Vendored Helm chart dependencies already present; skipping repository refresh."
+    Just missingDependencies -> do
+      putStrLn $
+        "Vendored Helm chart dependencies are incomplete (missing: "
+          <> intercalate ", " missingDependencies
+          <> "); reconciling repositories."
+      reconcileHelmChartDependenciesFromRepositories
+    Nothing -> do
+      putStrLn "Could not verify vendored Helm chart dependencies from chart/Chart.lock; reconciling repositories."
+      reconcileHelmChartDependenciesFromRepositories
+
+data HelmLockFile = HelmLockFile
+  { helmLockDependencies :: [HelmLockDependency]
+  }
+
+instance FromJSON HelmLockFile where
+  parseJSON = withObject "HelmLockFile" $ \objectValue ->
+    HelmLockFile <$> objectValue .: "dependencies"
+
+data HelmLockDependency = HelmLockDependency
+  { helmLockDependencyName :: String
+  , helmLockDependencyVersion :: String
+  }
+
+instance FromJSON HelmLockDependency where
+  parseJSON = withObject "HelmLockDependency" $ \objectValue ->
+    HelmLockDependency
+      <$> objectValue .: "name"
+      <*> objectValue .: "version"
+
+missingVendoredHelmDependencies :: IO (Maybe [FilePath])
+missingVendoredHelmDependencies = do
+  chartDirectoryExists <- doesDirectoryExist "chart/charts"
+  case chartDirectoryExists of
+    False -> pure Nothing
+    True -> do
+      lockFileResult <- decodeFileEither "chart/Chart.lock"
+      case lockFileResult of
+        Left _ -> pure Nothing
+        Right (HelmLockFile dependencies) -> do
+          vendoredFiles <- listDirectory "chart/charts"
+          let expectedFiles =
+                [ helmLockDependencyName dependency
+                    <> "-"
+                    <> helmLockDependencyVersion dependency
+                    <> ".tgz"
+                | dependency <- dependencies
+                ]
+          pure (Just [fileName | fileName <- expectedFiles, fileName `notElem` vendoredFiles])
+
+reconcileHelmChartDependenciesFromRepositories :: IO ()
+reconcileHelmChartDependenciesFromRepositories = do
   putStrLn "Reconciling Helm repositories..."
   callProcess "helm" ["repo", "add", "minio", "https://charts.min.io/", "--force-update"]
   callProcess "helm" ["repo", "add", "pulsar", "https://pulsar.apache.org/charts", "--force-update"]
+  callProcess "helm" ["repo", "add", "goharbor", "https://helm.goharbor.io", "--force-update"]
   callProcess "helm" ["repo", "add", "bitnami", "https://charts.bitnami.com/bitnami", "--force-update"]
   callProcess "helm" ["repo", "update"]
   putStrLn "Reconciling Helm chart dependencies..."
@@ -1245,6 +1370,100 @@ helmReleaseExists :: String -> IO Bool
 helmReleaseExists releaseName = do
   (exitCode, _, _) <- readProcessWithExitCode "helm" ["status", releaseName] ""
   pure (exitCode == ExitSuccess)
+
+data HelmHistoryEntry = HelmHistoryEntry
+  { helmHistoryRevision :: Int
+  , helmHistoryUpdated :: Maybe UTCTime
+  , helmHistoryStatus :: String
+  }
+
+instance FromJSON HelmHistoryEntry where
+  parseJSON = withObject "HelmHistoryEntry" $ \objectValue -> do
+    revision <- objectValue .: "revision"
+    updatedText <- objectValue .:? "updated"
+    status <- objectValue .: "status"
+    pure
+      HelmHistoryEntry
+        { helmHistoryRevision = revision
+        , helmHistoryUpdated = updatedText >>= iso8601ParseM
+        , helmHistoryStatus = status
+        }
+
+recoverStalePendingHelmRelease :: String -> IO ()
+recoverStalePendingHelmRelease releaseName = do
+  maybeHistory <- readHelmHistory releaseName
+  case maybeHistory of
+    Nothing -> pure ()
+    Just history -> do
+      let newestFirst = reverse history
+          pendingEntries = takeWhile (isPendingHelmStatus . helmHistoryStatus) newestFirst
+          newestStable = listToMaybe (dropWhile (isPendingHelmStatus . helmHistoryStatus) newestFirst)
+      unless (null pendingEntries) $ do
+        now <- getCurrentTime
+        let stalePendingEntries = filter (helmPendingEntryIsStale now) pendingEntries
+        when (length stalePendingEntries == length pendingEntries) $ do
+          putStrLn $
+            "Removing stale Helm release state for '"
+              <> releaseName
+              <> "' at revision(s) "
+              <> intercalate ", " (map (show . helmHistoryRevision) (reverse stalePendingEntries))
+              <> "."
+          case newestStable of
+            Just stableEntry ->
+              putStrLn $
+                "Restoring Helm release '"
+                  <> releaseName
+                  <> "' to last stable revision "
+                  <> show (helmHistoryRevision stableEntry)
+                  <> "."
+            Nothing ->
+              putStrLn $
+                "No stable Helm revision remains for '"
+                  <> releaseName
+                  <> "'; the next upgrade will reinstall the release."
+          forM_ stalePendingEntries $ \pendingEntry ->
+            deleteHelmRevisionSecret releaseName (helmHistoryRevision pendingEntry)
+          threadDelay 1000000
+
+readHelmHistory :: String -> IO (Maybe [HelmHistoryEntry])
+readHelmHistory releaseName = do
+  (exitCode, stdoutText, stderrText) <-
+    readProcessWithExitCode "helm" ["history", releaseName, "-o", "json"] ""
+  case exitCode of
+    ExitSuccess ->
+      case decode (LBS.pack stdoutText) of
+        Just history -> pure (Just history)
+        Nothing -> die ("Failed to decode Helm history JSON for release '" <> releaseName <> "'.")
+    ExitFailure _ ->
+      if isMissingHelmReleaseError stderrText
+        then pure Nothing
+        else die stderrText
+
+isPendingHelmStatus :: String -> Bool
+isPendingHelmStatus status =
+  status `elem` ["pending-install", "pending-upgrade", "pending-rollback"]
+
+helmPendingEntryIsStale :: UTCTime -> HelmHistoryEntry -> Bool
+helmPendingEntryIsStale now entry =
+  case helmHistoryUpdated entry of
+    Just updatedAt -> diffUTCTime now updatedAt >= 60
+    Nothing -> True
+
+deleteHelmRevisionSecret :: String -> Int -> IO ()
+deleteHelmRevisionSecret releaseName revision =
+  callProcess
+    "kubectl"
+    [ "delete"
+    , "secret"
+    , "sh.helm.release.v1." <> releaseName <> ".v" <> show revision
+    , "--ignore-not-found=true"
+    ]
+
+isMissingHelmReleaseError :: String -> Bool
+isMissingHelmReleaseError stderrText =
+  let normalized = map toLower stderrText
+   in "release: not found" `isInfixOf` normalized
+        || "release: release not found" `isInfixOf` normalized
 
 lookupSecretValue :: String -> String -> IO (Maybe String)
 lookupSecretValue secretName jsonPath = do
@@ -1263,6 +1482,105 @@ lookupSecretValue secretName jsonPath = do
               case Base64.decode (BS.pack encoded) of
                 Left _ -> pure Nothing
                 Right decoded -> pure (Just (BS.unpack decoded))
+
+lookupRequiredSecretValue :: String -> String -> IO String
+lookupRequiredSecretValue secretName jsonPath = do
+  maybeValue <- lookupSecretValue secretName jsonPath
+  case maybeValue of
+    Just value -> pure value
+    Nothing ->
+      die
+        ( "Required secret value missing: "
+            <> secretName
+            <> " "
+            <> jsonPath
+        )
+
+harborDeploymentsPresent :: IO Bool
+harborDeploymentsPresent =
+  and <$> forM harborDeploymentNames kubectlResourceExists
+
+waitForHarborReady :: IO ()
+waitForHarborReady = do
+  deployments <- waitForHarborDeployments 60
+  forM_ deployments $ \deploymentName ->
+    waitForWorkloadRollout deploymentName "480s"
+  manager <- newManager defaultManagerSettings
+  withPortForward "service/studiomcp-harbor-core" 39031 80 $ \baseUrl ->
+    waitForHttpStatusWithTimeout 120 manager (baseUrl <> "/api/v2.0/ping") [200]
+
+waitForHarborDeployments :: Int -> IO [String]
+waitForHarborDeployments retriesRemaining = do
+  deploymentPresence <- forM harborDeploymentNames $ \deploymentName ->
+    (deploymentName,) <$> kubectlResourceExists deploymentName
+  let deployments = [deploymentName | (deploymentName, exists) <- deploymentPresence, exists]
+  if length deployments == length harborDeploymentNames
+    then pure harborDeploymentNames
+    else
+      if retriesRemaining <= 0
+        then die "Harbor deployments were not rendered into the cluster release."
+        else do
+          threadDelay 2_000_000
+          waitForHarborDeployments (retriesRemaining - 1)
+
+harborDeploymentNames :: [String]
+harborDeploymentNames =
+  map
+    ("deployment/" <>)
+    [ "studiomcp-harbor-core"
+    , "studiomcp-harbor-jobservice"
+    , "studiomcp-harbor-nginx"
+    , "studiomcp-harbor-portal"
+    , "studiomcp-harbor-registry"
+    ]
+
+ensureHarborDatabase :: IO ()
+ensureHarborDatabase = do
+  postgresAdminPassword <- lookupRequiredSecretValue "studiomcp-postgres-credentials" "{.data.postgres-password}"
+  harborDatabasePassword <- lookupRequiredSecretValue "studiomcp-harbor-database" "{.data.password}"
+  let sql =
+        unlines
+          [ "DO $$"
+          , "BEGIN"
+          , "  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'harbor') THEN"
+          , "    CREATE ROLE harbor LOGIN PASSWORD " <> sqlSingleQuote harborDatabasePassword <> ";"
+          , "  ELSE"
+          , "    ALTER ROLE harbor WITH LOGIN PASSWORD " <> sqlSingleQuote harborDatabasePassword <> ";"
+          , "  END IF;"
+          , "END"
+          , "$$;"
+          , "SELECT 'CREATE DATABASE harbor OWNER harbor'"
+          , "WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'harbor')\\gexec"
+          , "ALTER DATABASE harbor OWNER TO harbor;"
+          , "GRANT ALL PRIVILEGES ON DATABASE harbor TO harbor;"
+          ]
+      args =
+        [ "exec"
+        , "-i"
+        , "pod/studiomcp-postgresql-ha-postgresql-0"
+        , "--"
+        , "env"
+        , "PGPASSWORD=" <> postgresAdminPassword
+        , "psql"
+        , "-U"
+        , "postgres"
+        , "-d"
+        , "postgres"
+        , "-v"
+        , "ON_ERROR_STOP=1"
+        , "-f"
+        , "-"
+        ]
+  (exitCode, _, stderrText) <- readProcessWithExitCode "kubectl" args sql
+  case exitCode of
+    ExitSuccess -> pure ()
+    ExitFailure _ -> die stderrText
+
+sqlSingleQuote :: String -> String
+sqlSingleQuote value = "'" <> concatMap escape value <> "'"
+  where
+    escape '\'' = "''"
+    escape character = [character]
 
 -- | Run all validators sequentially with aggregate reporting
 validateAll :: IO ()
@@ -2377,33 +2695,47 @@ requireExecutables commands =
       die ("Required executable is not available: " <> command)
 
 data ImageRegistryConfig = ImageRegistryConfig
-  { imageRegistryHost :: String,
+  { imageRegistryPushHost :: String,
+    imageRegistryPullHost :: String,
     imageRegistryProject :: String,
     imageRegistryName :: String,
-    imageRegistryTag :: String
+    imageRegistryTag :: String,
+    imageRegistryManagedHarbor :: Bool
   }
   deriving (Eq, Show)
 
-localRegistryContainerName :: String
-localRegistryContainerName = "studiomcp-harbor-registry"
+managedHarborPullHost :: String
+managedHarborPullHost = "localhost:32443"
 
-localRegistryHost :: String
-localRegistryHost = "localhost:5001"
+resolveManagedHarborPushHost :: IO String
+resolveManagedHarborPushHost = do
+  runningInContainer <- doesFileExist "/.dockerenv"
+  pure $
+    if runningInContainer
+      then "host.docker.internal:32443"
+      else managedHarborPullHost
 
 loadImageRegistryConfig :: IO ImageRegistryConfig
 loadImageRegistryConfig = do
-  registryHost <- lookupEnvDefault "STUDIOMCP_HARBOR_REGISTRY" localRegistryHost
-  registryProject <- lookupEnvDefault "STUDIOMCP_HARBOR_PROJECT" "studiomcp"
+  maybeRegistryHost <- normalizeOptionalPath <$> lookupEnv "STUDIOMCP_HARBOR_REGISTRY"
+  registryPushHost <-
+    case maybeRegistryHost of
+      Just registryHost -> pure registryHost
+      Nothing -> resolveManagedHarborPushHost
+  let registryPullHost = fromMaybe managedHarborPullHost maybeRegistryHost
+  registryProject <- lookupEnvDefault "STUDIOMCP_HARBOR_PROJECT" "library"
   registryName <- lookupEnvDefault "STUDIOMCP_IMAGE_REPOSITORY" "studiomcp"
   registryTag <- lookupEnvDefault "STUDIOMCP_IMAGE_TAG" "latest"
-  when ("://" `isInfixOf` registryHost) $
+  when ("://" `isInfixOf` registryPullHost || "://" `isInfixOf` registryPushHost) $
     die "STUDIOMCP_HARBOR_REGISTRY must be a Docker registry host[:port], not a URL with a scheme."
   pure
     ImageRegistryConfig
-      { imageRegistryHost = registryHost,
+      { imageRegistryPushHost = registryPushHost,
+        imageRegistryPullHost = registryPullHost,
         imageRegistryProject = registryProject,
         imageRegistryName = registryName,
-        imageRegistryTag = registryTag
+        imageRegistryTag = registryTag,
+        imageRegistryManagedHarbor = maybeRegistryHost == Nothing
       }
 
 lookupEnvDefault :: String -> String -> IO String
@@ -2414,24 +2746,36 @@ lookupEnvDefault name fallback = do
       Just value | not (null value) -> value
       _ -> fallback
 
-imageRegistryRepository :: ImageRegistryConfig -> String
-imageRegistryRepository config =
+imageRegistryRepositoryForHost :: String -> ImageRegistryConfig -> String
+imageRegistryRepositoryForHost registryHost config =
   intercalate "/"
     ( filter
         (not . null)
-        [ imageRegistryHost config
+        [ registryHost
         , imageRegistryProject config
         , imageRegistryName config
         ]
     )
 
-imageRegistryReference :: ImageRegistryConfig -> String
-imageRegistryReference config =
-  imageRegistryRepository config <> ":" <> imageRegistryTag config
+imageRegistryPullRepository :: ImageRegistryConfig -> String
+imageRegistryPullRepository config =
+  imageRegistryRepositoryForHost (imageRegistryPullHost config) config
+
+imageRegistryPushRepository :: ImageRegistryConfig -> String
+imageRegistryPushRepository config =
+  imageRegistryRepositoryForHost (imageRegistryPushHost config) config
+
+imageRegistryPullReference :: ImageRegistryConfig -> String
+imageRegistryPullReference config =
+  imageRegistryPullRepository config <> ":" <> imageRegistryTag config
+
+imageRegistryPushReference :: ImageRegistryConfig -> String
+imageRegistryPushReference config =
+  imageRegistryPushRepository config <> ":" <> imageRegistryTag config
 
 helmImageArgs :: ImageRegistryConfig -> [String]
 helmImageArgs config =
-  let repository = imageRegistryRepository config
+  let repository = imageRegistryPullRepository config
       tag = imageRegistryTag config
    in concat
         [ ["--set-string", "image.repository=" <> repository]
@@ -2440,81 +2784,49 @@ helmImageArgs config =
         , ["--set-string", "worker.image.tag=" <> tag]
         , ["--set-string", "bff.image.repository=" <> repository]
         , ["--set-string", "bff.image.tag=" <> tag]
-        , ["--set-string", "image.pullPolicy=IfNotPresent"]
+        , ["--set-string", "image.pullPolicy=Always"]
         ]
 
 clusterPushImages :: IO ImageRegistryConfig
 clusterPushImages = do
-  requireExecutables ["docker"]
+  requireExecutables ["docker", "kind", "kubectl", "helm", "skopeo"]
+  clusterUp
+  clusterName <- getClusterName
+  ensureContainerClusterAccess clusterName
   config <- loadImageRegistryConfig
+  when (imageRegistryManagedHarbor config) $ do
+    sidecarsReady <- kindSidecarsReady config
+    unless sidecarsReady $
+      ensureKindSidecars config
   clusterPushImagesWithConfig config
 
 clusterPushImagesWithConfig :: ImageRegistryConfig -> IO ImageRegistryConfig
 clusterPushImagesWithConfig config = do
-  ensureImageRegistryAvailable config
+  when (imageRegistryManagedHarbor config) $
+    waitForHarborReady
   buildServerImage
-  let registryImage = imageRegistryReference config
-  callProcess "docker" ["tag", "studiomcp:latest", registryImage]
-  localDigest <- localImageConfigDigest registryImage
-  remoteDigest <- remoteImageConfigDigest registryImage
+  credentials <- imageRegistryCredentials config
+  let pushReference = imageRegistryPushReference config
+  localDigest <- localImageConfigDigest "studiomcp:latest"
+  remoteDigest <- remoteImageConfigDigest config credentials
   if remoteDigest == Just localDigest
-    then putStrLn ("Registry image already current: " <> registryImage)
+    then putStrLn ("Registry image already current: " <> pushReference)
     else do
-      putStrLn ("Pushing image to registry: " <> registryImage)
-      callProcess "docker" ["push", registryImage]
+      putStrLn ("Pushing image to registry: " <> pushReference)
+      pushImageToRegistry config credentials
   pure config
 
-ensureImageRegistryAvailable :: ImageRegistryConfig -> IO ()
-ensureImageRegistryAvailable config =
-  if isLocalRegistryConfig config
-    then ensureLocalRegistryRunning
-    else dockerLoginIfConfigured config
-
-isLocalRegistryConfig :: ImageRegistryConfig -> Bool
-isLocalRegistryConfig config =
-  imageRegistryHost config `elem` [localRegistryHost, "127.0.0.1:5001"]
-
-ensureLocalRegistryRunning :: IO ()
-ensureLocalRegistryRunning = do
-  (inspectExit, inspectOut, _) <-
-    readProcessWithExitCode
-      "docker"
-      ["inspect", "-f", "{{.State.Running}}", localRegistryContainerName]
-      ""
-  case inspectExit of
-    ExitSuccess
-      | trimWhitespace inspectOut == "true" ->
-          pure ()
-    _ -> do
-      _ <- readProcessWithExitCode "docker" ["rm", "-f", localRegistryContainerName] ""
-      callProcess
-        "docker"
-        [ "run"
-        , "-d"
-        , "--restart=always"
-        , "-p"
-        , "5001:5000"
-        , "--name"
-        , localRegistryContainerName
-        , "registry:2"
-        ]
-      putStrLn ("Started local registry container '" <> localRegistryContainerName <> "'.")
-
-dockerLoginIfConfigured :: ImageRegistryConfig -> IO ()
-dockerLoginIfConfigured config = do
+imageRegistryCredentials :: ImageRegistryConfig -> IO (Maybe (String, String))
+imageRegistryCredentials config
+  | imageRegistryManagedHarbor config = do
+      password <- lookupRequiredSecretValue "studiomcp-harbor-admin" "{.data.HARBOR_ADMIN_PASSWORD}"
+      pure (Just ("admin", password))
+  | otherwise = do
   maybeUsername <- fmap normalizeOptionalPath (lookupEnv "STUDIOMCP_HARBOR_USERNAME")
   maybePassword <- fmap normalizeOptionalPath (lookupEnv "STUDIOMCP_HARBOR_PASSWORD")
   case (maybeUsername, maybePassword) of
-    (Nothing, Nothing) -> pure ()
-    (Just username, Just password) -> do
-      (exitCode, _, stderrText) <-
-        readProcessWithExitCode
-          "docker"
-          ["login", imageRegistryHost config, "--username", username, "--password-stdin"]
-          (password <> "\n")
-      case exitCode of
-        ExitSuccess -> pure ()
-        ExitFailure _ -> die stderrText
+    (Nothing, Nothing) -> pure Nothing
+    (Just username, Just password) -> pure (Just (username, password))
     _ ->
       die "Set both STUDIOMCP_HARBOR_USERNAME and STUDIOMCP_HARBOR_PASSWORD, or neither."
 
@@ -2529,10 +2841,17 @@ localImageConfigDigest imageRef = do
     ExitSuccess -> pure (trimWhitespace stdoutText)
     ExitFailure _ -> die stderrText
 
-remoteImageConfigDigest :: String -> IO (Maybe String)
-remoteImageConfigDigest imageRef = do
+remoteImageConfigDigest :: ImageRegistryConfig -> Maybe (String, String) -> IO (Maybe String)
+remoteImageConfigDigest config credentials = do
+  let args =
+        [ "inspect"
+        , "--raw"
+        ]
+          <> registryCredentialArgs "--creds" credentials
+          <> registryTlsArgs config
+          <> ["docker://" <> imageRegistryPushReference config]
   (exitCode, stdoutText, _) <-
-    readProcessWithExitCode "docker" ["manifest", "inspect", imageRef] ""
+    readProcessWithExitCode "skopeo" args ""
   case exitCode of
     ExitFailure _ -> pure Nothing
     ExitSuccess ->
@@ -2540,50 +2859,41 @@ remoteImageConfigDigest imageRef = do
         Just value -> pure (lookupString ["config", "digest"] value)
         Nothing -> pure Nothing
 
-ensureKindRegistryAccess :: ImageRegistryConfig -> String -> IO ()
-ensureKindRegistryAccess config clusterName =
-  when (isLocalRegistryConfig config) $ do
-    ensureLocalRegistryRunning
-    dockerNetworkConnectIfNeeded "kind" localRegistryContainerName
-    configureKindNodeRegistry clusterName
+pushImageToRegistry :: ImageRegistryConfig -> Maybe (String, String) -> IO ()
+pushImageToRegistry config credentials = do
+  tempDir <- getTemporaryDirectory
+  bracket
+    (openTempFile tempDir "studiomcp-image.tar")
+    (\(archivePath, handle) -> hClose handle >> removeFileIfExists archivePath)
+    (\(archivePath, handle) -> do
+        hClose handle
+        callProcess "docker" ["save", "--output", archivePath, "studiomcp:latest"]
+        let args =
+              [ "copy"
+              , "docker-archive:" <> archivePath
+              ]
+                <> registryCredentialArgs "--dest-creds" credentials
+                <> registryDestTlsArgs config
+                <> ["docker://" <> imageRegistryPushReference config]
+        callProcess "skopeo" args
+    )
 
-dockerNetworkConnectIfNeeded :: String -> String -> IO ()
-dockerNetworkConnectIfNeeded networkName containerName = do
-  connected <- dockerContainerOnNetwork networkName containerName
-  unless connected $
-    callProcess "docker" ["network", "connect", networkName, containerName]
+registryCredentialArgs :: String -> Maybe (String, String) -> [String]
+registryCredentialArgs _ Nothing = []
+registryCredentialArgs flagName (Just (username, password)) =
+  [flagName, username <> ":" <> password]
 
-dockerContainerOnNetwork :: String -> String -> IO Bool
-dockerContainerOnNetwork networkName containerName = do
-  (exitCode, stdoutText, _) <-
-    readProcessWithExitCode
-      "docker"
-      ["network", "inspect", networkName, "--format", "{{json .Containers}}"]
-      ""
-  case exitCode of
-    ExitFailure _ -> pure False
-    ExitSuccess -> pure (("\"Name\":\"" <> containerName <> "\"") `isInfixOf` stdoutText)
+registryTlsArgs :: ImageRegistryConfig -> [String]
+registryTlsArgs config =
+  if imageRegistryManagedHarbor config
+    then ["--tls-verify=false"]
+    else []
 
-configureKindNodeRegistry :: String -> IO ()
-configureKindNodeRegistry clusterName = do
-  let nodeName = clusterName <> "-control-plane"
-      registryDir = "/etc/containerd/certs.d/" <> localRegistryHost
-      hostsToml =
-        unlines
-          [ "server = \"http://" <> localRegistryHost <> "\""
-          , ""
-          , "[host.\"http://" <> localRegistryContainerName <> ":5000\"]"
-          , "  capabilities = [\"pull\", \"resolve\"]"
-          ]
-  callProcess "docker" ["exec", nodeName, "mkdir", "-p", registryDir]
-  (exitCode, _, stderrText) <-
-    readProcessWithExitCode
-      "docker"
-      ["exec", "-i", nodeName, "sh", "-c", "cat > " <> registryDir <> "/hosts.toml"]
-      hostsToml
-  case exitCode of
-    ExitSuccess -> pure ()
-    ExitFailure _ -> die stderrText
+registryDestTlsArgs :: ImageRegistryConfig -> [String]
+registryDestTlsArgs config =
+  if imageRegistryManagedHarbor config
+    then ["--dest-tls-verify=false"]
+    else []
 
 buildServerImage :: IO ()
 buildServerImage = do
@@ -2624,8 +2934,6 @@ buildServerImage = do
             , "studiomcp:latest"
             , "-f"
             , "docker/Dockerfile"
-            , "--target"
-            , "production"
             , "."
             ]
         )
@@ -3109,6 +3417,7 @@ requiredPortMappings :: [RequiredPortMapping]
 requiredPortMappings =
   [ RequiredPortMapping 80 8081 "HTTP Ingress"
   , RequiredPortMapping 32000 9000 "MinIO S3 API"
+  , RequiredPortMapping 32443 32443 "Harbor registry"
   ]
 
 renderKindConfig :: String -> FilePath -> LBS.ByteString
@@ -3119,8 +3428,8 @@ renderKindConfig clusterName dataRoot =
     , "name: " <> LBS.pack clusterName
     , "containerdConfigPatches:"
     , "  - |-"
-    , "    [plugins.\"io.containerd.grpc.v1.cri\".registry.mirrors.\"" <> LBS.pack localRegistryHost <> "\"]"
-    , "      endpoint = [\"http://" <> LBS.pack localRegistryContainerName <> ":5000\"]"
+    , "    [plugins.\"io.containerd.grpc.v1.cri\".registry.mirrors.\"" <> LBS.pack managedHarborPullHost <> "\"]"
+    , "      endpoint = [\"http://" <> LBS.pack managedHarborPullHost <> "\"]"
     , "nodes:"
     , "  - role: control-plane"
     , "    extraPortMappings:"
@@ -3550,12 +3859,11 @@ validateLiveKeycloak config = do
 validateMcpAuth :: IO ()
 validateMcpAuth = do
   putStrLn "Validating MCP authentication..."
-  preferKindEdge <- kindEdgeValidationRequested
-  when preferKindEdge $
-    clusterDeploy DeployServer
   liveConfig <- loadPreferredEdgeValidationConfig
   case liveConfig of
-    Just config -> validateLiveMcpAuth config
+    Just config -> do
+      clusterDeploy DeployServer
+      validateLiveMcpAuth config
     Nothing -> validateHarnessMcpAuth
 
 validateSessionStore :: IO ()
@@ -3694,23 +4002,21 @@ validateSessionStore = do
 validateHorizontalScale :: IO ()
 validateHorizontalScale = do
   putStrLn "Validating horizontal scaling support..."
-  preferKindEdge <- kindEdgeValidationRequested
-  when preferKindEdge $
-    clusterDeploy DeployServer
   liveConfig <- loadKindEdgeValidationConfig
   case liveConfig of
-    Just config -> validateLiveHorizontalScale config
+    Just config -> do
+      clusterDeploy DeployServer
+      validateLiveHorizontalScale config
     Nothing -> validateHarnessHorizontalScale
 
 validateWebBff :: IO ()
 validateWebBff = do
   putStrLn "Validating Web BFF..."
-  preferKindEdge <- kindEdgeValidationRequested
-  when preferKindEdge $
-    clusterDeploy DeployServer
   liveConfig <- loadPreferredEdgeValidationConfig
   case liveConfig of
-    Just config -> validateLiveWebBff config
+    Just config -> do
+      clusterDeploy DeployServer
+      validateLiveWebBff config
     Nothing -> validateHarnessWebBff
 
 data LiveValidationConfig = LiveValidationConfig

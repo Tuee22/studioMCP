@@ -5,8 +5,8 @@ apiVersion: kind.x-k8s.io/v1alpha4
 name: studiomcp
 containerdConfigPatches:
   - |-
-    [plugins."io.containerd.grpc.v1.cri".registry.mirrors."localhost:5001"]
-      endpoint = ["http://studiomcp-harbor-registry:5000"]
+    [plugins."io.containerd.grpc.v1.cri".registry.mirrors."localhost:32443"]
+      endpoint = ["http://localhost:32443"]
 nodes:
   - role: control-plane
     extraPortMappings:
@@ -15,6 +15,9 @@ nodes:
         protocol: TCP
       - containerPort: 32000
         hostPort: 9000
+        protocol: TCP
+      - containerPort: 32443
+        hostPort: 32443
         protocol: TCP
     extraMounts:
       # Bind mount ./.data into the kind node for persistent storage

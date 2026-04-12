@@ -7,19 +7,20 @@
 
 > **Purpose**: Define the supported Kind and Helm deployment path that exposes the canonical
 > control-plane contract in local cluster development, with unified ingress routing for web
-> services, Harbor-compatible registry integration, and CLI-owned storage reconciliation.
+> services, Harbor-backed image distribution, and CLI-owned storage reconciliation.
 
 ## Phase Summary
 
 **Status**: Done
 **Implementation**: `chart/Chart.yaml`, `chart/templates/ingress.yaml`, `chart/values.yaml`, `chart/values-kind.yaml`, `kind/kind_config.yaml`, `src/StudioMCP/CLI/Cluster.hs`
-**Docs to update**: `documents/engineering/k8s_native_dev_policy.md`, `documents/engineering/k8s_storage.md`, `documents/operations/runbook_local_debugging.md`
+**Docs to update**: `documents/engineering/docker_policy.md`, `documents/engineering/k8s_native_dev_policy.md`, `documents/engineering/k8s_storage.md`, `documents/operations/runbook_local_debugging.md`
 
 ### Goal
 
 Ensure the Kind and Helm workflow exposes the canonical control-plane contract with:
 - Unified ingress routing for all web services on a single port
-- Harbor-compatible registry integration for application images
+- In-cluster Harbor deployment for application images
+- CLI-owned Harbor population before Helm chart deployment
 - CLI-owned storage reconciliation and explicit `studiomcp-manual` persistence policy
 - CLI-managed secrets (no env files)
 
@@ -32,7 +33,7 @@ Ensure the Kind and Helm workflow exposes the canonical control-plane contract w
 | Kind config | `kind/kind_config.yaml` | Done |
 | Cluster CLI | `src/StudioMCP/CLI/Cluster.hs` | Done |
 | Unified ingress for web services | `chart/templates/ingress.yaml`, `chart/values-kind.yaml` | Done |
-| Harbor-compatible registry integration | `src/StudioMCP/CLI/Cluster.hs`, `kind/kind_config.yaml` | Done |
+| Harbor-backed image flow | `src/StudioMCP/CLI/Cluster.hs`, `kind/kind_config.yaml`, `chart/values.yaml`, `chart/values-kind.yaml` | Done |
 | CLI-owned storage reconciliation | `src/StudioMCP/CLI/Cluster.hs`, `chart/values.yaml`, `chart/values-kind.yaml` | Done |
 | CLI-managed secrets | `src/StudioMCP/CLI/Cluster.hs`, `chart/values.yaml` | Done |
 
@@ -81,37 +82,48 @@ ingress:
           port: 9001
 ```
 
-## Harbor-Compatible Registry Integration
+## Harbor Deployment And Image Flow
 
-All Helm deploys to the cluster pull application containers from the configured registry:
+The supported cluster image path uses Harbor as an in-cluster deployment. Harbor is not a sidecar
+or other registry container running outside the cluster.
 
-- CLI is responsible to idempotently push images before deploy
-- Push only when image digest differs from the registry manifest when that digest is available
-- Helm charts reference the registry image repository instead of relying on `kind load docker-image`
-- `STUDIOMCP_HARBOR_REGISTRY` can point at a real Harbor registry; local kind defaults to
-  `localhost:5001` backed by a CLI-managed local registry container
+The default local Kind path uses that in-cluster Harbor deployment through:
+
+- `host.docker.internal:32443` for pushes from the outer development container
+- `localhost:32443` for pulls from Kind nodes via the containerd mirror
+
+All Helm deploys are to pull application containers from Harbor:
+
+- The CLI is responsible for populating Harbor with the required application images before
+  deploying Helm charts.
+- Harbor population remains idempotent: push only when the local image digest differs from the
+  Harbor manifest digest when that digest is available.
+- Helm charts reference Harbor repositories instead of relying on `kind load docker-image` or a
+  host-level sidecar registry.
 
 ### CLI Registry Commands
 
 ```bash
-# Push images to the configured registry (idempotent, only on change when digest is available)
+# Push images to Harbor (idempotent, only on change when digest is available)
 docker compose run --rm studiomcp studiomcp cluster push-images
 
-# Deploy with registry pull
+# Deploy with Harbor-backed image pull
 docker compose run --rm studiomcp studiomcp cluster deploy server
 ```
 
 ### Image Push Logic
 
-The CLI compares local image digests with the registry manifest:
+The CLI compares local image digests with the Harbor manifest:
 1. Build image locally if needed
-2. Query the registry for existing image digest
-3. Push only if digest differs or image not present
-4. Helm values reference the registry repository and tag
+2. Query Harbor for the existing image digest
+3. Push only if the digest differs or the image is not present
+4. Set Helm values to reference the Harbor repository and tag
+5. Run `helm upgrade --install` only after Harbor population is complete
 
-Before `helm upgrade --install`, the CLI reconciles chart dependencies with
-`helm dependency build chart` so the supported `cluster ensure`, `cluster deploy sidecars`, and
-`cluster deploy server` flows do not depend on a pre-populated `chart/charts/` directory.
+Before `helm upgrade --install`, the CLI populates Harbor with the required images and reconciles
+chart dependencies with `helm dependency build chart` so the supported `cluster ensure`,
+`cluster deploy sidecars`, and `cluster deploy server` flows do not depend on a pre-populated
+`chart/charts/` directory.
 
 ## CLI-Owned Storage Reconciliation
 
@@ -171,6 +183,10 @@ All validation commands use the ephemeral container pattern:
 docker compose build
 ```
 
+`cluster ensure` closes the sidecar and shared-service base environment. `/mcp` and `/api` are
+validated after `cluster deploy server`, which rolls the application workloads onto the ingress
+edge with Harbor-backed image references.
+
 #### Validation Gates
 
 | Check | Command | Expected |
@@ -178,14 +194,14 @@ docker compose build
 | Helm lint | `docker compose run --rm studiomcp helm lint chart -f chart/values.yaml -f chart/values-kind.yaml` | Success |
 | Helm template | `docker compose run --rm studiomcp helm template studiomcp chart -f chart/values.yaml -f chart/values-kind.yaml` | Renders unified ingress |
 | Storage reconcile | `docker compose run --rm studiomcp studiomcp cluster storage reconcile` | `studiomcp-manual` and required PVs applied idempotently |
-| Cluster ensure | `docker compose run --rm studiomcp studiomcp cluster ensure` | All services ready |
-| Cluster deploy server | `docker compose run --rm studiomcp studiomcp cluster deploy server` | Server pods running |
+| Cluster ensure | `docker compose run --rm studiomcp studiomcp cluster ensure` | Shared services, ingress, storage policy, and realm bootstrap converge |
+| Cluster deploy server | `docker compose run --rm studiomcp studiomcp cluster deploy server` | MCP and BFF workloads are running with Harbor-backed image references |
 | Integration tests | `docker compose run --rm studiomcp studiomcp test integration` | Pass on the supported parity path |
 | Storage policy | `docker compose run --rm studiomcp studiomcp validate storage-policy` | PASS |
-| Edge reachability | All web paths reachable | HTTP 200 on /kc, /mcp, /api, /minio |
-| Control-plane port | Kind exposes one control-plane ingress port | `/mcp`, `/api`, `/kc`, `/minio` use ingress at 8081 |
+| Sidecar edge reachability | `docker compose run --rm studiomcp curl -fsS localhost:8081/kc/realms/studiomcp/.well-known/openid-configuration` and `docker compose run --rm studiomcp curl -fsS localhost:8081/minio/` | `/kc` and `/minio` are reachable through ingress at 8081 |
+| Control-plane route validation | `docker compose run --rm studiomcp studiomcp validate mcp-http` and `docker compose run --rm studiomcp studiomcp validate web-bff` | `/mcp` and `/api` work on the ingress edge after server deploy |
 | Data-plane port | Kind exposes object-storage data-plane port | Presigned URLs remain rooted at `http://localhost:9000` |
-| Registry pull | Pods pull from configured registry | Image pull policy and registry URL correct |
+| Registry pull | `docker compose run --rm studiomcp studiomcp cluster deploy server` plus Helm values | Application workloads pull from Harbor with `image.pullPolicy=Always` |
 | CLI secrets | `docker compose run --rm studiomcp studiomcp cluster ensure-secrets` | Required secrets applied idempotently |
 
 ### Remaining Work
@@ -195,6 +211,7 @@ None. This phase is complete on the current supported path.
 ## Documentation Requirements
 
 **Engineering docs to create/update:**
+- `documents/engineering/docker_policy.md` - Harbor deployment model and pre-Helm image population contract
 - `documents/engineering/k8s_native_dev_policy.md` - Kind-native setup, unified ingress, registry integration
 - `documents/engineering/k8s_storage.md` - manual StorageClass and CLI-owned PV lifecycle
 - `documents/operations/runbook_local_debugging.md` - cluster debugging and readiness workflow

@@ -32,9 +32,9 @@ flowchart TB
 
 The repo keeps one Dockerfile at `docker/Dockerfile`.
 
-- it is multi-stage
-- one stage is the outer development container
-- one stage is the runtime image consumed by Helm and kind
+- it is single-stage
+- the same image serves one-off outer-container commands and the in-cluster runtime path
+- Kubernetes manifests choose runtime subcommands explicitly; the Dockerfile does not provide a default `CMD`
 
 ### No Scripts Command Surface
 
@@ -43,7 +43,7 @@ Supported repository commands must live in the Haskell CLI, not in checked-in sh
 - local cluster actions belong in `studiomcp cluster ...`
 - deployment actions belong in `studiomcp cluster deploy ...` or a closely related native CLI family
 - validation actions belong in `studiomcp validate ...`
-- LLMs should enter the outer development container and invoke the Haskell CLI there
+- LLMs should invoke the Haskell CLI through one-off outer-container commands
 - storage lifecycle actions belong in the CLI as well
 
 ### One Helm Chart
@@ -59,7 +59,7 @@ The repo keeps one Helm chart at `chart/`.
 The local control-plane loop is:
 
 1. build the outer development image with Docker Compose
-2. invoke commands with `docker compose -f docker-compose.yaml run --rm studiomcp ...`
+2. invoke one command at a time with `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp ...`
 3. run `studiomcp cluster ...` commands to manage kind
 4. run `studiomcp cluster deploy ...` commands to deploy Helm-backed workloads
 
@@ -72,7 +72,7 @@ Skaffold remains part of the Kubernetes-native toolchain for image-build and dep
 
 ### Compose Is a Container Launcher, Not a Platform Model
 
-Compose remains in the repo for one narrow reason: to launch ephemeral outer development containers with access to the active host Docker context.
+Compose remains in the repo for one narrow reason: to launch one-off outer development containers with access to the active host Docker context.
 
 Compose must not become:
 
@@ -93,7 +93,7 @@ This policy is represented today through:
 - [Docker Policy](docker_policy.md#docker-policy)
 - [CLI Architecture](../architecture/cli_architecture.md#cli-architecture)
 
-Current repo note: the policy is now materially implemented for the local cluster baseline. The native Haskell cluster-management surface exists, Compose launches ephemeral outer development containers, sidecars and the server deploy through the CLI, application images flow through the configured registry, and cluster secrets are created by the CLI before Helm install.
+Current repo note: the policy is now materially implemented for the local cluster baseline. The native Haskell cluster-management surface exists, Compose launches one-off outer development containers, sidecars and the server deploy through the CLI, application images flow through the configured registry, and cluster secrets are created by the CLI before Helm install.
 
 ## Cross-References
 

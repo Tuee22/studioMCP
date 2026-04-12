@@ -76,7 +76,8 @@ None. This phase is complete on the current supported path.
 ## Documentation Requirements
 
 **Engineering docs to create/update:**
-- `documents/architecture/multi_tenant_saas_mcp_auth_architecture.md` - auth design and issuer rules
+- `documents/architecture/multi_tenant_saas_mcp_auth_architecture.md` - auth design, issuer rules,
+  and per-tool scope tables aligned with the stable Phase 2 MCP catalog
 - `documents/engineering/security_model.md` - enforcement rules and trust boundaries
 - `documents/engineering/session_scaling.md` - shared-session and scale-out behavior
 
@@ -84,6 +85,7 @@ None. This phase is complete on the current supported path.
 - None.
 
 **Cross-references to add:**
+- Keep [phase-2-mcp-surface-catalog-artifact-governance.md](phase-2-mcp-surface-catalog-artifact-governance.md) and [../documents/reference/mcp_tool_catalog.md](../documents/reference/mcp_tool_catalog.md) aligned when auth docs name MCP tools.
 - Keep [phase-5-browser-session-contract.md](phase-5-browser-session-contract.md) aligned when browser session rules change.
 - Keep [legacy-tracking-for-deletion.md](legacy-tracking-for-deletion.md) aligned when auth compatibility surfaces change.
 
@@ -91,5 +93,6 @@ None. This phase is complete on the current supported path.
 
 - [README.md](README.md)
 - [system-components.md](system-components.md)
+- [phase-2-mcp-surface-catalog-artifact-governance.md](phase-2-mcp-surface-catalog-artifact-governance.md)
 - [phase-5-browser-session-contract.md](phase-5-browser-session-contract.md)
 - [../documents/engineering/security_model.md](../documents/engineering/security_model.md)

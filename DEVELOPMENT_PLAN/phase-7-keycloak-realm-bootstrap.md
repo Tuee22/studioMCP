@@ -52,7 +52,8 @@ None. This phase is complete on the current supported path.
 ## Documentation Requirements
 
 **Engineering docs to create/update:**
-- `documents/operations/keycloak_realm_bootstrap_runbook.md` - automated bootstrap and recovery path
+- `documents/operations/keycloak_realm_bootstrap_runbook.md` - automated bootstrap and recovery
+  path without stale manual-script or retired-port guidance
 
 **Product docs to create/update:**
 - None.

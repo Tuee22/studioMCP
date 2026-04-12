@@ -23,7 +23,7 @@ spec:
         - name: bff
           image: "{{ .Values.bff.image.repository }}:{{ .Values.bff.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: ["studiomcp", "bff"]
+          command: ["/usr/bin/tini", "--", "studiomcp", "bff"]
           env:
             - name: STUDIO_MCP_MODE
               value: "server"

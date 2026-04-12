@@ -52,7 +52,7 @@ flowchart TB
 
 ## Current Repo Note
 
-This topology is now implemented for the current login/password delivery path. The repo ships the ingress-nginx-backed kind topology, live Keycloak-backed browser login/password flow, deterministic Keycloak realm bootstrap from the checked-in realm export, and live validation behind the shared ingress edge. Docker-compose launches only the outer development container; all application services run in the kind cluster.
+This topology is now implemented for the current login/password delivery path. The repo ships the ingress-nginx-backed kind topology, live Keycloak-backed browser login/password flow, deterministic Keycloak realm bootstrap from the checked-in realm export, and live validation behind the shared ingress edge. Docker Compose launches only one-off outer development containers; all application services run in the kind cluster.
 
 ## Client Classes
 
@@ -210,7 +210,7 @@ Some Keycloak direct-grant access tokens in the current delivery path can omit `
   },
   "resource_access": {
     "studiomcp-mcp": {
-      "roles": ["workflow.submit", "artifact.download"]
+      "roles": ["workflow.submit", "artifact.download_url"]
     }
   }
 }
@@ -255,14 +255,17 @@ flowchart TB
 
 ### Per-Tool Scope Requirements
 
+The stable public tool identifiers come from the MCP catalog in
+[../reference/mcp_tool_catalog.md](../reference/mcp_tool_catalog.md#mcp-tool-catalog).
+
 | Tool | Required Scopes |
 |------|-----------------|
-| `workflow.submit_dag` | `workflow:write` |
-| `workflow.list_runs` | `workflow:read` |
-| `workflow.get_run` | `workflow:read` |
-| `workflow.cancel_run` | `workflow:write` |
-| `artifact.prepare_upload` | `artifact:write` |
-| `artifact.prepare_download` | `artifact:read` |
+| `workflow.submit` | `workflow:write` |
+| `workflow.list` | `workflow:read` |
+| `workflow.status` | `workflow:read` |
+| `workflow.cancel` | `workflow:write` |
+| `artifact.upload_url` | `artifact:write` |
+| `artifact.download_url` | `artifact:read` |
 | `artifact.hide` | `artifact:manage` |
 | `artifact.archive` | `artifact:manage` |
 

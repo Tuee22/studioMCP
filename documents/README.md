@@ -21,6 +21,8 @@
 ## Canonical Documents
 
 - [Architecture Overview](architecture/overview.md#architecture-overview)
+- [BFF Architecture](architecture/bff_architecture.md#bff-architecture)
+- [Inference Mode](architecture/inference_mode.md#inference-mode)
 - [MCP Protocol Architecture](architecture/mcp_protocol_architecture.md#mcp-protocol-architecture)
 - [Server Mode](architecture/server_mode.md#server-mode)
 - [Multi-Tenant SaaS MCP Auth Architecture](architecture/multi_tenant_saas_mcp_auth_architecture.md#multi-tenant-saas-mcp-auth-architecture)
@@ -34,6 +36,7 @@
 - [Docker Policy](engineering/docker_policy.md#docker-policy)
 - [Kubernetes Storage Policy](engineering/k8s_storage.md#kubernetes-storage-policy)
 - [Kubernetes-Native Development Policy](engineering/k8s_native_dev_policy.md#kubernetes-native-development-policy)
+- [Timeout Enforcement Policy](engineering/timeout_policy.md#timeout-enforcement-policy)
 - [Local Development](development/local_dev.md#local-development)
 - [Testing Strategy](development/testing_strategy.md#testing-strategy)
 - [Documentation Standards](documentation_standards.md#studiomcp-documentation-standards)

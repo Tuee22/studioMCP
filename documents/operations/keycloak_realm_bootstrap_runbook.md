@@ -381,67 +381,15 @@ Add a protocol mapper to include tenant_id in tokens:
 | `tenant-globex` | Globex test tenant | testuser2 |
 | `tenant-platform` | Platform admin tenant | testadmin |
 
-## Bootstrap Script
+## Non-Default Bootstrap Patterns
 
-### docker-compose Bootstrap
+The canonical repo workflow does **not** ship or support a separate `keycloak/bootstrap.sh` helper,
+a compose-era `localhost:18080` bootstrap path, or another repo-owned manual import script.
 
-```bash
-#!/bin/bash
-# keycloak/bootstrap.sh
-
-set -e
-
-KEYCLOAK_URL="${KEYCLOAK_URL:-http://localhost:18080/kc}"
-ADMIN_USER="${KEYCLOAK_ADMIN:-admin}"
-ADMIN_PASS="${KEYCLOAK_ADMIN_PASSWORD:-admin}"
-
-# Wait for Keycloak to be ready behind the edge
-echo "Waiting for Keycloak..."
-until curl -sf "http://localhost:18080/kc/realms/studiomcp/.well-known/openid-configuration" >/dev/null; do
-  sleep 2
-done
-
-# Get admin token
-TOKEN=$(curl -sf -X POST "http://localhost:18080/kc/realms/master/protocol/openid-connect/token" \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "client_id=admin-cli" \
-  -d "username=${ADMIN_USER}" \
-  -d "password=${ADMIN_PASS}" \
-  -d "grant_type=password" | jq -r '.access_token')
-
-# Import realm
-curl -sf -X POST "http://localhost:18080/kc/admin/realms" \
-  -H "Authorization: Bearer ${TOKEN}" \
-  -H "Content-Type: application/json" \
-  -d @docker/keycloak/realm/studiomcp-realm.json
-
-echo "Realm bootstrap complete"
-```
-
-### Alternative Chart-Managed Bootstrap
-
-The repository currently uses the CLI-driven kind bootstrap described above. A chart-managed Kubernetes Job remains a viable alternative pattern, but it is not the active default path.
-
-```yaml
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: keycloak-bootstrap
-spec:
-  template:
-    spec:
-      containers:
-      - name: bootstrap
-        image: curlimages/curl:latest
-        command: ["/bin/sh", "-c"]
-        args:
-        - |
-          # Bootstrap script here
-        envFrom:
-        - secretRef:
-            name: keycloak-admin-credentials
-      restartPolicy: OnFailure
-```
+If an operator chooses to implement a one-off recovery script or a chart-managed Kubernetes Job for
+a site-specific environment, treat that as local operational glue rather than part of the governed
+repository contract. The active default remains the CLI-driven `cluster ensure` / `cluster deploy`
+path documented above.
 
 ## Validation Steps
 

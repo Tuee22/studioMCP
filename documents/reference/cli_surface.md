@@ -144,7 +144,7 @@ All cluster management commands are idempotent and safe to run repeatedly:
 | `cluster up` | Creates cluster only if it doesn't exist; ensures network connectivity |
 | `cluster down` | Deletes cluster only if it exists |
 | `cluster reset` | Uninstalls the Helm release when present, recreates the kind cluster, and preserves host-backed volume contents |
-| `cluster push-images` | Builds the production image, tags it for the configured registry, and pushes when the remote digest differs or is absent |
+| `cluster push-images` | Builds the application image from the repository Dockerfile, tags it for the configured registry, and pushes when the remote digest differs or is absent |
 | `cluster ensure-secrets` | Applies the required Kubernetes secrets with fixed names and stable keys |
 | `cluster deploy sidecars` | Ensures Helm dependencies are reconciled, ensures registry image availability, applies CLI-managed secrets, uses `helm upgrade --install`, ensures ingress-nginx, and bootstraps the checked-in Keycloak realm |
 | `cluster deploy server` | Ensures Helm dependencies are reconciled, ensures registry image availability, applies CLI-managed secrets, uses `helm upgrade --install`, bootstraps the checked-in Keycloak realm, and rolls server/BFF workloads |
@@ -362,7 +362,7 @@ The exact final taxonomy may evolve, but the repository must not reintroduce she
 
 ## Usage Context
 
-For local development and LLM-driven operations, the CLI runs inside the outer development container:
+For local development and LLM-driven operations, the CLI runs inside one-off outer development containers:
 
 ```bash
 # Bootstrap (run on host)
@@ -371,6 +371,9 @@ docker compose build
 # Invoke CLI commands (run inside container)
 docker compose run --rm studiomcp studiomcp <subcommand...>
 ```
+
+Each command gets its own container. `docker compose up` and `docker compose exec` are not part
+of the supported outer-container workflow.
 
 Kind-edge validation uses the same outer-container entrypoint. Set `STUDIOMCP_VALIDATE_KIND_EDGE=true` to make `validate keycloak`, `validate mcp-auth`, `validate mcp-http`, and `validate web-bff` target the kind ingress edge after cluster provisioning.
 

@@ -31,7 +31,7 @@ It must live in the same Haskell codebase as the rest of the system so that:
 
 ## Execution Model
 
-The CLI is expected to run inside the outer development container, not directly on the host as the primary workflow.
+The CLI is expected to run inside one-off outer development containers, not directly on the host as the primary workflow.
 
 Canonical invocation shape:
 

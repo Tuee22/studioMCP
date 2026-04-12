@@ -39,12 +39,12 @@ spec = do
 
   describe "extractResourceRoles" $ do
     it "extracts resource roles from resource_access.{client}.roles" $ do
-      let clientRoles = Array $ V.fromList [String "workflow.submit", String "artifact.download"]
+      let clientRoles = Array $ V.fromList [String "workflow.submit", String "artifact.download_url"]
           clientAccess = Object $ KM.fromList [("roles", clientRoles)]
           resourceAccess = Object $ KM.fromList [("studiomcp-mcp", clientAccess)]
           payload = emptyPayload {jpResourceAccess = Just resourceAccess}
           roles = extractResourceRoles payload
-      roles `shouldBe` Set.fromList [Role "workflow.submit", Role "artifact.download"]
+      roles `shouldBe` Set.fromList [Role "workflow.submit", Role "artifact.download_url"]
 
     it "returns empty set when no resource_access" $ do
       let payload = emptyPayload {jpResourceAccess = Nothing}

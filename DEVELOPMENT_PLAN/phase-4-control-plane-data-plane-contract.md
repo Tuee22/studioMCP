@@ -11,7 +11,7 @@
 ## Phase Summary
 
 **Status**: Done
-**Implementation**: `chart/templates/studiomcp_deployment.yaml`, `chart/templates/bff.yaml`, `chart/templates/ingress.yaml`, `chart/values.yaml`, `chart/values-kind.yaml`, `src/StudioMCP/Config/Load.hs`
+**Implementation**: `chart/templates/studiomcp_deployment.yaml`, `chart/templates/bff.yaml`, `chart/templates/ingress.yaml`, `chart/templates/_helpers.tpl`, `chart/values.yaml`, `chart/values-kind.yaml`, `src/StudioMCP/MCP/Handlers.hs`
 **Docs to update**: `documents/architecture/overview.md`, `documents/reference/web_portal_surface.md`
 
 ### Goal
@@ -28,7 +28,7 @@ contracts explicit in configuration, routing, and validation.
 | Values for Kind | `chart/values-kind.yaml` | Done |
 | Public endpoint config | `chart/values.yaml` (`global.publicBaseUrl`) | Done |
 | Object-storage endpoint | `chart/values.yaml` (`global.objectStorage.publicEndpoint`) | Done |
-| Runtime persistence root | `src/StudioMCP/Config/Load.hs` (`./.data/`) | Done |
+| Repo-local persistence root | `src/StudioMCP/MCP/Handlers.hs` (`resolvePersistenceRoot`) | Done |
 
 ### Validation
 
@@ -39,6 +39,7 @@ All validation commands run inside the outer container after bootstrap:
 ```bash
 docker compose build
 docker compose run --rm studiomcp studiomcp cluster ensure
+docker compose run --rm studiomcp studiomcp cluster deploy server
 ```
 
 #### Validation Gates
@@ -46,13 +47,13 @@ docker compose run --rm studiomcp studiomcp cluster ensure
 | Check | Command | Expected |
 |-------|---------|----------|
 | Helm lint | `docker compose run --rm studiomcp helm lint chart -f chart/values.yaml -f chart/values-kind.yaml` | Success |
-| Helm template | `docker compose run --rm studiomcp helm template studiomcp chart ...` | Renders |
-| Cluster ensure | `docker compose run --rm studiomcp studiomcp cluster ensure` | Success |
+| Helm template | `docker compose run --rm studiomcp helm template studiomcp chart -f chart/values.yaml -f chart/values-kind.yaml` | Renders |
+| Cluster ensure | `docker compose run --rm studiomcp studiomcp cluster ensure` | Shared services, ingress, realm bootstrap, and data-plane prerequisites converge |
+| Cluster deploy server | `docker compose run --rm studiomcp studiomcp cluster deploy server` | MCP and BFF workloads are rolled onto the supported ingress edge |
 | Keycloak OIDC | `docker compose run --rm studiomcp curl localhost:8081/kc/realms/studiomcp/.well-known/openid-configuration` | HTTP 200 |
-| MCP endpoint | `docker compose run --rm studiomcp curl localhost:8081/mcp` | Responds |
-| BFF endpoint | `docker compose run --rm studiomcp curl localhost:8081/api/health` | HTTP 200 |
-| Upload presigned URL | `POST /api/v1/upload/request` returns `localhost:9000` rooted URL | Correct root |
-| Persistence root | unit test for `./.data/studiomcp` default | Pass |
+| MCP ingress route | `docker compose run --rm studiomcp studiomcp validate mcp-http` | PASS |
+| BFF ingress route and public object-storage root | `docker compose run --rm studiomcp studiomcp validate web-bff` | PASS |
+| Persistence root | `docker compose run --rm studiomcp studiomcp test unit` | `test/MCP/HandlersSpec.hs` keeps `.data/studiomcp` as the default |
 
 ### Remaining Work
 

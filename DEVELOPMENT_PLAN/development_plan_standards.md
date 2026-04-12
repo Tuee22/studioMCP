@@ -175,7 +175,7 @@ rendering rules defined in
 
 ### L. Container Execution Context
 
-The supported development workflow uses ephemeral containers. All commands in
+The supported development workflow uses ephemeral one-command containers. All commands in
 `DEVELOPMENT_PLAN/` must specify their execution context.
 
 **All commands** (ephemeral container):
@@ -190,13 +190,17 @@ docker compose run --rm -it studiomcp sh
 ```
 
 Rules:
+- The outer-container workflow is one command per `docker compose run --rm` invocation.
 - No long-running container; every command creates an ephemeral container.
 - Container removed after command completes (`--rm` flag).
+- Do not document `docker compose up` or `docker compose exec` as supported outer-container workflows.
 - Validation tables must use the full `docker compose run --rm studiomcp` invocation pattern.
 - Never show bare `studiomcp` or `cabal` commands without container context in phase docs.
-- The Dockerfile `env` target has no `CMD`; docker-compose.yaml has no `command`.
-- The production image may retain its runtime `ENTRYPOINT`/`CMD` because it runs in-cluster, not
-  as the outer development container.
+- The supported repository container contract uses a single-stage Dockerfile.
+- The supported repository container image uses `tini` as init and carries no Dockerfile `CMD`;
+  docker-compose.yaml has no `command`.
+- If long-lived server startup matters, document it at the Kubernetes/runtime layer rather than as
+  a compose or Dockerfile default.
 - Cross-reference [../documents/engineering/docker_policy.md](../documents/engineering/docker_policy.md)
   for the complete container workflow and LLM operating rules.
 

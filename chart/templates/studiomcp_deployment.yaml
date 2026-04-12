@@ -22,6 +22,7 @@ spec:
         - name: studiomcp
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/usr/bin/tini", "--", "studiomcp", "server"]
           env:
             - name: STUDIO_MCP_MODE
               value: {{ .Values.studiomcp.mode | quote }}

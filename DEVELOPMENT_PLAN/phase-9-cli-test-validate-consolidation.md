@@ -50,14 +50,17 @@ docker compose run --rm studiomcp studiomcp cluster ensure  # Required for integ
 | Aggregate test command | `docker compose run --rm studiomcp studiomcp test all` | Runs unit and integration suites through the CLI |
 | Unit tests | `docker compose run --rm studiomcp studiomcp test unit` | 867 examples, 0 failures on the current worktree |
 | Integration tests | `docker compose run --rm studiomcp studiomcp test integration` | 16 examples, 0 failures on the supported cluster path |
-| Aggregate validation | `docker compose run --rm studiomcp studiomcp validate all` | 28/28 validators pass on the supported cluster path |
+| Aggregate validation command | `docker compose run --rm studiomcp studiomcp validate all` | Runs the aggregate validator runner through the CLI and emits an aggregate summary |
 | Docs validation | `docker compose run --rm studiomcp studiomcp validate docs` | PASS |
 | CLI usage text | `docker compose run --rm studiomcp studiomcp --help` | Prints usage text containing `test` and `validate all` commands |
 
 ### Current Validation State
 
 - `docker compose run --rm studiomcp studiomcp test unit` passes with 867 examples and 0 failures on the current worktree.
-- `validate all` runs 28 validators sequentially and emits an aggregate summary.
+- `docker compose run --rm studiomcp studiomcp test integration` passes with 16 examples and 0 failures on the supported cluster path.
+- `docker compose run --rm studiomcp studiomcp test` passes through the canonical aggregate CLI entrypoint.
+- `validate all` remains the aggregate validator runner; it invokes 28 validators sequentially and emits an aggregate summary.
+- `docker compose run --rm studiomcp studiomcp validate all` passes with 28/28 validators on the current worktree.
 - The canonical `studiomcp` binary exposes `test`, `test all`, `test unit`, `test integration`, and `validate all` as first-class commands.
 - `docker compose run --rm studiomcp studiomcp --help` exits successfully and prints the supported CLI surface, including the reconciled cluster deploy commands.
 

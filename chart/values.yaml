@@ -146,6 +146,10 @@ llmReference:
       cpu: 4000m
       memory: 8Gi
 
+# Harbor registry is enabled only on the kind parity path.
+harbor:
+  enabled: false
+
 # Unified ingress configuration for web-facing services
 ingress:
   enabled: false
@@ -224,6 +228,8 @@ minio:
     - name: studiomcp-summaries
       policy: none
     - name: studiomcp-test-fixtures
+      policy: none
+    - name: studiomcp-harbor
       policy: none
 
 # Apache Pulsar message broker (apache/pulsar official chart)

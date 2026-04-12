@@ -12,9 +12,9 @@
 
 | Component | Technology | Deployment | Purpose | Durable State |
 |-----------|------------|------------|---------|---------------|
-| Outer dev container | Docker Compose | ephemeral via `run --rm` | Build/test shell and cluster control entrypoint with `studiomcp` on `PATH` | bind-mounted repo plus `./.data/` |
+| Outer dev container | Docker Compose | ephemeral via `run --rm`; one command per container | Build/test shell and cluster control entrypoint with `studiomcp` on `PATH` and no persistent daemon workflow | bind-mounted repo plus `./.data/` |
 | Local cluster | Kind | Docker-backed Kubernetes | Hosts the application and supporting services | host-backed volumes under `./.data/` |
-| Container registry | Harbor-compatible OCI registry | Local Docker container or external Harbor | Stores application images; Helm pulls from the configured registry | Registry storage |
+| Container registry | Harbor | In-cluster Helm deployment | Stores application images; all Helm workloads pull from Harbor | cluster storage |
 | Edge router | ingress-nginx | Helm release | Unified entrypoint for web services: `/mcp`, `/api`, `/kc`, `/minio` | none |
 | Identity provider | Keycloak | Helm release | Login/password auth and token issuance | Keycloak PostgreSQL |
 | Keycloak database | PostgreSQL | Helm release | Durable auth data | cluster storage |
@@ -67,8 +67,8 @@
 | Shared resumable session state | MCP session layer | Redis | Required for horizontal scale validation |
 | Immutable artifacts and memo objects | storage adapters | MinIO | Bulk bytes stay on the data plane |
 | Cluster deployment config | Helm values and chart templates | `chart/` | Defines the canonical route split, registry image flow, and `studiomcp-manual` storage settings |
-| Outer container workflow | Compose and Dockerfile | `docker-compose.yaml`, `docker/` | Ephemeral containers via `docker compose run --rm`; Dockerfile has no CMD, compose has no command |
-| Image registry | Harbor-compatible OCI registry | `STUDIOMCP_HARBOR_REGISTRY` or local `localhost:5001` | Application images; CLI pushes on change |
+| Outer container workflow | Compose and Dockerfile | `docker-compose.yaml`, `docker/` | Ephemeral one-command containers via `docker compose run --rm`; the repository Dockerfile is single-stage, uses `tini`, and has no `CMD`; compose has no `command`; Kubernetes workloads declare explicit startup commands |
+| Image registry | Harbor | cluster deployment and Harbor registry storage | Application images; the CLI populates Harbor with required images before Helm chart deployment |
 | Validation assets | repo fixtures | `examples/`, `test/` | Deterministic inputs for runtime validation |
 
 ## Cross-References
@@ -78,4 +78,6 @@
 - [phase-2-mcp-surface-catalog-artifact-governance.md](phase-2-mcp-surface-catalog-artifact-governance.md)
 - [phase-3-keycloak-auth-shared-sessions.md](phase-3-keycloak-auth-shared-sessions.md)
 - [phase-4-control-plane-data-plane-contract.md](phase-4-control-plane-data-plane-contract.md)
+- [phase-6-cluster-control-plane-parity.md](phase-6-cluster-control-plane-parity.md)
 - [phase-9-cli-test-validate-consolidation.md](phase-9-cli-test-validate-consolidation.md)
+- [phase-10-build-artifact-isolation.md](phase-10-build-artifact-isolation.md)

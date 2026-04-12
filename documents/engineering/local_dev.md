@@ -1,115 +1,13 @@
 # File: documents/engineering/local_dev.md
-# Local Development
+# Local Development Compatibility Note
 
-**Status**: Authoritative source
-**Supersedes**: legacy local development doc
-**Referenced by**: [../README.md](../README.md#documentation-suite), [testing.md](testing.md#cross-references), [k8s_native_dev_policy.md](k8s_native_dev_policy.md#cross-references), [../operations/runbook_local_debugging.md](../operations/runbook_local_debugging.md#cross-references), [../reference/cli_surface.md](../reference/cli_surface.md#cross-references)
+**Status**: Reference only
+**Supersedes**: N/A
+**Referenced by**: N/A
 
-> **Purpose**: Canonical local setup and workflow guide for contributors working on `studioMCP`.
+> **Purpose**: Compatibility entry point for older links that pointed at engineering-local-development guidance.
+> **📖 Authoritative Reference**: [Local Development](../development/local_dev.md#local-development)
 
-## Tooling Baseline
-
-- GHC 9.12.2
-- cabal-install 3.16.0.0
-- Docker for image builds and the host engine used by kind
-- Docker Compose for launching the outer development container
-- Helm for deployment rendering
-- kind for the local cluster
-- Skaffold for Kubernetes-oriented image and deploy workflows
-- host `./.data/` for explicit local PV backing paths
-
-## Common Commands
-
-- `docker compose -f docker-compose.yaml build studiomcp`
-- `docker compose -f docker-compose.yaml run --rm studiomcp cabal --builddir=/opt/build/studiomcp build all`
-- `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp test unit`
-- `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp test integration` (requires cluster)
-- `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate-dag examples/dags/transcode-basic.yaml`
-- `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp dag validate-fixtures`
-- `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate docs`
-- `docker compose -f docker-compose.yaml config`
-- `docker compose -f docker-compose.yaml run --rm studiomcp helm lint chart -f chart/values.yaml -f chart/values-kind.yaml`
-- `docker compose -f docker-compose.yaml run --rm studiomcp skaffold diagnose --yaml-only --profile kind`
-- `docker compose -f docker-compose.yaml run --rm studiomcp skaffold render --offline --profile kind --digest-source=tag`
-
-## Current Outer-Container Workflow
-
-The repo now includes the outer development-container service and the first native cluster commands. The intended invocation shape is:
-
-- `docker compose -f docker-compose.yaml build studiomcp`
-- `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp dag validate-fixtures`
-- `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp cluster up`
-- `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp cluster status`
-- `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp cluster storage reconcile`
-- `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp cluster deploy sidecars`
-- `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp cluster deploy server`
-- `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate cluster`
-- `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate executor`
-- `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate e2e`
-- `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate worker`
-- `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate pulsar`
-- `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate minio`
-- `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate boundary`
-- `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate ffmpeg-adapter`
-- `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate mcp-http`
-- `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate mcp-conformance`
-- `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate inference`
-- `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate observability`
-- `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate docs`
-
-The outer container talks to the same engine through `/var/run/docker.sock`.
-By default the CLI derives the host-visible `./.data/` path for kind from the outer container's `/.data/` bind mount. Set `STUDIOMCP_KIND_HOST_DATA_PATH` only as an override for non-standard Docker contexts.
-
-## Container Management
-
-All studioMCP containers use fixed names for idempotent management. This means:
-
-- Re-running commands automatically cleans up stale containers
-- No orphaned containers accumulate from interrupted tests
-- Container state is always predictable
-
-### Fixed Container Names
-
-| Container | Purpose | Created By |
-|-----------|---------|------------|
-| `studiomcp` | Kind cluster | `studiomcp cluster up` |
-| `studiomcp-test-redis` | Validation Redis | `validate mcp-session-store`, `validate mcp-horizontal-scale`, etc. |
-
-### Manual Cleanup
-
-If containers become orphaned (rare), clean them up with:
-
-```bash
-# View all studioMCP containers
-docker ps -a --filter "name=studiomcp"
-
-# Remove all studioMCP containers
-docker rm -f $(docker ps -aq --filter "name=studiomcp")
-
-# Or prune specific containers
-docker rm -f studiomcp-test-redis
-```
-
-The kind cluster container can be removed with:
-
-```bash
-kind delete cluster --name studiomcp
-```
-
-## Working Rule
-
-From Phase 1 onward, do not proceed to the next implementation phase until the Haskell build succeeds and the phase-relevant native CLI validations pass.
-
-Target rule: for cluster and deployment work, enter the outer development container and run `studiomcp` there.
-Do not add new repository helper scripts for developer workflows.
-Do not rely on dynamic storage classes for local development; use the explicit `.data/` plus manual-PV flow defined in [k8s_storage.md](k8s_storage.md#kubernetes-storage-policy).
-Current repo note: the outer-container workflow is now verified on this machine for `cluster up`, `cluster status`, `cluster deploy sidecars`, `validate cluster`, `validate executor`, `validate e2e`, `validate worker`, `validate pulsar`, `validate minio`, `validate boundary`, `validate ffmpeg-adapter`, `validate mcp-http`, `validate mcp-conformance`, `validate inference`, `validate observability`, and `validate docs`. The shipped kind values use manual host-backed PVs for stateful sidecars, and `cluster storage reconcile` applies those PVs before Helm deployment.
-Use [../documentation_standards.md](../documentation_standards.md#studiomcp-documentation-standards) as the SSoT for documentation rules.
-
-## Cross-References
-
-- [Testing Doctrine](testing.md#testing-doctrine)
-- [Kubernetes-Native Development Policy](k8s_native_dev_policy.md#kubernetes-native-development-policy)
-- [Kubernetes Storage Policy](k8s_storage.md#kubernetes-storage-policy)
-- [CLI Surface Reference](../reference/cli_surface.md#cli-surface-reference)
-- [Documentation Standards](../documentation_standards.md#studiomcp-documentation-standards)
+Use [../development/local_dev.md](../development/local_dev.md#local-development) as the canonical
+local setup and workflow guide. The governed local-development contract lives under
+`documents/development/`, not `documents/engineering/`.

@@ -18,6 +18,10 @@ dependencies:
     repository: https://pulsar.apache.org/charts
     version: "~3"
     condition: pulsar.enabled
+  - name: harbor
+    repository: https://helm.goharbor.io
+    version: "~1.18"
+    condition: harbor.enabled
   # Bitnami charts for services lacking official HA
   - name: postgresql-ha
     repository: https://charts.bitnami.com/bitnami

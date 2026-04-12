@@ -1,4 +1,4 @@
-FROM ubuntu:24.04 AS os-base
+FROM ubuntu:24.04
 
 ARG DEBIAN_FRONTEND=noninteractive
 
@@ -26,6 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     sox \
     tar \
+    tini \
     unzip \
     wget \
     xz-utils \
@@ -33,10 +34,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && rm -rf /var/lib/apt/lists/*
 
 RUN apt-get update && apt-get install -y --no-install-recommends blender || true
-
-FROM os-base AS env
-
-COPY --from=minio/mc:latest /usr/bin/mc /usr/local/bin/mc
 
 ARG GHC_VERSION=9.12.2
 ARG CABAL_VERSION=3.16.0.0
@@ -49,6 +46,7 @@ ARG TARGETARCH
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     docker.io \
+    skopeo \
   && rm -rf /var/lib/apt/lists/*
 
 RUN if [ -z "${TARGETARCH}" ]; then TARGETARCH="$(dpkg --print-architecture)"; fi && \
@@ -72,6 +70,8 @@ RUN if [ -z "${TARGETARCH}" ]; then TARGETARCH="$(dpkg --print-architecture)"; f
     tar -xzf /tmp/helm.tgz -C /tmp && \
     mv "/tmp/linux-${STUDIO_ARCH}/helm" /usr/local/bin/helm && \
     chmod +x /usr/local/bin/helm && \
+    curl -fsSL -o /usr/local/bin/mc "https://dl.min.io/client/mc/release/linux-${STUDIO_ARCH}/mc" && \
+    chmod +x /usr/local/bin/mc && \
     mkdir -p /usr/libexec/docker/cli-plugins && \
     curl -fsSL -o /usr/libexec/docker/cli-plugins/docker-buildx "https://github.com/docker/buildx/releases/download/${BUILDX_VERSION}/buildx-${BUILDX_VERSION}.linux-${STUDIO_ARCH}" && \
     chmod +x /usr/libexec/docker/cli-plugins/docker-buildx && \
@@ -89,17 +89,4 @@ RUN mkdir -p /opt/build/studiomcp && \
     cabal update && \
     cabal --builddir=/opt/build/studiomcp build all && \
     cabal --builddir=/opt/build/studiomcp install exe:studiomcp --installdir /usr/local/bin --overwrite-policy=always
-
-FROM os-base AS production
-
-WORKDIR /app
-
-ENV LANG="C.UTF-8" \
-    LC_ALL="C.UTF-8"
-
-COPY --from=env /usr/local/bin/studiomcp /usr/local/bin/studiomcp
-COPY --from=env /usr/local/bin/kubectl /usr/local/bin/kubectl
-COPY --from=env /usr/local/bin/mc /usr/local/bin/mc
-
-ENTRYPOINT ["studiomcp"]
-CMD ["server"]
+ENTRYPOINT ["tini", "--"]

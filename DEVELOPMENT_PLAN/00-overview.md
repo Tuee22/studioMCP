@@ -26,14 +26,14 @@
 |-------|--------|-------|
 | 1 | Done | Repository, DAG execution, tool boundaries, worker runtime, and inference entrypoints are implemented and validated |
 | 2 | Done | MCP protocol surface, artifact governance, and observability are implemented and validated |
-| 3 | Done | Keycloak-backed auth and shared Redis session behavior are implemented and validated |
+| 3 | Done | Keycloak-backed auth and shared Redis session behavior are implemented, validated, and documented against the stable Phase 2 MCP catalog |
 | 4 | Done | Control-plane route split and object-storage public endpoint contract are explicit and validated |
-| 5 | Done | Browser login, session, refresh, and logout behavior are cookie-first and validated |
-| 6 | Done | Kind and Helm expose the canonical control-plane contract through unified ingress, registry-backed image pulls, CLI-managed secrets, and CLI-owned storage reconciliation |
-| 7 | Done | Keycloak realm bootstrap is automated and idempotent on the default cluster path |
-| 8 | Done | The full regression gate now passes on the supported outer-container and Kind-based workflow |
+| 5 | Done | Browser login, session, refresh, and logout behavior are cookie-first, validated, and aligned across the BFF and web-surface docs |
+| 6 | Done | The cluster plan uses an in-cluster Harbor deployment as the registry source for all Helm workloads, with the CLI responsible for Harbor population before Helm chart deployment |
+| 7 | Done | Keycloak realm bootstrap is automated and idempotent on the default cluster path, and the runbook now documents the CLI-driven path without retired compose-era guidance |
+| 8 | Done | The canonical regression gate remains `docker compose run --rm studiomcp studiomcp validate all`, and the final closure work now includes aligned suite indexes, one canonical doc per governed concept, and refreshed top-level status summaries |
 | 9 | Done | CLI test and validate commands consolidated with unified interface and documentation |
-| 10 | Done | Build artifact isolation, ephemeral container operation, and minimal compose mounts are implemented |
+| 10 | Done | Build artifact isolation and the one-command container contract are implemented: single-stage Dockerfile, `tini`, no Dockerfile `CMD`, no compose `command`, and Kubernetes-owned runtime startup |
 
 ## Public Topology Baseline
 
@@ -47,6 +47,8 @@ The supported local and cluster topology is:
 - Keycloak uses its own PostgreSQL store
 - MCP listener nodes externalize resumable session state to Redis
 - runtime services use Pulsar and MinIO for eventing and immutable artifact storage
+- Harbor runs on the cluster and serves as the image source for Helm-managed workloads
+- the CLI populates Harbor with required application images before Helm chart deployment begins
 - local cluster persistence uses CLI-reconciled PVs backed by `./.data/` through the `studiomcp-manual` StorageClass
 - all durable local filesystem state lives under `./.data/`
 
@@ -55,13 +57,21 @@ The supported local and cluster topology is:
 - Browser auth is intentionally simplified to login/password over TLS to the BFF plus an HTTP-only
   session cookie. Redirect-based OAuth/PKCE is deferred.
 - Keycloak remains the identity backend and JWT issuer.
-- `docker-compose.yaml` runs ephemeral containers via `docker compose run --rm -it studiomcp <cmd>`.
-  No persistent daemon; the `env` image has no CMD and compose has no command.
+- `docker-compose.yaml` is a one-command launcher only: every supported CLI action uses
+  `docker compose run --rm studiomcp studiomcp <subcommand>`.
+  `docker compose up` and `docker compose exec` are not supported workflow examples.
+- The supported repository container contract uses a single-stage Dockerfile with `tini` as init,
+  no Dockerfile `CMD`, and no compose `command`.
+  Kubernetes manifests own explicit runtime startup for the in-cluster path rather than the
+  development container.
 - Environment variables (`LANG`, `LC_ALL`) are set only in the Dockerfile; compose inherits from image.
 - Compose mounts are minimal: workspace, `.data`, and docker socket only.
 - Web portals route through the ingress control-plane port: `/mcp`, `/api`, `/kc`, and `/minio`.
-- Helm deploys pull application containers from the configured Harbor-compatible registry; the CLI
-  idempotently pushes images on change when the registry exposes a comparable manifest digest.
+- Harbor is an in-cluster deployment, not a sidecar or other registry container
+  running outside the cluster.
+- All Helm deploys pull application containers from Harbor.
+- The CLI is responsible for populating Harbor with the required application images before Helm
+  chart deployment.
 - Cluster secrets are managed by the CLI on deploy; no env files.
 - Stateful Helm workloads bind only to the CLI-reconciled `studiomcp-manual` StorageClass; no
   default dynamic storage class remains on the supported local path.

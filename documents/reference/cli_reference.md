@@ -11,7 +11,7 @@ The `studiomcp` CLI is the canonical interface for all development, validation, 
 
 ## Execution Context
 
-All CLI commands run inside the outer `studiomcp` container. Bootstrap and invoke as follows:
+All CLI commands run inside one-off outer `studiomcp` containers. Bootstrap and invoke as follows:
 
 ```bash
 # Bootstrap (run on host)
@@ -20,6 +20,9 @@ docker compose build
 # Invoke CLI commands (run inside container)
 docker compose run --rm studiomcp studiomcp <command>
 ```
+
+Each command creates its own container and removes it on exit. `docker compose up` and
+`docker compose exec` are not supported outer-container workflow examples.
 
 See [DEVELOPMENT_PLAN/development_plan_standards.md](../../DEVELOPMENT_PLAN/development_plan_standards.md#l-container-execution-context) for the complete container workflow.
 

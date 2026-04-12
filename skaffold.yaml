@@ -10,7 +10,6 @@ build:
     - image: studiomcp
       docker:
         dockerfile: docker/Dockerfile
-        target: production
       sync:
         manual:
           - src: "documents/**/*.md"

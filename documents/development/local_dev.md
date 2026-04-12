@@ -12,7 +12,7 @@
 - GHC 9.12.2
 - cabal-install 3.16.0.0
 - Docker for image builds and the host engine used by kind
-- Docker Compose for launching the outer development container
+- Docker Compose for launching one-off outer development containers
 - Helm for deployment rendering
 - kind for the local cluster
 - Skaffold for Kubernetes-oriented image and deploy workflows
@@ -57,14 +57,38 @@ The repo now includes the outer development-container service and the first nati
 - `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate observability`
 - `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate docs`
 
+Each supported command creates its own outer container and removes it on exit.
+Do not use `docker compose up` or `docker compose exec` as the development workflow.
 The outer container talks to the same engine through `/var/run/docker.sock`.
 By default the CLI derives the host-visible `./.data/` path for kind from the outer container's `/.data/` bind mount. Set `STUDIOMCP_KIND_HOST_DATA_PATH` only as an override for non-standard Docker contexts.
+
+## Container Management
+
+All repo-managed validation containers use fixed names for idempotent cleanup and repeatable
+debugging.
+
+### Fixed Container Names
+
+| Container | Purpose | Created By |
+|-----------|---------|------------|
+| `studiomcp` | Kind cluster | `studiomcp cluster up` |
+| `studiomcp-test-redis` | Validation Redis | session-store and horizontal-scale validators |
+
+### Manual Cleanup
+
+If local test infrastructure is interrupted, use predictable names for cleanup:
+
+```bash
+docker ps -a --filter "name=studiomcp"
+docker rm -f studiomcp-test-redis
+kind delete cluster --name studiomcp
+```
 
 ## Working Rule
 
 From Phase 1 onward, do not proceed to the next implementation phase until the Haskell build succeeds and the phase-relevant native CLI validations pass.
 
-Target rule: for cluster and deployment work, enter the outer development container and run `studiomcp` there.
+Target rule: for cluster and deployment work, invoke `studiomcp` through one-off `docker compose run --rm` containers.
 Do not add new repository helper scripts for developer workflows.
 Do not rely on dynamic storage classes for local development; use the explicit `.data/` plus manual-PV flow defined in [../engineering/k8s_storage.md](../engineering/k8s_storage.md#kubernetes-storage-policy).
 Current repo note: the outer-container workflow is now verified on this machine for `cluster up`, `cluster status`, `cluster deploy sidecars`, `validate cluster`, `validate executor`, `validate e2e`, `validate worker`, `validate pulsar`, `validate minio`, `validate boundary`, `validate ffmpeg-adapter`, `validate mcp-http`, `validate mcp-conformance`, `validate inference`, `validate observability`, and `validate docs`. The shipped kind values use manual host-backed PVs for stateful sidecars, and `cluster storage reconcile` applies those PVs before Helm deployment.

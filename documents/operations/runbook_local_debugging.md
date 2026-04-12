@@ -18,7 +18,7 @@ This runbook covers the repo as it exists today:
 - Helm and Skaffold render validation
 - documentation validation
 
-It assumes that cluster-management actions flow through the outer development container and the `studiomcp` CLI.
+It assumes that cluster-management actions flow through one-off outer development containers and the `studiomcp` CLI.
 
 ## Primary Checks
 
@@ -61,6 +61,8 @@ The repo now includes the intended outer-container entrypoint and the validated 
 15. `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate observability`
 16. `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate docs`
 
+Each supported command creates its own outer container and removes it on exit.
+Do not use `docker compose up` or `docker compose exec` as the debugging workflow.
 The outer container should talk to the mounted daemon socket at `/var/run/docker.sock`.
 The CLI derives the host-visible `./.data/` path for kind from the outer container bind mount by default. Set `STUDIOMCP_KIND_HOST_DATA_PATH` only to override that discovery for a non-standard Docker context.
 
@@ -104,7 +106,7 @@ Use these commands to leave the repo in a clean local validation state:
 
 - stop any ad hoc local processes you started for debugging
 - `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp cluster down` if you want to remove the kind cluster
-- `docker compose -f docker-compose.yaml down` if you want to stop the outer development container
+- there is no long-running outer development container to stop; one-off `docker compose run --rm` containers exit automatically
 
 ## Cross-References
 

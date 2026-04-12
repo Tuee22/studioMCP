@@ -9,12 +9,13 @@
 
 ## Summary
 
-`studioMCP` uses Docker for two different purposes:
+`studioMCP` uses one repository container image in two execution contexts:
 
-- an outer development container that owns local build and cluster-management workflows
-- a runtime image for the MCP server that is built locally but runs only inside the kind cluster
+- one-off outer development containers that own local build and cluster-management workflows
+- in-cluster application containers scheduled by Helm inside kind or other Kubernetes environments
 
-These are different concerns and must stay separate in both code and documentation.
+These contexts share a Dockerfile but not startup semantics. Compose is only a one-command
+launcher. Kubernetes manifests own long-lived runtime startup.
 
 ## No Scripts Rule
 
@@ -35,11 +36,11 @@ Not allowed:
 - repository-owned shell helpers for docs validation
 - repository-owned shell helpers for Helm, kind, or integration orchestration
 
-## Two-Image Strategy
+## Single-Image Strategy
 
-The single Dockerfile under `docker/Dockerfile` must remain multi-stage.
+The single Dockerfile under `docker/Dockerfile` must remain single-stage.
 
-### Outer Development Container
+### One-Off Outer Development Container
 
 The outer development container exists to run the Haskell toolchain and the `studiomcp` CLI in a reproducible environment.
 
@@ -50,17 +51,20 @@ It must include:
 - `kind`
 - `kubectl`
 - `helm`
+- `tini`
 - the `studiomcp` CLI binary or build path
 
-This is the container that local humans and LLMs interact with.
+This is the image that local humans and LLMs invoke through `docker compose run --rm`.
 
-### Runtime Image
+### In-Cluster Runtime Use
 
-The runtime image exists to run the actual MCP server in Kubernetes.
+The same image is also pushed to the registry and run in Kubernetes.
 
-- it is built by the multi-stage Dockerfile
-- it is not the primary local interactive development environment
-- it should be scheduled only inside the kind cluster during local development
+- Helm manifests choose the runtime startup command explicitly at the workload layer
+- the supported local kind deploy path forces fresh pulls of the pushed registry image
+- the Dockerfile carries no default `CMD`
+- Compose is not the runtime topology
+- the image should be scheduled only inside the kind cluster during local development
 
 ## Docker Context Handling
 
@@ -141,25 +145,28 @@ Rules:
 
 ## Compose Role
 
-`docker-compose.yaml` exists to run ephemeral development containers via `docker compose run --rm`.
+`docker-compose.yaml` exists to launch one-off development containers via `docker compose run --rm`.
 
-The ephemeral container model means:
-- Dockerfile `env` target has no `CMD`
-- docker-compose.yaml service has no `command`
-- All operations use `docker compose run --rm -it studiomcp <cmd>`
-- No long-running container; container removed after each command
-- Interactive sessions: `docker compose run --rm -it studiomcp sh`
+The one-command container model means:
+- The Dockerfile uses `ENTRYPOINT ["tini", "--"]`
+- The Dockerfile has no `CMD`
+- `docker-compose.yaml` has no service `command`
+- All operations use `docker compose run --rm studiomcp <cmd>`
+- No long-running container; each command gets its own container
+- Interactive sessions use `docker compose run --rm -it studiomcp sh`
+- `docker compose up` and `docker compose exec` are not supported outer-container workflows
 
 Compose must not become:
 
 - the canonical runtime topology for the MCP server
 - the place where the full application stack lives long term
 - a substitute for the Haskell CLI
-- a persistent daemon via `docker compose up -d`
+- a persistent daemon or `exec`-driven shell loop
 
 ## LLM Operating Rule
 
-When an LLM needs to manage the local Kubernetes lifecycle, it should do so using ephemeral containers and invoking the Haskell CLI.
+When an LLM needs to manage the local Kubernetes lifecycle, it should do so using one-off
+containers and invoking the Haskell CLI.
 
 The canonical shape is:
 
@@ -184,9 +191,11 @@ Required naming convention:
 | Purpose | Container Name | Notes |
 |---------|---------------|-------|
 | Kind cluster | `studiomcp` | Via `STUDIOMCP_KIND_CLUSTER` env var |
-| Local image registry | `studiomcp-harbor-registry` | Used when `STUDIOMCP_HARBOR_REGISTRY` is not set |
 | Validation Redis | `studiomcp-test-redis` | Used by `withTemporaryRedisConfig` |
 | Future test containers | `studiomcp-test-{service}` | Follow this pattern for new services |
+
+The in-cluster Harbor deployment is Helm-managed Kubernetes state, not a Docker container naming
+requirement for the outer-container workflow.
 
 Rationale:
 
@@ -215,8 +224,11 @@ All Helm deploys to the cluster pull application containers from the configured 
 - Push only when image digest differs from the registry manifest when that digest is available
 - Helm charts reference the configured registry repository, never local-only image loading
 - No direct `kind load docker-image` usage; application images flow through the configured registry
-- `STUDIOMCP_HARBOR_REGISTRY` can point at a real Harbor registry; local kind defaults to a
-  CLI-managed `localhost:5001` registry container
+- `STUDIOMCP_HARBOR_REGISTRY` can point at another Harbor-compatible registry host when an override
+  is required
+- The default local Kind path uses the in-cluster Harbor deployment exposed at
+  `host.docker.internal:32443` for pushes from the outer development container and
+  `localhost:32443` for pulls from Kind nodes
 
 The CLI commands for registry integration:
 
@@ -230,7 +242,11 @@ docker compose run --rm studiomcp studiomcp cluster deploy server
 
 ## Current Repo Note
 
-This policy is materially embodied. The legacy top-level `scripts/` directory and Docker shell assets are gone, the multi-stage Dockerfile defines both `env` and `production` targets, the outer-container workflow is ephemeral, build artifacts stay under `/opt/build/studiomcp`, and cluster deploys use registry-backed image pulls with CLI-managed secrets.
+This policy is materially embodied. The legacy top-level `scripts/` directory and Docker shell
+assets are gone, the Dockerfile is single-stage, the image entrypoint is `tini`, the Dockerfile
+has no `CMD`, the outer-container workflow is one command per `docker compose run --rm`, build
+artifacts stay under `/opt/build/studiomcp`, and cluster deploys use registry-backed image pulls
+with Kubernetes-owned runtime startup and fresh local repulls of the pushed registry image.
 
 ## Cross-References
 
