@@ -36,6 +36,7 @@ Ensure the Kind and Helm workflow exposes the canonical control-plane contract w
 | Harbor-backed image flow | `src/StudioMCP/CLI/Cluster.hs`, `kind/kind_config.yaml`, `chart/values.yaml`, `chart/values-kind.yaml` | Done |
 | CLI-owned storage reconciliation | `src/StudioMCP/CLI/Cluster.hs`, `chart/values.yaml`, `chart/values-kind.yaml` | Done |
 | CLI-managed secrets | `src/StudioMCP/CLI/Cluster.hs`, `chart/values.yaml` | Done |
+| Event-driven service endpoint publication gate after server rollout | `src/StudioMCP/CLI/Cluster.hs` | Done |
 
 ## Unified Ingress Routing
 
@@ -125,6 +126,18 @@ chart dependencies with `helm dependency build chart` so the supported `cluster 
 `cluster deploy sidecars`, and `cluster deploy server` flows do not depend on a pre-populated
 `chart/charts/` directory.
 
+## Event-Driven Service Endpoint Readiness
+
+The supported `cluster deploy server` path treats deployment rollout and service endpoint
+publication as separate readiness events.
+
+- `kubectl rollout status` closes the deployment-level readiness event for the `studiomcp` and
+  `studiomcp-bff` workloads.
+- `kubectl wait` on the Kubernetes `EndpointSlice` object closes the routing-level readiness event
+  for those services.
+- Live edge validators begin only after both events have closed, so `/mcp` and `/api` do not rely
+  on validator-local HTTP retry loops to absorb post-rollout endpoint publication lag.
+
 ## CLI-Owned Storage Reconciliation
 
 The supported Kind path now includes explicit storage reconciliation before Helm deployment.
@@ -195,7 +208,7 @@ edge with Harbor-backed image references.
 | Helm template | `docker compose run --rm studiomcp helm template studiomcp chart -f chart/values.yaml -f chart/values-kind.yaml` | Renders unified ingress |
 | Storage reconcile | `docker compose run --rm studiomcp studiomcp cluster storage reconcile` | `studiomcp-manual` and required PVs applied idempotently |
 | Cluster ensure | `docker compose run --rm studiomcp studiomcp cluster ensure` | Shared services, ingress, storage policy, and realm bootstrap converge |
-| Cluster deploy server | `docker compose run --rm studiomcp studiomcp cluster deploy server` | MCP and BFF workloads are running with Harbor-backed image references |
+| Cluster deploy server | `docker compose run --rm studiomcp studiomcp cluster deploy server` | MCP and BFF workloads are running with Harbor-backed image references and published service endpoints |
 | Integration tests | `docker compose run --rm studiomcp studiomcp test integration` | Pass on the supported parity path |
 | Storage policy | `docker compose run --rm studiomcp studiomcp validate storage-policy` | PASS |
 | Sidecar edge reachability | `docker compose run --rm studiomcp curl -fsS localhost:8081/kc/realms/studiomcp/.well-known/openid-configuration` and `docker compose run --rm studiomcp curl -fsS localhost:8081/minio/` | `/kc` and `/minio` are reachable through ingress at 8081 |
@@ -222,6 +235,7 @@ None. This phase is complete on the current supported path.
 **Cross-references to add:**
 - Keep [phase-4-control-plane-data-plane-contract.md](phase-4-control-plane-data-plane-contract.md) aligned when ingress behavior changes.
 - Keep [system-components.md](system-components.md) aligned when deployment topology changes.
+- Keep [README.md](README.md) and [00-overview.md](00-overview.md) aligned when deploy-time readiness semantics change.
 
 ## Cross-References
 

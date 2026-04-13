@@ -85,6 +85,7 @@ A phase can move to `Done` only when all of the following are true:
 **Cluster-Dependent Coverage:**
 - The supported cluster path is now clean end to end: `cluster ensure`, integration tests, the full test suite, and `validate all` all pass through the outer-container CLI.
 - `cluster ensure` now tolerates stale pending Helm revisions on the supported local path, and the kind-specific PostgreSQL HA pgpool settings fit the single-node resource envelope used for local validation.
+- `cluster deploy server` now blocks on Kubernetes service endpoint publication for `studiomcp` and `studiomcp-bff` before live edge validators hit `/mcp` or `/api`.
 - Integration tests and aggregate validation continue to exercise Keycloak, MinIO, Pulsar, ingress routing, MCP HTTP, BFF session flows, horizontal scale, observability, and conformance through the live cluster path.
 
 ## Phase Details

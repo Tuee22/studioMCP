@@ -85,8 +85,10 @@ docker compose run --rm studiomcp studiomcp cluster ensure
 - Redis health checks and image-build-skip handling remain part of the supported local workflow.
 - The outer development container installs `studiomcp` to `/usr/local/bin`, so the supported
   workflow invokes the CLI directly by name inside `studiomcp`.
-- MCP session bootstrap retries the `notifications/initialized` step across transient rollout-time
-  `401`, `502`, `503`, and `504` responses.
+- Live server deploy now blocks on Kubernetes service endpoint publication for `studiomcp` and
+  `studiomcp-bff` before `/mcp` or `/api` edge validation begins.
+- MCP session bootstrap retry handling remains available for outage-recovery and scale-transition
+  validations, but steady-state live edge readiness no longer depends on validator-local HTTP retries.
 - The live horizontal-scale validator accepts both existing-session recovery and clean
   post-recovery MCP session re-establishment after a Redis outage.
 - MinIO readiness checks wait for write quorum (`/minio/health/cluster`) before DAG execution

@@ -945,6 +945,8 @@ clusterDeploy target = do
       restartWorkloadIfExists "deployment/studiomcp-bff"
       waitForWorkloadRollout "deployment/studiomcp" "480s"
       waitForWorkloadRollout "deployment/studiomcp-bff" "480s"
+      waitForServiceEndpointPublication "studiomcp" "300s"
+      waitForServiceEndpointPublication "studiomcp-bff" "300s"
 
 kindSidecarsReady :: ImageRegistryConfig -> IO Bool
 kindSidecarsReady registryConfig = do
@@ -1046,6 +1048,39 @@ waitForWorkloadRollout workload timeoutValue = do
 waitForNamespacedWorkloadRollout :: String -> String -> String -> IO ()
 waitForNamespacedWorkloadRollout workload namespace timeoutValue =
   callProcess "kubectl" ["rollout", "status", workload, "-n", namespace, "--timeout=" <> timeoutValue]
+
+waitForServiceEndpointPublication :: String -> String -> IO ()
+waitForServiceEndpointPublication serviceName timeoutValue = do
+  serviceExists <- kubectlResourceExists ("service/" <> serviceName)
+  when serviceExists $ do
+    (exitCode, stdoutText, stderrText) <-
+      readProcessWithExitCode
+        "kubectl"
+        [ "get"
+        , "endpointslices"
+        , "-l"
+        , "kubernetes.io/service-name=" <> serviceName
+        , "-o"
+        , "jsonpath={.items[0].metadata.name}"
+        ]
+        ""
+    endpointSliceName <-
+      case (exitCode, trimLine stdoutText) of
+        (ExitSuccess, sliceName) | not (null sliceName) -> pure sliceName
+        _ ->
+          die
+            ( "Failed to resolve an EndpointSlice for service '"
+                <> serviceName
+                <> "': "
+                <> trimLine stderrText
+            )
+    callProcess
+      "kubectl"
+      [ "wait"
+      , "--for=jsonpath={.endpoints[0].conditions.ready}=true"
+      , "endpointslice/" <> endpointSliceName
+      , "--timeout=" <> timeoutValue
+      ]
 
 kubectlResourceExists :: String -> IO Bool
 kubectlResourceExists resourceName = do
@@ -5809,8 +5844,8 @@ validateMcpConformance = do
   let baseUrl = internalBaseUrl
   do
     -- Note: We skip waitForHttpStatusWithTimeout here because clusterDeploy DeployServer
-    -- already waits for all workload rollouts to complete (studiomcp, studiomcp-bff, studiomcp-redis-node).
-    -- The pods are ready to serve requests at this point.
+    -- already waits for the server and BFF rollouts plus Kubernetes service endpoint
+    -- publication, so the live edge has routable backends before validation begins.
     sessionHeaders <- initializeMcpSessionWithHeaders manager baseUrl authHeaders
 
     -- Test 3: Tool catalog conformance

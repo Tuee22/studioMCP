@@ -29,7 +29,7 @@
 | 3 | Done | Keycloak-backed auth and shared Redis session behavior are implemented, validated, and documented against the stable Phase 2 MCP catalog |
 | 4 | Done | Control-plane route split and object-storage public endpoint contract are explicit and validated |
 | 5 | Done | Browser login, session, refresh, and logout behavior are cookie-first, validated, and aligned across the BFF and web-surface docs |
-| 6 | Done | The cluster plan uses an in-cluster Harbor deployment as the registry source for all Helm workloads, with the CLI responsible for Harbor population before Helm chart deployment |
+| 6 | Done | The cluster plan uses an in-cluster Harbor deployment as the registry source for all Helm workloads, with the CLI responsible for Harbor population and event-driven service endpoint publication before live edge validation |
 | 7 | Done | Keycloak realm bootstrap is automated and idempotent on the default cluster path, and the runbook now documents the CLI-driven path without retired compose-era guidance |
 | 8 | Done | The canonical regression gate remains `docker compose run --rm studiomcp studiomcp validate all`, and the final closure work now includes aligned suite indexes, one canonical doc per governed concept, and refreshed top-level status summaries |
 | 9 | Done | CLI test and validate commands consolidated with unified interface and documentation |
@@ -49,6 +49,7 @@ The supported local and cluster topology is:
 - runtime services use Pulsar and MinIO for eventing and immutable artifact storage
 - Harbor runs on the cluster and serves as the image source for Helm-managed workloads
 - the CLI populates Harbor with required application images before Helm chart deployment begins
+- server deploy waits for Kubernetes service endpoint publication before live ingress validation begins
 - local cluster persistence uses CLI-reconciled PVs backed by `./.data/` through the `studiomcp-manual` StorageClass
 - all durable local filesystem state lives under `./.data/`
 
@@ -72,6 +73,8 @@ The supported local and cluster topology is:
 - All Helm deploys pull application containers from Harbor.
 - The CLI is responsible for populating Harbor with the required application images before Helm
   chart deployment.
+- The CLI treats workload rollout plus Kubernetes service endpoint publication as the readiness
+  contract for live `/mcp` and `/api` validation.
 - Cluster secrets are managed by the CLI on deploy; no env files.
 - Stateful Helm workloads bind only to the CLI-reconciled `studiomcp-manual` StorageClass; no
   default dynamic storage class remains on the supported local path.

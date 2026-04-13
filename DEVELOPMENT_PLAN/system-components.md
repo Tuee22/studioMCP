@@ -15,7 +15,7 @@
 | Outer dev container | Docker Compose | ephemeral via `run --rm`; one command per container | Build/test shell and cluster control entrypoint with `studiomcp` on `PATH` and no persistent daemon workflow | bind-mounted repo plus `./.data/` |
 | Local cluster | Kind | Docker-backed Kubernetes | Hosts the application and supporting services | host-backed volumes under `./.data/` |
 | Container registry | Harbor | In-cluster Helm deployment | Stores application images; all Helm workloads pull from Harbor | cluster storage |
-| Edge router | ingress-nginx | Helm release | Unified entrypoint for web services: `/mcp`, `/api`, `/kc`, `/minio` | none |
+| Edge router | ingress-nginx | Helm release | Unified entrypoint for web services: `/mcp`, `/api`, `/kc`, `/minio`; depends on published ready service endpoints for live edge validation | none |
 | Identity provider | Keycloak | Helm release | Login/password auth and token issuance | Keycloak PostgreSQL |
 | Keycloak database | PostgreSQL | Helm release | Durable auth data | cluster storage |
 | Session store | Redis | Helm release | Shared MCP and browser-adjacent session coordination | in-cluster runtime state |
@@ -41,7 +41,7 @@
 | Auth middleware | `src/StudioMCP/Auth/*.hs` | JWT validation, claims extraction, scope enforcement, and Keycloak integration |
 | Worker runtime | `src/StudioMCP/Worker/Server.hs` | Runtime worker validation and execution entrypoint |
 | Inference runtime | `src/StudioMCP/Inference/*.hs` | Advisory inference service and related validation path |
-| Cluster CLI | `src/StudioMCP/CLI/Cluster.hs` | Cluster ensure/deploy/bootstrap operations |
+| Cluster CLI | `src/StudioMCP/CLI/Cluster.hs` | Cluster ensure/deploy/bootstrap operations plus event-driven post-rollout service endpoint readiness gates |
 | Docs validator | `src/StudioMCP/CLI/Docs.hs` | Documentation validation entrypoint |
 | Test CLI | `src/StudioMCP/CLI/Test.hs` | Test command handlers for unit and integration tests |
 
