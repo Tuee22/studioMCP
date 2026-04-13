@@ -108,12 +108,16 @@ spec:
               port: {{ .Values.bff.health.livenessProbe.port }}
             initialDelaySeconds: {{ .Values.bff.health.livenessProbe.initialDelaySeconds }}
             periodSeconds: {{ .Values.bff.health.livenessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.bff.health.livenessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.bff.health.livenessProbe.failureThreshold }}
           readinessProbe:
             httpGet:
               path: {{ .Values.bff.health.readinessProbe.path }}
               port: {{ .Values.bff.health.readinessProbe.port }}
             initialDelaySeconds: {{ .Values.bff.health.readinessProbe.initialDelaySeconds }}
             periodSeconds: {{ .Values.bff.health.readinessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.bff.health.readinessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.bff.health.readinessProbe.failureThreshold }}
           {{- end }}
 ---
 apiVersion: v1

@@ -29,9 +29,11 @@ module StudioMCP.Web.Handlers
 where
 
 import Control.Applicative ((<|>))
+import Control.Concurrent.Async (mapConcurrently)
 import Control.Concurrent (threadDelay)
 import Data.Aeson (FromJSON, ToJSON, decode, encode, object, (.=))
 import qualified Data.ByteString.Builder as Builder
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (find)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -45,6 +47,7 @@ import Network.HTTP.Types
     status400,
     status401,
     status404,
+    status503,
   )
 import Network.Wai
   ( Application,
@@ -59,24 +62,50 @@ import Network.Wai
     requestHeaders,
   )
 import StudioMCP.DAG.Summary (RunId (..))
+import StudioMCP.API.Readiness
+  ( ReadinessCheck,
+    ReadinessReport (..),
+    ReadinessStatus (..),
+    blockedCheck,
+    buildReadinessReport,
+    probeAnyHttpCheck,
+    probeHttpCheck,
+    readinessHttpStatus,
+    readyCheck,
+    renderBlockingChecks,
+  )
+import StudioMCP.Auth.Config (AuthConfig (..), jwksEndpoint)
+import StudioMCP.DAG.Runtime (RuntimeConfig (..))
+import StudioMCP.Inference.ReferenceModel (ReferenceModelConfig (..))
+import StudioMCP.MCP.Tools (ToolCatalog (..))
+import StudioMCP.Messaging.Pulsar (PulsarConfig (..))
+import StudioMCP.Storage.MinIO (MinIOConfig (..))
+import StudioMCP.Util.Logging (logInfo)
 import StudioMCP.Web.BFF
 import StudioMCP.Web.Types
 
 -- | BFF context containing service and configuration
 data BFFContext = BFFContext
   { bffCtxService :: BFFService,
-    bffCtxConfig :: BFFConfig
+    bffCtxConfig :: BFFConfig,
+    bffCtxReadinessSummaryRef :: IORef (Maybe Text)
   }
 
 -- | Create a new BFF context
 newBFFContext :: BFFConfig -> IO BFFContext
 newBFFContext config = do
   service <- newBFFService config
-  pure BFFContext {bffCtxService = service, bffCtxConfig = config}
+  newBFFContextWithService config service
 
-newBFFContextWithService :: BFFConfig -> BFFService -> BFFContext
-newBFFContextWithService config service =
-  BFFContext {bffCtxService = service, bffCtxConfig = config}
+newBFFContextWithService :: BFFConfig -> BFFService -> IO BFFContext
+newBFFContextWithService config service = do
+  readinessSummaryRef <- newIORef Nothing
+  pure
+    BFFContext
+      { bffCtxService = service,
+        bffCtxConfig = config,
+        bffCtxReadinessSummaryRef = readinessSummaryRef
+      }
 
 -- | BFF WAI application
 -- Routes are duplicated to support both direct access (/api/v1/...) and
@@ -86,11 +115,17 @@ bffApplication ctx request respond =
   case (requestMethod request, pathInfo request) of
     -- Health check endpoints (accessible at root for ingress liveness/readiness probes)
     ("GET", ["healthz"]) ->
-      respond $ jsonResponse status200 (object ["status" .= ("healthy" :: Text)])
+      handleBffHealth ctx respond
+    ("GET", ["api", "healthz"]) ->
+      handleBffHealth ctx respond
     ("GET", ["health", "live"]) ->
       respond $ jsonResponse status200 (object ["status" .= ("live" :: Text)])
+    ("GET", ["api", "health", "live"]) ->
+      respond $ jsonResponse status200 (object ["status" .= ("live" :: Text)])
     ("GET", ["health", "ready"]) ->
-      respond $ jsonResponse status200 (object ["status" .= ("ready" :: Text)])
+      handleBffReadiness ctx respond
+    ("GET", ["api", "health", "ready"]) ->
+      handleBffReadiness ctx respond
 
     -- Upload endpoints (with /api prefix)
     ("POST", ["api", "v1", "upload", "request"]) ->
@@ -169,6 +204,180 @@ bffApplication ctx request respond =
     -- 404 for unknown routes
     _ ->
       respond $ jsonResponse status404 (object ["error" .= ("Not found" :: Text)])
+
+handleBffHealth ::
+  BFFContext ->
+  (Response -> IO ResponseReceived) ->
+  IO ResponseReceived
+handleBffHealth ctx respond = do
+  readinessReport <- bffReadinessReport ctx
+  let statusValue =
+        case readinessStatus readinessReport of
+          ReadinessReady -> status200
+          ReadinessBlocked -> status503
+      healthStatusText =
+        case readinessStatus readinessReport of
+          ReadinessReady -> "healthy" :: Text
+          ReadinessBlocked -> "degraded" :: Text
+  respond $
+    jsonResponse
+      statusValue
+      ( object
+          [ "status" .= healthStatusText
+          , "blocking" .= readinessBlockingChecks readinessReport
+          ]
+      )
+
+handleBffReadiness ::
+  BFFContext ->
+  (Response -> IO ResponseReceived) ->
+  IO ResponseReceived
+handleBffReadiness ctx respond = do
+  readinessReport <- bffReadinessReport ctx
+  logReadinessTransition "studiomcp-bff" (bffCtxReadinessSummaryRef ctx) readinessReport
+  respond $ jsonResponse (readinessHttpStatus readinessReport) readinessReport
+
+bffReadinessReport :: BFFContext -> IO ReadinessReport
+bffReadinessReport ctx = do
+  checkGroups <-
+    mapConcurrently
+      id
+      [ pure (runtimeToolingChecks (bffCtxService ctx)),
+        authReadinessChecks (bffCtxService ctx) (bffCtxConfig ctx),
+        referenceModelReadinessChecks (bffCtxService ctx),
+        platformReadinessChecks (bffCtxService ctx)
+      ]
+  pure (buildReadinessReport "studiomcp-bff" (concat checkGroups))
+
+runtimeToolingChecks :: BFFService -> [ReadinessCheck]
+runtimeToolingChecks service =
+  [ case bffToolCatalog service >>= tcRuntimeConfig of
+      Just _ ->
+        readyCheck
+          "workflow-runtime"
+          "runtime-configured"
+          "workflow tooling is configured for the BFF"
+      Nothing ->
+        blockedCheck
+          "workflow-runtime"
+          "runtime-unconfigured"
+          "workflow tooling is not configured for the BFF"
+  ]
+
+authReadinessChecks :: BFFService -> BFFConfig -> IO [ReadinessCheck]
+authReadinessChecks service config
+  | not (acEnabled (bffAuthConfig config)) =
+      pure
+        [ readyCheck
+            "auth-jwks"
+            "auth-disabled"
+            "authentication is disabled for the BFF"
+        ]
+  | otherwise =
+      pure . (: []) =<<
+        case bffHttpManager service of
+          Nothing ->
+            pure
+              ( blockedCheck
+                  "auth-jwks"
+                  "auth-unconfigured"
+                  "the BFF HTTP client is not configured"
+              )
+          Just manager ->
+            probeHttpCheck
+              manager
+              "auth-jwks"
+              (jwksEndpoint (acKeycloak (bffAuthConfig config)))
+              [200]
+              "auth-jwks-ready"
+              "auth-jwks-unavailable"
+
+referenceModelReadinessChecks :: BFFService -> IO [ReadinessCheck]
+referenceModelReadinessChecks service =
+  pure . (: []) =<<
+    case (bffInferenceManager service, bffReferenceModelConfig service) of
+      (Just manager, Just referenceModelConfig) ->
+        probeAnyHttpCheck
+          manager
+          "reference-model"
+          (referenceModelHealthUrls referenceModelConfig)
+          [200]
+          "reference-model-ready"
+          "reference-model-unavailable"
+      _ ->
+        pure
+          ( blockedCheck
+              "reference-model"
+              "reference-model-unconfigured"
+              "the BFF advisory model client is not configured"
+          )
+
+platformReadinessChecks :: BFFService -> IO [ReadinessCheck]
+platformReadinessChecks service =
+  case (bffHttpManager service, bffToolCatalog service >>= tcRuntimeConfig) of
+    (Just manager, Just runtimeConfigValue) ->
+      mapConcurrently
+        id
+        [ probeHttpCheck
+            manager
+            "pulsar"
+            (pulsarHttpEndpoint (runtimePulsarConfig runtimeConfigValue) <> "/admin/v2/clusters")
+            [200]
+            "dependency-ready"
+            "dependency-unavailable",
+          probeHttpCheck
+            manager
+            "minio"
+            (minioEndpointUrl (runtimeMinioConfig runtimeConfigValue) <> "/minio/health/ready")
+            [200]
+            "dependency-ready"
+            "dependency-unavailable"
+        ]
+    (Nothing, _) ->
+      pure
+        [ blockedCheck
+            "platform-dependencies"
+            "http-client-unconfigured"
+            "the BFF HTTP client is not configured"
+        ]
+    (_, Nothing) ->
+      pure
+        [ blockedCheck
+            "platform-dependencies"
+            "runtime-unconfigured"
+            "runtime dependency endpoints are unavailable because workflow tooling is not configured"
+        ]
+
+referenceModelHealthUrls :: ReferenceModelConfig -> [Text]
+referenceModelHealthUrls referenceModelConfig =
+  let rawUrl = T.pack (referenceModelUrl referenceModelConfig)
+      rootUrl =
+        case take 3 (T.splitOn "/" rawUrl) of
+          [scheme, "", authority] -> T.intercalate "/" [scheme, "", authority]
+          _ -> rawUrl
+   in filter
+        (not . T.null)
+        [rootUrl <> "/healthz", rootUrl <> "/api/tags", rootUrl <> "/api/version"]
+
+logReadinessTransition :: Text -> IORef (Maybe Text) -> ReadinessReport -> IO ()
+logReadinessTransition serviceName summaryRef readinessReport = do
+  let summary =
+        case readinessStatus readinessReport of
+          ReadinessReady -> "ready"
+          ReadinessBlocked -> renderBlockingChecks readinessReport
+  previousSummary <- readIORef summaryRef
+  if previousSummary == Just summary
+    then pure ()
+    else do
+      writeIORef summaryRef (Just summary)
+      logInfo
+        ( "readiness["
+            <> serviceName
+            <> "] "
+            <> case readinessStatus readinessReport of
+              ReadinessReady -> "ready"
+              ReadinessBlocked -> "blocked: " <> summary
+        )
 
 withSession ::
   BFFContext ->

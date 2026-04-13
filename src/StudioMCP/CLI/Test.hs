@@ -5,16 +5,14 @@ where
 
 import Control.Monad (unless)
 import StudioMCP.CLI.Command (TestCommand (..))
+import StudioMCP.Util.Cabal (cabalBuildDir, ensureCabalBootstrap)
 import System.Exit (ExitCode (..), exitFailure, exitWith)
 import System.Process (createProcess, proc, waitForProcess)
 
--- | Build directory for cabal artifacts (must stay outside workspace bind mount)
-cabalBuildDir :: String
-cabalBuildDir = "/opt/build/studiomcp"
-
 -- | Run test command
 runTestCommand :: TestCommand -> IO ()
-runTestCommand command =
+runTestCommand command = do
+  ensureCabalBootstrap
   case command of
     TestAllCommand -> runTestAll
     TestUnitCommand -> runTestUnit

@@ -15,7 +15,7 @@
 | Outer dev container | Docker Compose | ephemeral via `run --rm`; one command per container | Build/test shell and cluster control entrypoint with `studiomcp` on `PATH` and no persistent daemon workflow | bind-mounted repo plus `./.data/` |
 | Local cluster | Kind | Docker-backed Kubernetes | Hosts the application and supporting services | host-backed volumes under `./.data/` |
 | Container registry | Harbor | In-cluster Helm deployment | Stores application images; all Helm workloads pull from Harbor | cluster storage |
-| Edge router | ingress-nginx | Helm release | Unified entrypoint for web services: `/mcp`, `/api`, `/kc`, `/minio`; depends on published ready service endpoints for live edge validation | none |
+| Edge router | ingress-nginx | Helm release | Unified entrypoint for web services: `/mcp`, `/api`, `/kc`, `/minio`; routes traffic only after published service endpoints and backend application readiness have both closed | none |
 | Identity provider | Keycloak | Helm release | Login/password auth and token issuance | Keycloak PostgreSQL |
 | Keycloak database | PostgreSQL | Helm release | Durable auth data | cluster storage |
 | Session store | Redis | Helm release | Shared MCP and browser-adjacent session coordination | in-cluster runtime state |
@@ -41,9 +41,21 @@
 | Auth middleware | `src/StudioMCP/Auth/*.hs` | JWT validation, claims extraction, scope enforcement, and Keycloak integration |
 | Worker runtime | `src/StudioMCP/Worker/Server.hs` | Runtime worker validation and execution entrypoint |
 | Inference runtime | `src/StudioMCP/Inference/*.hs` | Advisory inference service and related validation path |
-| Cluster CLI | `src/StudioMCP/CLI/Cluster.hs` | Cluster ensure/deploy/bootstrap operations plus event-driven post-rollout service endpoint readiness gates |
+| Cluster CLI | `src/StudioMCP/CLI/Cluster.hs` | Cluster ensure/deploy/bootstrap operations plus rollout, service-endpoint, and shared application-readiness gates |
 | Docs validator | `src/StudioMCP/CLI/Docs.hs` | Documentation validation entrypoint |
 | Test CLI | `src/StudioMCP/CLI/Test.hs` | Test command handlers for unit and integration tests |
+
+## Readiness and Startup Contract
+
+- Kubernetes rollout, readiness probes, and `EndpointSlice` publication remain necessary routing
+  gates on the cluster path.
+- `src/StudioMCP/API/Readiness.hs` defines the shared readiness payload and blocking-reason model
+  used by the MCP server, BFF, worker, inference surface, and cluster CLI.
+- `src/StudioMCP/CLI/Cluster.hs` waits for shared-service readiness during `cluster ensure` and
+  for ingress-routable application readiness during `cluster deploy server`.
+- `src/StudioMCP/MCP/Server.hs`, `src/StudioMCP/Web/Handlers.hs`,
+  `src/StudioMCP/Worker/Server.hs`, and `src/StudioMCP/Inference/Host.hs` now expose
+  dependency-aware readiness handlers tied to real downstream requirements.
 
 ## External and Browser-Facing Boundaries
 
@@ -81,3 +93,4 @@
 - [phase-6-cluster-control-plane-parity.md](phase-6-cluster-control-plane-parity.md)
 - [phase-9-cli-test-validate-consolidation.md](phase-9-cli-test-validate-consolidation.md)
 - [phase-10-build-artifact-isolation.md](phase-10-build-artifact-isolation.md)
+- [phase-11-runtime-readiness-and-condition-driven-startup.md](phase-11-runtime-readiness-and-condition-driven-startup.md)

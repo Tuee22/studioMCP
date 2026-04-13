@@ -99,11 +99,36 @@ Server mode may not:
 - permanently delete tenant media
 - accept a tool that performs permanent media deletion
 
+## Startup And Readiness Contract
+
+Server mode is considered ready only when the listener can safely serve authenticated MCP traffic.
+
+The implemented readiness contract checks:
+
+- protocol state is not shutting down
+- the shared Redis-backed session store is reachable
+- the configured JWKS issuer path is reachable when auth is enabled
+- Pulsar and MinIO are reachable for runtime-backed tool execution
+
+Operational endpoints distinguish liveness from readiness:
+
+- `/healthz` and `/mcp/healthz` return an operator-facing summary
+- `/health/live` and `/mcp/health/live` confirm the process is alive
+- `/health/ready` and `/mcp/health/ready` return structured JSON with per-check blocking reasons
+
+`/metrics` now includes readiness gauges and blocking-check labels so deploy-time timeouts and
+steady-state regressions can be correlated with the exact readiness cause.
+
 ## Operational Endpoints
 
 Operational endpoints remain out of band from MCP:
 
 - `/healthz`
+- `/health/live`
+- `/health/ready`
+- `/mcp/healthz`
+- `/mcp/health/live`
+- `/mcp/health/ready`
 - `/version`
 - `/metrics`
 

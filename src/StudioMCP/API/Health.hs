@@ -4,11 +4,13 @@ module StudioMCP.API.Health
   ( DependencyHealth (..),
     HealthReport (..),
     HealthStatus (..),
+    healthReportFromChecks,
     probeDependencies,
+    probePlatformDependencyChecks,
   )
 where
 
-import Control.Exception (SomeException, try)
+import Control.Concurrent.Async (mapConcurrently)
 import Data.Aeson
   ( FromJSON (parseJSON),
     ToJSON (toJSON),
@@ -19,21 +21,14 @@ import Data.Aeson
     (.:),
     (.=),
   )
-import Data.ByteString.Lazy qualified as LBS
 import Data.Text (Text)
 import Data.Text qualified as Text
-import Network.HTTP.Client
-  ( Manager,
-    Request,
-    Request (responseTimeout),
-    Response,
-    Response (responseStatus),
-    httpLbs,
-    parseRequest,
-    responseTimeoutMicro,
-  )
-import Network.HTTP.Types.Status (statusCode)
+import Network.HTTP.Client (Manager)
 import StudioMCP.Config.Types (AppConfig (..))
+import StudioMCP.API.Readiness
+  ( ReadinessCheck (..),
+    probeHttpCheck,
+  )
 
 data HealthStatus = Healthy | Degraded
   deriving (Eq, Show)
@@ -96,51 +91,49 @@ instance FromJSON HealthReport where
 
 probeDependencies :: Manager -> AppConfig -> IO HealthReport
 probeDependencies manager appConfig = do
-  pulsarHealth <- probeHttpDependency manager "pulsar" (pulsarHttpUrl appConfig <> "/admin/v2/clusters")
-  minioHealth <- probeHttpDependency manager "minio" (minioEndpoint appConfig <> "/minio/health/live")
-  let dependencies = [pulsarHealth, minioHealth]
+  healthReportFromChecks <$> probePlatformDependencyChecks manager appConfig
+
+probePlatformDependencyChecks :: Manager -> AppConfig -> IO [ReadinessCheck]
+probePlatformDependencyChecks manager appConfig =
+  mapConcurrently id
+    [ probeHttpCheck
+        manager
+        "pulsar"
+        (pulsarHttpUrl appConfig <> "/admin/v2/clusters")
+        [200]
+        "dependency-ready"
+        "dependency-unavailable",
+      probeHttpCheck
+        manager
+        "minio"
+        (minioEndpoint appConfig <> "/minio/health/ready")
+        [200]
+        "dependency-ready"
+        "dependency-unavailable"
+    ]
+
+healthReportFromChecks :: [ReadinessCheck] -> HealthReport
+healthReportFromChecks checks =
+  let dependencies = map readinessCheckToDependency checks
       overallStatus =
         if all ((== Healthy) . dependencyStatus) dependencies
           then Healthy
           else Degraded
-  pure
-    HealthReport
-      { healthStatus = overallStatus,
-        healthDependencies = dependencies
-      }
+   in HealthReport
+        { healthStatus = overallStatus,
+          healthDependencies = dependencies
+        }
 
-probeHttpDependency :: Manager -> Text -> Text -> IO DependencyHealth
-probeHttpDependency manager dependency url = do
-  requestOrException <- try (parseRequest (Text.unpack url)) :: IO (Either SomeException Request)
-  case requestOrException of
-    Left exn ->
-      pure
-        DependencyHealth
-          { dependencyName = dependency,
-            dependencyStatus = Degraded,
-            dependencyDetail = Text.pack (show exn)
-          }
-    Right request -> do
-      responseOrException <-
-        try
-          ( httpLbs
-              request {responseTimeout = responseTimeoutMicro 2000000}
-              manager
-          ) :: IO (Either SomeException (Response LBS.ByteString))
-      case responseOrException of
-        Left exn ->
-          pure
-            DependencyHealth
-              { dependencyName = dependency,
-                dependencyStatus = Degraded,
-                dependencyDetail = Text.pack (show exn)
-              }
-        Right response ->
-          let code = statusCode (responseStatus response)
-           in pure
-                DependencyHealth
-                  { dependencyName = dependency,
-                    dependencyStatus =
-                      if code >= 200 && code < 400 then Healthy else Degraded,
-                    dependencyDetail = "http_status=" <> Text.pack (show code)
-                  }
+readinessCheckToDependency :: ReadinessCheck -> DependencyHealth
+readinessCheckToDependency readinessCheck =
+  DependencyHealth
+    { dependencyName = readinessCheckName readinessCheck,
+      dependencyStatus =
+        if readinessCheckReady readinessCheck
+          then Healthy
+          else Degraded,
+      dependencyDetail =
+        readinessCheckReason readinessCheck
+          <> ": "
+          <> readinessCheckDetail readinessCheck
+    }

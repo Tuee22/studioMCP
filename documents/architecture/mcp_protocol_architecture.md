@@ -94,6 +94,27 @@ Session state may include:
 
 In remote multi-node deployments, session data must be externalized as described in [../engineering/session_scaling.md](../engineering/session_scaling.md#session-scaling).
 
+## HTTP Readiness And Session Bootstrap
+
+The public Streamable HTTP MCP endpoint remains `/mcp`, but deploy-time admission now distinguishes
+routing readiness from application readiness.
+
+- Kubernetes rollout and `EndpointSlice` publication prove that `/mcp` is routable
+- `/mcp/health/ready` proves that the listener can actually serve authenticated MCP traffic
+- `studiomcp cluster deploy server` waits for that readiness contract before validators issue
+  `initialize` or `tools/call` traffic
+
+The readiness payload is operational, not part of the business MCP contract, but it names the same
+blocking conditions that would otherwise surface as opaque startup races:
+
+- protocol state not ready for traffic
+- Redis-backed session store unavailable
+- auth JWKS path unavailable
+- Pulsar or MinIO unavailable for runtime-backed tool execution
+
+This keeps session bootstrap deterministic. Final-request retries remain a transport hedge, not the
+primary startup synchronization mechanism.
+
 ## Capability Scope
 
 The target capability surface is intentionally constrained.

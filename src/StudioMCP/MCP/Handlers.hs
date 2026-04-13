@@ -71,6 +71,7 @@ data ServerEnv = ServerEnv
   { serverAppConfig :: AppConfig,
     serverRuntimeConfig :: RuntimeConfig,
     serverMetricsRef :: IORef MetricsSnapshot,
+    serverReadinessSummaryRef :: IORef (Maybe Text),
     serverHttpManager :: Manager,
     serverMcpMetrics :: McpMetricsService,
     serverRateLimiter :: RateLimiterService,
@@ -92,6 +93,7 @@ createServerEnv :: AppConfig -> IO ServerEnv
 createServerEnv appConfig = do
   let AppConfig _ pulsarHttp pulsarBinary minioUrl minioPublicUrl minioAccess minioSecret = appConfig
   metricsRef <- newIORef emptyMetricsSnapshot
+  readinessSummaryRef <- newIORef Nothing
   manager <- newManager defaultManagerSettings
   mcpMetrics <- newMcpMetricsService
   rateLimiter <- newRateLimiterService defaultRateLimiterConfig
@@ -128,6 +130,7 @@ createServerEnv appConfig = do
       { serverAppConfig = appConfig,
         serverRuntimeConfig = runtimeConfig,
         serverMetricsRef = metricsRef,
+        serverReadinessSummaryRef = readinessSummaryRef,
         serverHttpManager = manager,
         serverMcpMetrics = mcpMetrics,
         serverRateLimiter = rateLimiter,

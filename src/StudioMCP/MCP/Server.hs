@@ -6,10 +6,13 @@ module StudioMCP.MCP.Server
   )
 where
 
+import Control.Concurrent.Async (mapConcurrently)
 import Control.Concurrent.STM (atomically, readTVarIO, writeTVar)
 import Data.Aeson (ToJSON, decode, encode, object, (.=))
 import Data.ByteString.Lazy qualified as LBS
+import Data.IORef (IORef, readIORef, writeIORef)
 import Data.Text (Text)
+import Data.Text qualified as Textual
 import Data.Text.Encoding qualified as Text
 import Network.HTTP.Client (newManager, defaultManagerSettings)
 import Network.HTTP.Types
@@ -36,9 +39,23 @@ import Network.Wai
 import Network.Wai.Handler.Warp (defaultSettings, runSettings, setHost, setPort, setTimeout)
 import StudioMCP.API.Health
   ( HealthReport (healthStatus),
+    healthReportFromChecks,
     HealthStatus (Degraded, Healthy),
   )
-import StudioMCP.Auth.Config (AuthConfig (..), loadAuthConfigFromEnv)
+import StudioMCP.API.Readiness
+  ( ReadinessCheck,
+    ReadinessReport (..),
+    ReadinessStatus (..),
+    blockedCheck,
+    buildReadinessReport,
+    probeHttpCheck,
+    readinessCheckName,
+    readinessCheckReason,
+    readinessHttpStatus,
+    readyCheck,
+    renderBlockingChecks,
+  )
+import StudioMCP.Auth.Config (AuthConfig (..), jwksEndpoint, loadAuthConfigFromEnv)
 import StudioMCP.Auth.Middleware
   ( AuthService,
     authenticateWaiRequest,
@@ -54,6 +71,7 @@ import StudioMCP.Auth.Types
     tenantId,
   )
 import StudioMCP.Config.Load (loadAppConfig)
+import StudioMCP.Config.Types (AppConfig (..))
 import StudioMCP.MCP.Core
   ( McpServer (..),
     defaultServerConfig,
@@ -64,7 +82,6 @@ import StudioMCP.MCP.Core
 import StudioMCP.MCP.Handlers
   ( ServerEnv (..),
     createServerEnv,
-    currentHealthReport,
     currentVersionInfo,
   )
 import StudioMCP.MCP.Prompts (newPromptCatalog)
@@ -75,7 +92,7 @@ import StudioMCP.MCP.Session.RedisStore (readSessionData, testConnection, writeS
 import StudioMCP.MCP.Transport.Http (getMcpSessionId)
 import StudioMCP.MCP.Transport.Stdio (createStdioTransport, defaultStdioConfig, runStdioTransport)
 import qualified StudioMCP.Observability.McpMetrics as McpMetrics
-import StudioMCP.Util.Logging (configureProcessLogging)
+import StudioMCP.Util.Logging (configureProcessLogging, logInfo)
 import System.Environment (lookupEnv)
 
 runServer :: IO ()
@@ -124,15 +141,21 @@ application serverEnv mcpServer authConfig authService request respond =
     ["mcp"] -> handleMcpEndpoint serverEnv mcpServer authConfig authService request respond
     -- Admin endpoints (no auth required for health/metrics)
     ["healthz"] | requestMethod request == methodGet ->
-      handleHealth serverEnv respond
+      handleHealth serverEnv mcpServer authConfig respond
+    ["mcp", "healthz"] | requestMethod request == methodGet ->
+      handleHealth serverEnv mcpServer authConfig respond
     ["health", "live"] | requestMethod request == methodGet ->
       respond (jsonResponse status200 (object ["status" .= ("ok" :: Text)]))
+    ["mcp", "health", "live"] | requestMethod request == methodGet ->
+      respond (jsonResponse status200 (object ["status" .= ("ok" :: Text)]))
     ["health", "ready"] | requestMethod request == methodGet ->
-      handleReadiness mcpServer respond
+      handleReadiness serverEnv mcpServer authConfig respond
+    ["mcp", "health", "ready"] | requestMethod request == methodGet ->
+      handleReadiness serverEnv mcpServer authConfig respond
     ["version"] | requestMethod request == methodGet ->
       respond (jsonResponse status200 (currentVersionInfo serverEnv))
     ["metrics"] | requestMethod request == methodGet ->
-      handleMetrics serverEnv respond
+      handleMetrics serverEnv mcpServer authConfig respond
     _ ->
       respond
         ( jsonResponse
@@ -283,40 +306,197 @@ jsonResponseWithSession statusValue payload maybeSessionId =
 
 handleHealth ::
   ServerEnv ->
+  McpServer ->
+  AuthConfig ->
   (Response -> IO b) ->
   IO b
-handleHealth serverEnv respond = do
-  healthReport <- currentHealthReport serverEnv
-  let statusValue =
+handleHealth serverEnv mcpServer authConfig respond = do
+  readinessReport <- serverReadinessReport serverEnv mcpServer authConfig
+  let healthReport = healthReportFromChecks (readinessChecks readinessReport)
+      statusValue =
         case healthStatus healthReport of
           Healthy -> status200
           Degraded -> status503
   respond (jsonResponse statusValue healthReport)
 
 handleReadiness ::
+  ServerEnv ->
   McpServer ->
+  AuthConfig ->
   (Response -> IO b) ->
   IO b
-handleReadiness mcpServer respond = do
-  protocolState <- readTVarIO (msProtocolState mcpServer)
-  let (statusValue, readinessStatus) =
-        case protocolState of
-          ShuttingDown -> (status503, "shutting-down" :: Text)
-          _ -> (status200, "ready" :: Text)
-  respond (jsonResponse statusValue (object ["status" .= readinessStatus]))
+handleReadiness serverEnv mcpServer authConfig respond = do
+  readinessReport <- serverReadinessReport serverEnv mcpServer authConfig
+  logReadinessTransition "studiomcp-server" (serverReadinessSummaryRef serverEnv) readinessReport
+  respond (jsonResponse (readinessHttpStatus readinessReport) readinessReport)
 
 handleMetrics ::
   ServerEnv ->
+  McpServer ->
+  AuthConfig ->
   (Response -> IO b) ->
   IO b
-handleMetrics serverEnv respond = do
+handleMetrics serverEnv mcpServer authConfig respond = do
   metricsSnapshot <- McpMetrics.getMcpMetrics (serverMcpMetrics serverEnv)
+  readinessReport <- serverReadinessReport serverEnv mcpServer authConfig
   respond
     ( responseLBS
         status200
         [(hContentType, "text/plain; version=0.0.4")]
-        (LBS.fromStrict (Text.encodeUtf8 (McpMetrics.renderPrometheusMetrics metricsSnapshot)))
+        ( LBS.fromStrict
+            ( Text.encodeUtf8
+                ( McpMetrics.renderPrometheusMetrics metricsSnapshot
+                    <> renderReadinessPrometheusMetrics readinessReport
+                )
+            )
+        )
     )
+
+serverReadinessReport :: ServerEnv -> McpServer -> AuthConfig -> IO ReadinessReport
+serverReadinessReport serverEnv mcpServer authConfig = do
+  checkGroups <-
+    mapConcurrently
+      id
+      [ protocolStateCheck mcpServer,
+        sessionStoreCheck serverEnv,
+        authJwksCheck serverEnv authConfig,
+        platformDependenciesCheck serverEnv
+      ]
+  pure (buildReadinessReport "studiomcp-server" (concat checkGroups))
+
+protocolStateCheck :: McpServer -> IO [ReadinessCheck]
+protocolStateCheck mcpServer = do
+  protocolState <- readTVarIO (msProtocolState mcpServer)
+  pure
+    [ case protocolState of
+        ShuttingDown ->
+          blockedCheck
+            "protocol-state"
+            "protocol-shutting-down"
+            "the MCP protocol state machine is shutting down"
+        _ ->
+          readyCheck
+            "protocol-state"
+            "protocol-ready"
+            "the MCP protocol state machine accepts traffic"
+    ]
+
+sessionStoreCheck :: ServerEnv -> IO [ReadinessCheck]
+sessionStoreCheck serverEnv = do
+  pingResult <- testConnection (serverSessionStore serverEnv)
+  pure
+    [ case pingResult of
+        Left sessionErr ->
+          blockedCheck
+            "redis-session-store"
+            "session-store-unavailable"
+            (Textual.pack (show sessionErr))
+        Right () ->
+          readyCheck
+            "redis-session-store"
+            "session-store-ready"
+            "the shared MCP session store is reachable"
+    ]
+
+authJwksCheck :: ServerEnv -> AuthConfig -> IO [ReadinessCheck]
+authJwksCheck serverEnv authConfig
+  | not (acEnabled authConfig) =
+      pure
+        [ readyCheck
+            "auth-jwks"
+            "auth-disabled"
+            "authentication is disabled for this server"
+        ]
+  | otherwise =
+      (: [])
+        <$> probeHttpCheck
+          (serverHttpManager serverEnv)
+          "auth-jwks"
+          (jwksEndpoint (acKeycloak authConfig))
+          [200]
+          "auth-jwks-ready"
+          "auth-jwks-unavailable"
+
+platformDependenciesCheck :: ServerEnv -> IO [ReadinessCheck]
+platformDependenciesCheck serverEnv = do
+  dependencyChecks <-
+    mapConcurrently
+      id
+      [ probeHttpCheck
+          (serverHttpManager serverEnv)
+          "pulsar"
+          (pulsarHttpUrl (serverAppConfig serverEnv) <> "/admin/v2/clusters")
+          [200]
+          "dependency-ready"
+          "dependency-unavailable",
+        probeHttpCheck
+          (serverHttpManager serverEnv)
+          "minio"
+          (minioEndpoint (serverAppConfig serverEnv) <> "/minio/health/ready")
+          [200]
+          "dependency-ready"
+          "dependency-unavailable"
+      ]
+  pure dependencyChecks
+
+logReadinessTransition :: Text -> IORef (Maybe Text) -> ReadinessReport -> IO ()
+logReadinessTransition serviceName summaryRef readinessReport = do
+  let summary =
+        case readinessStatus readinessReport of
+          ReadinessReady -> "ready"
+          ReadinessBlocked -> renderBlockingChecks readinessReport
+  previousSummary <- readIORef summaryRef
+  if previousSummary == Just summary
+    then pure ()
+    else do
+      writeIORef summaryRef (Just summary)
+      logInfo
+        ( "readiness["
+            <> serviceName
+            <> "] "
+            <> case readinessStatus readinessReport of
+              ReadinessReady -> "ready"
+              ReadinessBlocked -> "blocked: " <> summary
+        )
+
+renderReadinessPrometheusMetrics :: ReadinessReport -> Text
+renderReadinessPrometheusMetrics readinessReport =
+  Textual.unlines $
+    [ "# HELP studiomcp_readiness Indicates whether the MCP server readiness contract is closed",
+      "# TYPE studiomcp_readiness gauge",
+      "studiomcp_readiness "
+        <> case readinessStatus readinessReport of
+          ReadinessReady -> "1"
+          ReadinessBlocked -> "0",
+      "# HELP studiomcp_readiness_blocking_total Number of blocking readiness checks",
+      "# TYPE studiomcp_readiness_blocking_total gauge",
+      "studiomcp_readiness_blocking_total "
+        <> Textual.pack (show (length (readinessBlockingChecks readinessReport)))
+    ]
+      <> readinessBlockingMetricLines (readinessBlockingChecks readinessReport)
+
+readinessBlockingMetricLines :: [ReadinessCheck] -> [Text]
+readinessBlockingMetricLines [] = []
+readinessBlockingMetricLines blockingChecks =
+  [ "# HELP studiomcp_readiness_blocking Blocking readiness checks by reason",
+    "# TYPE studiomcp_readiness_blocking gauge"
+  ]
+    <> map renderBlockingMetric blockingChecks
+  where
+    renderBlockingMetric readinessCheck =
+      "studiomcp_readiness_blocking{check=\""
+        <> escapePrometheusLabel (readinessCheckName readinessCheck)
+        <> "\",reason=\""
+        <> escapePrometheusLabel (readinessCheckReason readinessCheck)
+        <> "\"} 1"
+
+escapePrometheusLabel :: Text -> Text
+escapePrometheusLabel =
+  Textual.concatMap escapeCharacter
+  where
+    escapeCharacter '"' = "\\\""
+    escapeCharacter '\\' = "\\\\"
+    escapeCharacter character = Textual.singleton character
 
 jsonResponse :: ToJSON a => Status -> a -> Response
 jsonResponse statusValue payload =

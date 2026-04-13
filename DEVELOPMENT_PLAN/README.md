@@ -30,6 +30,7 @@ govern this plan.
 | [phase-8-final-closure-regression-gate.md](phase-8-final-closure-regression-gate.md) | Final regression closure and clean validation gate |
 | [phase-9-cli-test-validate-consolidation.md](phase-9-cli-test-validate-consolidation.md) | CLI test and validate command consolidation |
 | [phase-10-build-artifact-isolation.md](phase-10-build-artifact-isolation.md) | Build artifact isolation and one-command container configuration closure |
+| [phase-11-runtime-readiness-and-condition-driven-startup.md](phase-11-runtime-readiness-and-condition-driven-startup.md) | Runtime readiness, condition-driven startup, and shared wait-gate closure |
 | [legacy-tracking-for-deletion.md](legacy-tracking-for-deletion.md) | Cleanup and compatibility removal ledger |
 
 ## Status Vocabulary
@@ -66,26 +67,25 @@ A phase can move to `Done` only when all of the following are true:
 | 8 | Final Closure and Regression Gate | Done | [phase-8-final-closure-regression-gate.md](phase-8-final-closure-regression-gate.md) |
 | 9 | CLI Test and Validate Consolidation | Done | [phase-9-cli-test-validate-consolidation.md](phase-9-cli-test-validate-consolidation.md) |
 | 10 | Build Artifact Isolation and Container Configuration | Done | [phase-10-build-artifact-isolation.md](phase-10-build-artifact-isolation.md) |
+| 11 | Runtime Readiness and Condition-Driven Startup | Done | [phase-11-runtime-readiness-and-condition-driven-startup.md](phase-11-runtime-readiness-and-condition-driven-startup.md) |
 
 ## Current Validation State
 
 **Passing:**
 - `docker compose build` passes for the single-stage outer-container image.
-- `docker compose run --rm studiomcp studiomcp cluster ensure` passes on the supported Kind path.
 - `docker compose run --rm studiomcp sh -lc 'command -v tini && command -v studiomcp && command -v mc && test ! -d /workspace/dist-newstyle'` passes.
-- `docker compose run --rm studiomcp studiomcp test unit` passes with 867 examples and 0 failures on the current worktree.
-- `docker compose run --rm studiomcp studiomcp test integration` passes with 16 examples and 0 failures on the supported cluster path.
-- `docker compose run --rm studiomcp studiomcp test` passes and runs both suites through the canonical CLI entrypoint.
+- `docker compose run --rm studiomcp studiomcp test unit` passes with 870 examples and 0 failures on the readiness-updated worktree.
 - `docker compose run --rm studiomcp studiomcp validate docs` passes for structural documentation checks on the current worktree.
-- `docker compose run --rm studiomcp studiomcp validate all` passes with 28/28 validators on the current worktree.
+- `docker compose run --rm studiomcp studiomcp test` passes after the requested `kind` teardown, Docker prune, and clean outer-image rebuild.
 - Build artifacts go to `/opt/build/studiomcp/` and never leak to the workspace bind mount.
 - `docker/Dockerfile` is single-stage, uses `tini`, and carries no Dockerfile `CMD`; `docker-compose.yaml` carries no service `command`.
 - Helm owns explicit in-cluster startup commands for the server, worker, and BFF workloads.
 
 **Cluster-Dependent Coverage:**
-- The supported cluster path is now clean end to end: `cluster ensure`, integration tests, the full test suite, and `validate all` all pass through the outer-container CLI.
-- `cluster ensure` now tolerates stale pending Helm revisions on the supported local path, and the kind-specific PostgreSQL HA pgpool settings fit the single-node resource envelope used for local validation.
-- `cluster deploy server` now blocks on Kubernetes service endpoint publication for `studiomcp` and `studiomcp-bff` before live edge validators hit `/mcp` or `/api`.
+- `cluster ensure` now waits for shared-service application readiness for MinIO, Pulsar, and Keycloak after workload rollout.
+- `cluster deploy server` now blocks on rollout, Kubernetes service endpoint publication, ingress-edge readiness for `/mcp` and `/api`, worker readiness, and reference-model health before live validators proceed.
+- The integration harness now preserves validator stdout and stderr when a shared readiness gate fails, so blocking reasons survive into test output.
+- The requested teardown, Docker prune, rebuild, and aggregate test rerun completed cleanly on the current worktree.
 - Integration tests and aggregate validation continue to exercise Keycloak, MinIO, Pulsar, ingress routing, MCP HTTP, BFF session flows, horizontal scale, observability, and conformance through the live cluster path.
 
 ## Phase Details
@@ -102,6 +102,7 @@ A phase can move to `Done` only when all of the following are true:
 | 8 | Done | None | `README.md`, `documents/README.md`, `documents/documentation_standards.md`, `documents/development/testing_strategy.md`, `documents/engineering/testing.md`, `documents/development/local_dev.md`, `documents/engineering/local_dev.md`, plan index files as needed |
 | 9 | Done | None | `documents/reference/cli_reference.md`, `documents/reference/cli_surface.md`, `DEVELOPMENT_PLAN/development_plan_standards.md` |
 | 10 | Done | None | `README.md`, `documents/engineering/docker_policy.md`, `documents/engineering/k8s_native_dev_policy.md`, `documents/reference/cli_reference.md`, `documents/reference/cli_surface.md`, `documents/development/local_dev.md`, `documents/operations/runbook_local_debugging.md`, `DEVELOPMENT_PLAN.md` |
+| 11 | Done | None | `documents/architecture/overview.md`, `documents/architecture/server_mode.md`, `documents/architecture/bff_architecture.md`, `documents/architecture/mcp_protocol_architecture.md`, `documents/engineering/k8s_native_dev_policy.md`, `documents/engineering/session_scaling.md`, `documents/development/testing_strategy.md`, `documents/reference/cli_reference.md`, `documents/reference/cli_surface.md`, `documents/operations/runbook_local_debugging.md` |
 
 ## Compatibility Entry Point
 

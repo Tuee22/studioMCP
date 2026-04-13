@@ -12,11 +12,16 @@
 
 ### A. Continuous Execution-Ordered Narrative
 
-The plan must read as one ordered buildout from repository foundations to final regression closure.
+The plan must read as one ordered buildout from repository foundations to integrated runtime and
+validation closure.
 
 - Each phase assumes the previous phase has already closed.
 - The plan should move from repository/runtime foundations to protocol surface, auth, control-plane
-  routing, browser contract, cluster parity, bootstrap automation, and final regression closure.
+  routing, browser contract, cluster parity, bootstrap automation, and cross-cutting runtime
+  hardening such as readiness or build isolation before claiming regression closure.
+- If a newly discovered system-level gap reopens previously "done" territory, add an explicit
+  follow-on phase and narrow the older phase wording instead of leaving overstated completion
+  claims in place.
 - A reader unfamiliar with the repository should be able to follow the plan from top to bottom
   without reconstructing hidden dependencies from scattered notes.
 
@@ -49,6 +54,8 @@ Rules:
 - `Active` requires a `Remaining Work` section.
 - `Blocked` requires a `Blocked by` line.
 - `Planned` must not hide unmet blockers.
+- When a cross-cutting concern spans multiple completed phases, prefer a new explicit follow-on
+  phase over silently keeping stale `Done` language in older documents.
 
 ### D. Declarative Current-State Language
 
@@ -79,6 +86,7 @@ DEVELOPMENT_PLAN/
 ├── phase-8-final-closure-regression-gate.md
 ├── phase-9-cli-test-validate-consolidation.md
 ├── phase-10-build-artifact-isolation.md
+├── phase-11-runtime-readiness-and-condition-driven-startup.md
 └── legacy-tracking-for-deletion.md
 ```
 

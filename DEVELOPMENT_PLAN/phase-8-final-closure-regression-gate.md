@@ -5,7 +5,7 @@
 **Supersedes**: N/A
 **Referenced by**: [README.md](README.md#phase-overview), [00-overview.md](00-overview.md)
 
-> **Purpose**: Summarize the final regression gate, the validated coverage, and the closure criteria
+> **Purpose**: Summarize the aggregate regression gate, the validated coverage, and the closure criteria
 > for the supported outer-container and Kind-based workflow.
 
 ## Phase Summary
@@ -16,8 +16,8 @@
 
 ### Goal
 
-Close the final live validation regressions and establish a clean regression gate for the supported
-outer-container and Kind-based workflow.
+Maintain the live validation regression gate for the supported outer-container and Kind-based
+workflow while keeping the validated surface explicit.
 
 ### Deliverables
 
@@ -45,7 +45,7 @@ docker compose run --rm studiomcp studiomcp cluster ensure
 | Check | Command | Expected | Review state |
 |-------|---------|----------|--------------|
 | Build | `docker compose run --rm studiomcp cabal --builddir=/opt/build/studiomcp build all` | Success | Container rebuild reran via `docker compose build` |
-| Unit tests | `docker compose run --rm studiomcp studiomcp test unit` | Success | 867 pass, 0 failures |
+| Unit tests | `docker compose run --rm studiomcp studiomcp test unit` | Success | 870 pass, 0 failures |
 | Integration tests | `docker compose run --rm studiomcp studiomcp test integration` | 0 failures | 16 pass, 0 failures |
 | Full regression gate | `docker compose run --rm studiomcp studiomcp test` | 0 failures | Pass; aggregate CLI run completed on the supported path |
 | Outer container CLI availability | `docker compose run --rm studiomcp sh -lc 'command -v studiomcp'` | `/usr/local/bin/studiomcp` | Pass |
@@ -57,11 +57,14 @@ docker compose run --rm studiomcp studiomcp cluster ensure
 
 - `docker compose build` passes for the current worktree.
 - `docker compose run --rm studiomcp studiomcp cluster ensure` passes on the supported Kind path.
-- `docker compose run --rm studiomcp studiomcp test unit` passes with 867 examples and 0 failures on the current worktree.
+- `docker compose run --rm studiomcp studiomcp test unit` passes with 870 examples and 0 failures on the current worktree.
 - `docker compose run --rm studiomcp studiomcp test integration` passes with 16 examples and 0 failures on the supported cluster path.
 - `docker compose run --rm studiomcp studiomcp test` passes and runs both suites through the canonical aggregate CLI entrypoint.
 - `docker compose run --rm studiomcp studiomcp validate docs` passes on the current worktree.
 - `docker compose run --rm studiomcp studiomcp validate all` passes with 28/28 validators on the current worktree.
+- The cross-cutting readiness contract introduced later in
+  [phase-11-runtime-readiness-and-condition-driven-startup.md](phase-11-runtime-readiness-and-condition-driven-startup.md)
+  now provides the shared deploy-time gate that live validators enter through.
 - The outer `studiomcp` container resolves `studiomcp` on `PATH` at `/usr/local/bin/studiomcp`.
 - The supported integration coverage set includes deterministic helper processes, FFmpeg adapter
   validation, sequential executor validation, worker runtime validation, cluster validation,
@@ -86,9 +89,10 @@ docker compose run --rm studiomcp studiomcp cluster ensure
 - The outer development container installs `studiomcp` to `/usr/local/bin`, so the supported
   workflow invokes the CLI directly by name inside `studiomcp`.
 - Live server deploy now blocks on Kubernetes service endpoint publication for `studiomcp` and
-  `studiomcp-bff` before `/mcp` or `/api` edge validation begins.
+  `studiomcp-bff`, then waits for shared application readiness across `/mcp`, `/api`, worker, and
+  reference-model surfaces before live edge validation begins.
 - MCP session bootstrap retry handling remains available for outage-recovery and scale-transition
-  validations, but steady-state live edge readiness no longer depends on validator-local HTTP retries.
+  validations as a last-mile hedge after the shared readiness gate has closed.
 - The live horizontal-scale validator accepts both existing-session recovery and clean
   post-recovery MCP session re-establishment after a Redis outage.
 - MinIO readiness checks wait for write quorum (`/minio/health/cluster`) before DAG execution
@@ -124,10 +128,12 @@ None. This phase is complete on the current supported path.
 - Keep [../documents/README.md](../documents/README.md#studiomcp-documentation-index) aligned with the canonical suite after governance cleanup.
 - Keep [README.md](README.md) aligned with the validated command set.
 - Keep [../DEVELOPMENT_PLAN.md](../DEVELOPMENT_PLAN.md) aligned as the compatibility index.
+- Keep [phase-11-runtime-readiness-and-condition-driven-startup.md](phase-11-runtime-readiness-and-condition-driven-startup.md) aligned when the aggregate readiness gate changes validator behavior.
 
 ## Cross-References
 
 - [README.md](README.md)
 - [00-overview.md](00-overview.md)
+- [phase-11-runtime-readiness-and-condition-driven-startup.md](phase-11-runtime-readiness-and-condition-driven-startup.md)
 - [legacy-tracking-for-deletion.md](legacy-tracking-for-deletion.md)
 - [../README.md](../README.md#development-roadmap)

@@ -7,6 +7,9 @@ module StudioMCP.Inference.Host
 where
 
 import Data.Aeson (ToJSON, decode, encode, object, (.=))
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.Text (Text)
+import Data.Text qualified as Text
 import Network.HTTP.Client (Manager, defaultManagerSettings, newManager)
 import Network.HTTP.Types
   ( hContentType,
@@ -16,6 +19,7 @@ import Network.HTTP.Types
     status200,
     status400,
     status502,
+    status503,
   )
 import Network.Wai
   ( Application,
@@ -26,6 +30,15 @@ import Network.Wai
     strictRequestBody,
   )
 import Network.Wai.Handler.Warp (defaultSettings, runSettings, setHost, setPort, setTimeout)
+import StudioMCP.API.Readiness
+  ( ReadinessCheck,
+    ReadinessReport (..),
+    ReadinessStatus (..),
+    buildReadinessReport,
+    probeAnyHttpCheck,
+    readinessHttpStatus,
+    renderBlockingChecks,
+  )
 import StudioMCP.API.Version (versionInfoForMode)
 import StudioMCP.Config.Load (loadAppConfig)
 import StudioMCP.Config.Types (AppMode (InferenceMode))
@@ -36,8 +49,14 @@ import StudioMCP.Inference.ReferenceModel
     requestReferenceAdvice,
   )
 import StudioMCP.Inference.Types (InferenceResponse (..))
-import StudioMCP.Util.Logging (configureProcessLogging)
+import StudioMCP.Util.Logging (configureProcessLogging, logInfo)
 import System.Environment (lookupEnv)
+
+data InferenceEnv = InferenceEnv
+  { inferenceManager :: Manager,
+    inferenceReferenceModelConfig :: ReferenceModelConfig,
+    inferenceReadinessSummaryRef :: IORef (Maybe Text)
+  }
 
 runInferenceMode :: IO ()
 runInferenceMode = do
@@ -50,13 +69,20 @@ runInferenceServer :: Int -> ReferenceModelConfig -> IO ()
 runInferenceServer port referenceModelConfig = do
   configureProcessLogging
   manager <- newManager defaultManagerSettings
+  readinessSummaryRef <- newIORef Nothing
+  let inferenceEnv =
+        InferenceEnv
+          { inferenceManager = manager,
+            inferenceReferenceModelConfig = referenceModelConfig,
+            inferenceReadinessSummaryRef = readinessSummaryRef
+          }
   putStrLn ("studioMCP inference listening on 0.0.0.0:" <> show port)
   runSettings
     (setHost "0.0.0.0" (setPort port (setTimeout 0 defaultSettings)))
-    (application manager referenceModelConfig)
+    (application inferenceEnv)
 
-application :: Manager -> ReferenceModelConfig -> Application
-application manager referenceModelConfig request respond =
+application :: InferenceEnv -> Application
+application inferenceEnv request respond =
   case pathInfo request of
     ["advice"] | requestMethod request == methodPost -> do
       requestBody <- strictRequestBody request
@@ -64,7 +90,11 @@ application manager referenceModelConfig request respond =
         Nothing ->
           respond (jsonResponse status400 (object ["error" .= ("invalid-request-body" :: String)]))
         Just inferenceRequest -> do
-          adviceResult <- requestReferenceAdvice manager referenceModelConfig (renderPlanningPrompt inferenceRequest)
+          adviceResult <-
+            requestReferenceAdvice
+              (inferenceManager inferenceEnv)
+              (inferenceReferenceModelConfig inferenceEnv)
+              (renderPlanningPrompt inferenceRequest)
           case adviceResult >>= applyGuardrails of
             Left failureDetail ->
               respond
@@ -75,11 +105,94 @@ application manager referenceModelConfig request respond =
             Right advisoryText ->
               respond (jsonResponse status200 (InferenceResponse advisoryText))
     ["healthz"] | requestMethod request == methodGet ->
-      respond (jsonResponse status200 (object ["status" .= ("ready" :: String)]))
+      handleInferenceHealth inferenceEnv respond
+    ["health", "live"] | requestMethod request == methodGet ->
+      respond (jsonResponse status200 (object ["status" .= ("ok" :: String)]))
+    ["health", "ready"] | requestMethod request == methodGet ->
+      handleInferenceReadiness inferenceEnv respond
     ["version"] | requestMethod request == methodGet ->
       respond (jsonResponse status200 (versionInfoForMode InferenceMode))
     _ ->
       respond (jsonResponse status400 (object ["error" .= ("unsupported-inference-route" :: String)]))
+
+handleInferenceHealth ::
+  InferenceEnv ->
+  (Response -> IO b) ->
+  IO b
+handleInferenceHealth inferenceEnv respond = do
+  readinessReport <- inferenceReadinessReport inferenceEnv
+  let statusValue =
+        case readinessStatus readinessReport of
+          ReadinessReady -> status200
+          ReadinessBlocked -> status503
+      healthStatusText =
+        case readinessStatus readinessReport of
+          ReadinessReady -> "healthy" :: Text
+          ReadinessBlocked -> "degraded" :: Text
+  respond $
+    jsonResponse
+      statusValue
+      ( object
+          [ "status" .= healthStatusText
+          , "blocking" .= readinessBlockingChecks readinessReport
+          ]
+      )
+
+handleInferenceReadiness ::
+  InferenceEnv ->
+  (Response -> IO b) ->
+  IO b
+handleInferenceReadiness inferenceEnv respond = do
+  readinessReport <- inferenceReadinessReport inferenceEnv
+  logReadinessTransition "studiomcp-inference" (inferenceReadinessSummaryRef inferenceEnv) readinessReport
+  respond (jsonResponse (readinessHttpStatus readinessReport) readinessReport)
+
+inferenceReadinessReport :: InferenceEnv -> IO ReadinessReport
+inferenceReadinessReport inferenceEnv =
+  buildReadinessReport "studiomcp-inference"
+    <$> inferenceReadinessChecks inferenceEnv
+
+inferenceReadinessChecks :: InferenceEnv -> IO [ReadinessCheck]
+inferenceReadinessChecks inferenceEnv =
+  pure . (: []) =<<
+    probeAnyHttpCheck
+      (inferenceManager inferenceEnv)
+      "reference-model"
+      (referenceModelHealthUrls (inferenceReferenceModelConfig inferenceEnv))
+      [200]
+      "reference-model-ready"
+      "reference-model-unavailable"
+
+referenceModelHealthUrls :: ReferenceModelConfig -> [Text]
+referenceModelHealthUrls referenceModelConfig =
+  let rawUrl = Text.pack (referenceModelUrl referenceModelConfig)
+      rootUrl =
+        case take 3 (Text.splitOn "/" rawUrl) of
+          [scheme, "", authority] -> Text.intercalate "/" [scheme, "", authority]
+          _ -> rawUrl
+   in filter
+        (not . Text.null)
+        [rootUrl <> "/healthz", rootUrl <> "/api/tags", rootUrl <> "/api/version"]
+
+logReadinessTransition :: Text -> IORef (Maybe Text) -> ReadinessReport -> IO ()
+logReadinessTransition serviceName summaryRef readinessReport = do
+  let summary =
+        case readinessStatus readinessReport of
+          ReadinessReady -> "ready"
+          ReadinessBlocked -> renderBlockingChecks readinessReport
+  previousSummary <- readIORef summaryRef
+  if previousSummary == Just summary
+    then pure ()
+    else do
+      writeIORef summaryRef (Just summary)
+      logInfo
+        ( "readiness["
+            <> serviceName
+            <> "] "
+            <> case readinessStatus readinessReport of
+              ReadinessReady -> "ready"
+              ReadinessBlocked -> "blocked: " <> summary
+        )
 
 jsonResponse :: ToJSON a => Status -> a -> Response
 jsonResponse statusValue payload =

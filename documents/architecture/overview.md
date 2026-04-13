@@ -22,6 +22,16 @@ The target public topology has four major planes:
 
 The current codebase already includes the live Keycloak boundary, the ingress-nginx-fronted kind topology, the browser-facing login/session behavior, and the MCP/runtime surface described by this suite. The documents here now describe implemented architecture for the current login/password delivery path, with OAuth/PKCE explicitly deferred.
 
+The current repo also treats runtime readiness as an explicit application contract rather than a
+pod-liveness side effect:
+
+- `/mcp`, `/api`, worker, and inference surfaces expose structured readiness state with blocking
+  reasons
+- Kubernetes rollout and published service endpoints remain necessary routing checks, but live
+  traffic does not begin until the application readiness contract has also closed
+- cluster waiters and live validators reuse that readiness contract instead of relying on fixed
+  sleeps or startup-race retry loops
+
 ## System Topology
 
 ```mermaid
@@ -48,6 +58,7 @@ flowchart TB
 - Haskell ownership of protocol, execution, failure algebra, and summary model
 - secure multi-tenant authn/authz with Keycloak as the trusted issuer
 - horizontally scalable non-sticky listener nodes
+- dependency-aware readiness with structured blocking reasons at each runtime surface
 - immutable artifact and manifest contracts
 - strict prohibition on permanent MCP-driven media deletion
 - browser product surface mediated through a BFF rather than direct browser-to-storage trust expansion

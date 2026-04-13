@@ -17,6 +17,8 @@
 - uses Keycloak for identity and Redis for shared MCP session state
 - serves browser users through a BFF with cookie-first session handling
 - routes `/mcp`, `/api`, and `/kc` through ingress-nginx
+- treats readiness as a first-class runtime contract with explicit application conditions,
+  watch-driven waiting, and structured blocking reasons
 - keeps large artifact bytes on the data plane via presigned object-storage URLs
 - stores all local durable repo state under `./.data/`
 
@@ -34,6 +36,7 @@
 | 8 | Done | The canonical regression gate remains `docker compose run --rm studiomcp studiomcp validate all`, and the final closure work now includes aligned suite indexes, one canonical doc per governed concept, and refreshed top-level status summaries |
 | 9 | Done | CLI test and validate commands consolidated with unified interface and documentation |
 | 10 | Done | Build artifact isolation and the one-command container contract are implemented: single-stage Dockerfile, `tini`, no Dockerfile `CMD`, no compose `command`, and Kubernetes-owned runtime startup |
+| 11 | Done | Dependency-aware readiness is implemented across workloads, CLI waits, validators, and governed docs, with the post-cleanup full-suite verification closed |
 
 ## Public Topology Baseline
 
@@ -49,7 +52,8 @@ The supported local and cluster topology is:
 - runtime services use Pulsar and MinIO for eventing and immutable artifact storage
 - Harbor runs on the cluster and serves as the image source for Helm-managed workloads
 - the CLI populates Harbor with required application images before Helm chart deployment begins
-- server deploy waits for Kubernetes service endpoint publication before live ingress validation begins
+- server deploy now waits for Kubernetes service endpoint publication and dependency-aware
+  application readiness before live ingress validation begins
 - local cluster persistence uses CLI-reconciled PVs backed by `./.data/` through the `studiomcp-manual` StorageClass
 - all durable local filesystem state lives under `./.data/`
 
@@ -73,8 +77,8 @@ The supported local and cluster topology is:
 - All Helm deploys pull application containers from Harbor.
 - The CLI is responsible for populating Harbor with the required application images before Helm
   chart deployment.
-- The CLI treats workload rollout plus Kubernetes service endpoint publication as the readiness
-  contract for live `/mcp` and `/api` validation.
+- The CLI treats workload rollout, Kubernetes service endpoint publication, and application
+  readiness as separate gates for live `/mcp` and `/api` validation.
 - Cluster secrets are managed by the CLI on deploy; no env files.
 - Stateful Helm workloads bind only to the CLI-reconciled `studiomcp-manual` StorageClass; no
   default dynamic storage class remains on the supported local path.
@@ -91,6 +95,9 @@ The supported local and cluster topology is:
 
 - A phase is complete only when the target behavior exists and the listed validation gates pass.
 - Harness-based validation only counts for the exact behavior it exercises.
+- Deployment rollout and `EndpointSlice` publication alone do not close runtime readiness; the
+  supported path must also make dependency-aware application readiness explicit where traffic would
+  otherwise race startup.
 - When architecture changes, update [README.md](README.md), [system-components.md](system-components.md),
   and the affected phase file together.
 - Public contract items are not complete until the contract and the environment-specific validation
@@ -111,3 +118,4 @@ The supported local and cluster topology is:
 - [phase-8-final-closure-regression-gate.md](phase-8-final-closure-regression-gate.md)
 - [phase-9-cli-test-validate-consolidation.md](phase-9-cli-test-validate-consolidation.md)
 - [phase-10-build-artifact-isolation.md](phase-10-build-artifact-isolation.md)
+- [phase-11-runtime-readiness-and-condition-driven-startup.md](phase-11-runtime-readiness-and-condition-driven-startup.md)

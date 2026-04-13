@@ -119,13 +119,25 @@ Kubernetes cluster lifecycle management.
 | `studiomcp cluster down` | Stop and delete the Kind cluster |
 | `studiomcp cluster reset` | Reset the cluster to clean state |
 | `studiomcp cluster status` | Show cluster status |
-| `studiomcp cluster ensure` | Idempotent: up + Helm dependency reconcile + sidecars + wait for all services |
+| `studiomcp cluster ensure` | Idempotent: up + Helm dependency reconcile + sidecars + shared-service readiness waits |
 | `studiomcp cluster push-images` | Build and push application images to the configured registry |
 | `studiomcp cluster ensure-secrets` | Create/update CLI-managed Kubernetes secrets |
 | `studiomcp cluster deploy sidecars` | Reconcile Helm dependencies and deploy sidecar services (Redis, MinIO, Pulsar, etc.) |
-| `studiomcp cluster deploy server` | Reconcile Helm dependencies and deploy the MCP server |
+| `studiomcp cluster deploy server` | Reconcile Helm dependencies, deploy MCP/BFF/worker workloads, and wait for routing plus application readiness |
 | `studiomcp cluster storage reconcile` | Reconcile storage resources |
 | `studiomcp cluster storage delete <name>` | Delete a named storage resource |
+
+## Readiness Behavior
+
+The cluster command surface now closes deploy-time readiness explicitly.
+
+- `cluster ensure` waits for shared-service application readiness for MinIO, Pulsar, and Keycloak
+  after the Helm-managed workloads roll out
+- `cluster deploy server` waits for rollout, Kubernetes `EndpointSlice` publication, ingress-edge
+  readiness for `/mcp` and `/api`, worker readiness, and reference-model health before returning
+- live validators such as `validate mcp-http`, `validate web-bff`, and `validate observability`
+  reuse that deploy-time gate instead of relying on startup-race retry loops as the primary
+  synchronization mechanism
 
 ## Usage Examples
 

@@ -3,9 +3,10 @@ module Integration.HarnessSpec
   )
 where
 
-import Control.Monad (unless)
+import Control.Monad (unless, when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import System.Directory (doesFileExist)
+import StudioMCP.Util.Cabal (ensureCabalBootstrap)
+import System.Directory (createDirectoryIfMissing, doesDirectoryExist, doesFileExist, removePathForcibly)
 import System.Exit (ExitCode (ExitSuccess, ExitFailure))
 import System.IO.Unsafe (unsafePerformIO)
 import System.Process (readProcessWithExitCode)
@@ -101,7 +102,7 @@ ensureOuterContainer = do
     insideOuterContainer <- isInsideOuterContainer
     if insideOuterContainer
       then do
-        _ <- runShellExpectSuccess outerContainerBuildCommand
+        buildOuterContainerBinary
         pure ()
       else do
         _ <- runComposeExpectSuccess ["build", "studiomcp"]
@@ -145,8 +146,14 @@ runOuterCliExpectSuccess args = do
           )
           ""
   let combinedOutput = stdoutText <> stderrText
-  exitCode `shouldBe` ExitSuccess
-  pure combinedOutput
+  case exitCode of
+    ExitSuccess -> pure combinedOutput
+    ExitFailure code -> do
+      expectationFailure $
+        "Command 'studiomcp " <> unwords args <> "' failed with exit code " <> show code <> ":\n"
+          <> "--- stdout ---\n" <> stdoutText <> "\n"
+          <> "--- stderr ---\n" <> stderrText
+      pure ""
 
 -- | Like runOuterCliExpectSuccess but provides detailed diagnostics on failure.
 -- Use this for critical setup commands (like cluster ensure) where understanding
@@ -182,17 +189,32 @@ outerEnvironmentReadyRef :: IORef Bool
 outerEnvironmentReadyRef = unsafePerformIO (newIORef False)
 {-# NOINLINE outerEnvironmentReadyRef #-}
 
-outerContainerBuildCommand :: String
-outerContainerBuildCommand =
-  "rm -rf /opt/build/studiomcp-cli && mkdir -p /opt/build/studiomcp-cli && cabal --builddir=/opt/build/studiomcp-cli build all && cabal --builddir=/opt/build/studiomcp-cli install exe:studiomcp --installdir /usr/local/bin --overwrite-policy=always"
+buildOuterContainerBinary :: IO ()
+buildOuterContainerBinary = do
+  ensureCabalBootstrap
+  let buildDir = "/opt/build/studiomcp-cli"
+  buildDirExists <- doesDirectoryExist buildDir
+  when buildDirExists $
+    removePathForcibly buildDir
+  createDirectoryIfMissing True buildDir
+  (exitCode, stdoutText, stderrText) <-
+    readProcessWithExitCode
+      "cabal"
+      [ "--builddir=" <> buildDir
+      , "install"
+      , "exe:studiomcp"
+      , "--installdir"
+      , "/usr/local/bin"
+      , "--overwrite-policy=always"
+      ]
+      ""
+  case exitCode of
+    ExitSuccess -> pure ()
+    ExitFailure code ->
+      expectationFailure $
+        "Command 'cabal install exe:studiomcp' failed with exit code " <> show code <> ":\n"
+          <> "--- stdout ---\n" <> stdoutText <> "\n"
+          <> "--- stderr ---\n" <> stderrText
 
 isInsideOuterContainer :: IO Bool
 isInsideOuterContainer = doesFileExist "/.dockerenv"
-
-runShellExpectSuccess :: String -> IO String
-runShellExpectSuccess command = do
-  (exitCode, stdoutText, stderrText) <-
-    readProcessWithExitCode "sh" ["-lc", command] ""
-  let combinedOutput = stdoutText <> stderrText
-  exitCode `shouldBe` ExitSuccess
-  pure combinedOutput

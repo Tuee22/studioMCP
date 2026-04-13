@@ -36,6 +36,8 @@ The current repository now implements the remote-session contract described here
 - shared session visibility and lock semantics are validated directly
 - live horizontal-scale validation confirms one MCP session survives repeated requests routed across multiple listener pods without sticky ingress
 - live validation also exercises subscription/cursor resumption, one-listener rollout survival, and deterministic Redis-outage recovery through either existing-session resumption or clean post-recovery session re-establishment
+- listener readiness now blocks when the Redis-backed session store is unavailable, so deploy-time
+  traffic does not reach an MCP listener that cannot safely resume or advance shared session state
 
 ## Non-Sticky Requirement
 
@@ -80,6 +82,15 @@ Redis is used here for:
 - cross-pod reconnect continuity
 
 Redis is not the artifact store and is not the identity source of truth.
+
+## Readiness Implications
+
+Because Redis session state is required for correctness, it is also a readiness dependency.
+
+- MCP listeners report blocked readiness when the shared session store cannot be contacted
+- deploy-time waiters do not treat rollout completion alone as sufficient for MCP admission
+- horizontal-scale and outage-recovery validation continue to prove that either existing-session
+  continuity or clean post-recovery re-establishment remains deterministic once readiness closes
 
 ## Redis Key Schema
 

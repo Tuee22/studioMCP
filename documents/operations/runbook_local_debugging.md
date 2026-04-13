@@ -88,6 +88,20 @@ The CLI derives the host-visible `./.data/` path for kind from the outer contain
 - rerun the failing Helm or Skaffold command directly
 - current repo note: the native `studiomcp` cluster-management, worker, server, inference, and observability workflows are verified from inside the built outer container on this machine; remaining issues are more likely to be host-context-specific or tied to persistence-enabled local releases
 
+### Readiness Timeout Or Blocked Startup
+
+- rerun `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp cluster deploy server`
+- inspect the structured readiness payloads instead of guessing from rollout alone:
+  `curl -fsS http://localhost:8081/mcp/health/ready`
+  `curl -fsS http://localhost:8081/api/health/ready`
+- if the edge routes are not available yet, port-forward the backing services and inspect:
+  `kubectl port-forward service/studiomcp-worker 39032:3002`
+  `curl -fsS http://127.0.0.1:39032/health/ready`
+- use the returned blocking reasons to distinguish auth JWKS, Redis/session-store, Pulsar,
+  MinIO, workflow-runtime, or reference-model failures
+- when integration tests fail during startup, inspect the preserved validator stdout and stderr in
+  the harness output before rerunning blindly
+
 ### Documentation Validation Failure
 
 - inspect the changed docs together with [../documentation_standards.md](../documentation_standards.md#studiomcp-documentation-standards)

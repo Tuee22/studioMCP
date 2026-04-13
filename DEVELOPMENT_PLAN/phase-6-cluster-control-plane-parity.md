@@ -36,7 +36,7 @@ Ensure the Kind and Helm workflow exposes the canonical control-plane contract w
 | Harbor-backed image flow | `src/StudioMCP/CLI/Cluster.hs`, `kind/kind_config.yaml`, `chart/values.yaml`, `chart/values-kind.yaml` | Done |
 | CLI-owned storage reconciliation | `src/StudioMCP/CLI/Cluster.hs`, `chart/values.yaml`, `chart/values-kind.yaml` | Done |
 | CLI-managed secrets | `src/StudioMCP/CLI/Cluster.hs`, `chart/values.yaml` | Done |
-| Event-driven service endpoint publication gate after server rollout | `src/StudioMCP/CLI/Cluster.hs` | Done |
+| Routing-level service endpoint publication gate after server rollout | `src/StudioMCP/CLI/Cluster.hs` | Done |
 
 ## Unified Ingress Routing
 
@@ -126,7 +126,7 @@ chart dependencies with `helm dependency build chart` so the supported `cluster 
 `cluster deploy sidecars`, and `cluster deploy server` flows do not depend on a pre-populated
 `chart/charts/` directory.
 
-## Event-Driven Service Endpoint Readiness
+## Routing-Level Service Endpoint Readiness
 
 The supported `cluster deploy server` path treats deployment rollout and service endpoint
 publication as separate readiness events.
@@ -137,6 +137,11 @@ publication as separate readiness events.
   for those services.
 - Live edge validators begin only after both events have closed, so `/mcp` and `/api` do not rely
   on validator-local HTTP retry loops to absorb post-rollout endpoint publication lag.
+
+This phase intentionally closed routing-level readiness only. Dependency-aware application
+readiness across auth, session state, object storage, event transport, and role-specific startup
+was layered on later by
+[phase-11-runtime-readiness-and-condition-driven-startup.md](phase-11-runtime-readiness-and-condition-driven-startup.md).
 
 ## CLI-Owned Storage Reconciliation
 
@@ -208,7 +213,7 @@ edge with Harbor-backed image references.
 | Helm template | `docker compose run --rm studiomcp helm template studiomcp chart -f chart/values.yaml -f chart/values-kind.yaml` | Renders unified ingress |
 | Storage reconcile | `docker compose run --rm studiomcp studiomcp cluster storage reconcile` | `studiomcp-manual` and required PVs applied idempotently |
 | Cluster ensure | `docker compose run --rm studiomcp studiomcp cluster ensure` | Shared services, ingress, storage policy, and realm bootstrap converge |
-| Cluster deploy server | `docker compose run --rm studiomcp studiomcp cluster deploy server` | MCP and BFF workloads are running with Harbor-backed image references and published service endpoints |
+| Cluster deploy server | `docker compose run --rm studiomcp studiomcp cluster deploy server` | MCP and BFF workloads are running with Harbor-backed image references; rollout, published service endpoints, and broader application readiness now all close before live validation begins |
 | Integration tests | `docker compose run --rm studiomcp studiomcp test integration` | Pass on the supported parity path |
 | Storage policy | `docker compose run --rm studiomcp studiomcp validate storage-policy` | PASS |
 | Sidecar edge reachability | `docker compose run --rm studiomcp curl -fsS localhost:8081/kc/realms/studiomcp/.well-known/openid-configuration` and `docker compose run --rm studiomcp curl -fsS localhost:8081/minio/` | `/kc` and `/minio` are reachable through ingress at 8081 |
@@ -236,12 +241,14 @@ None. This phase is complete on the current supported path.
 - Keep [phase-4-control-plane-data-plane-contract.md](phase-4-control-plane-data-plane-contract.md) aligned when ingress behavior changes.
 - Keep [system-components.md](system-components.md) aligned when deployment topology changes.
 - Keep [README.md](README.md) and [00-overview.md](00-overview.md) aligned when deploy-time readiness semantics change.
+- Keep [phase-11-runtime-readiness-and-condition-driven-startup.md](phase-11-runtime-readiness-and-condition-driven-startup.md) aligned when routing-level readiness is extended into application-level readiness.
 
 ## Cross-References
 
 - [00-overview.md](00-overview.md)
 - [system-components.md](system-components.md)
 - [phase-4-control-plane-data-plane-contract.md](phase-4-control-plane-data-plane-contract.md)
+- [phase-11-runtime-readiness-and-condition-driven-startup.md](phase-11-runtime-readiness-and-condition-driven-startup.md)
 - [legacy-tracking-for-deletion.md](legacy-tracking-for-deletion.md)
 - [../documents/engineering/k8s_native_dev_policy.md](../documents/engineering/k8s_native_dev_policy.md)
 - [../documents/engineering/k8s_storage.md](../documents/engineering/k8s_storage.md)

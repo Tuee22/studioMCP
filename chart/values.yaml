@@ -91,11 +91,15 @@ worker:
       port: 3002
       initialDelaySeconds: 15
       periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
     readinessProbe:
       path: /health/ready
       port: 3002
       initialDelaySeconds: 10
       periodSeconds: 5
+      timeoutSeconds: 5
+      failureThreshold: 3
 
 # BFF deployment (separate service for browser interface)
 bff:
@@ -126,11 +130,15 @@ bff:
       port: 3002
       initialDelaySeconds: 10
       periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
     readinessProbe:
       path: /health/ready
       port: 3002
       initialDelaySeconds: 5
       periodSeconds: 5
+      timeoutSeconds: 5
+      failureThreshold: 3
 
 # Reference LLM service (optional)
 llmReference:

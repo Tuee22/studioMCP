@@ -66,6 +66,21 @@ The local control-plane loop is:
 kind must run against the selected host Docker context through the outer development container. This is not Docker-in-Docker.
 Persistent storage must follow the explicit PV policy in [Kubernetes Storage Policy](k8s_storage.md#kubernetes-storage-policy).
 
+### Condition-Driven Startup
+
+Cluster startup and deploy-time admission must be condition-driven.
+
+- `studiomcp cluster ensure` owns shared-service convergence for Redis, PostgreSQL, MinIO, Pulsar,
+  and Keycloak
+- `studiomcp cluster deploy server` owns rollout, service-endpoint publication, and
+  application-readiness waits for the MCP server, BFF, worker, and reference-model path
+- fixed sleeps are not the supported synchronization mechanism for local cluster automation
+- live validators should rely on the shared CLI readiness gate instead of inventing command-local
+  startup loops
+
+Kubernetes readiness probes remain necessary, but they are paired with application readiness
+handlers that return structured blocking reasons instead of generic success/failure only.
+
 ### Skaffold Still Matters
 
 Skaffold remains part of the Kubernetes-native toolchain for image-build and deployment workflows. It does not replace the need for the Haskell CLI command surface.

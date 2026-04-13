@@ -6,11 +6,11 @@ module StudioMCP.CLI.Cluster
   )
 where
 
-import Control.Exception (SomeException, bracket, bracket_, try)
+import Control.Exception (SomeException, bracket, bracket_, throwIO, try)
 import GHC.IO.Handle.Lock (LockMode (..), hLock, hUnlock)
 import System.IO (IOMode (..), hClose, openFile)
 import Control.Concurrent (forkIO, killThread, threadDelay)
-import Control.Monad (foldM, forM, forM_, unless, when)
+import Control.Monad (foldM, forM, forM_, unless, void, when)
 import Data.Aeson (FromJSON, Value (..), decode, encode, fromJSON, object, withObject, (.:), (.:?), (.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as Key
@@ -22,8 +22,8 @@ import qualified Data.ByteString.Base64.URL as Base64Url
 import Data.ByteString.Char8 qualified as BS
 import Data.ByteString.Lazy.Char8 qualified as LBS
 import qualified Data.CaseInsensitive as CI
-import Data.Char (isSpace, toLower)
-import Data.List (intercalate, isInfixOf, isPrefixOf)
+import Data.Char (isAlphaNum, isSpace, toLower)
+import Data.List (intercalate, isInfixOf)
 import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import qualified Data.Set as Set
 import Data.Time (UTCTime, addUTCTime, diffUTCTime, getCurrentTime)
@@ -77,6 +77,11 @@ import StudioMCP.CLI.Command
 -- Note: ClusterEnsureCommand is now part of ClusterCommand (..)
 import StudioMCP.CLI.Docs (validateDocsCommand)
 import StudioMCP.API.Health (DependencyHealth (..), HealthReport (..), HealthStatus (..))
+import StudioMCP.API.Readiness
+  ( ReadinessReport (..)
+  , ReadinessStatus (..)
+  , renderBlockingChecks
+  )
 import StudioMCP.Auth.Admin
   ( KeycloakAdminConfig (..)
   , defaultAdminConfig
@@ -916,6 +921,15 @@ clusterEnsure = do
   -- Wait for Keycloak
   waitForWorkloadRollout "statefulset/studiomcp-keycloak" "480s"
 
+  manager <- newManager defaultManagerSettings
+  withPortForward "service/studiomcp-minio" 39010 9000 $ \baseUrl ->
+    waitForMinioReady manager baseUrl
+  withPortForward "service/studiomcp-pulsar-proxy" 39011 80 $ \pulsarHttpBaseUrl ->
+    waitForHttpStatus manager (pulsarHttpBaseUrl <> "/admin/v2/clusters") [200]
+  withPortForward "service/studiomcp-keycloak" 39021 80 $ \baseUrl -> do
+    waitForHttpStatusWithTimeout 180 manager (baseUrl <> "/kc/realms/master") [200]
+    waitForHttpStatus manager (baseUrl <> "/kc/realms/studiomcp/.well-known/openid-configuration") [200]
+
   putStrLn "cluster ensure: All services ready."
 
 clusterDeploy :: ClusterDeployTarget -> IO ()
@@ -941,12 +955,18 @@ clusterDeploy target = do
         ensureKindSidecars registryConfig
       _ <- clusterPushImagesWithConfig registryConfig
       runKindHelmUpgrade registryConfig True DeployServer
-      callProcess "kubectl" ["rollout", "restart", "deployment/studiomcp"]
+      restartWorkloadIfExists "deployment/studiomcp"
       restartWorkloadIfExists "deployment/studiomcp-bff"
+      restartWorkloadIfExists "deployment/studiomcp-worker"
+      restartWorkloadIfExists "deployment/studiomcp-llm-reference"
       waitForWorkloadRollout "deployment/studiomcp" "480s"
       waitForWorkloadRollout "deployment/studiomcp-bff" "480s"
+      waitForWorkloadRollout "deployment/studiomcp-worker" "480s"
+      waitForWorkloadRollout "deployment/studiomcp-llm-reference" "480s"
       waitForServiceEndpointPublication "studiomcp" "300s"
       waitForServiceEndpointPublication "studiomcp-bff" "300s"
+      waitForServiceEndpointPublication "studiomcp-worker" "300s"
+      waitForClusterApplicationReadiness
 
 kindSidecarsReady :: ImageRegistryConfig -> IO Bool
 kindSidecarsReady registryConfig = do
@@ -1081,6 +1101,31 @@ waitForServiceEndpointPublication serviceName timeoutValue = do
       , "endpointslice/" <> endpointSliceName
       , "--timeout=" <> timeoutValue
       ]
+
+waitForClusterApplicationReadiness :: IO ()
+waitForClusterApplicationReadiness = do
+  manager <- newManager defaultManagerSettings
+  baseUrl <- clusterEdgeInternalBaseUrl
+  _ <- waitForReadinessReportWithTimeout 180 manager (baseUrl <> "/mcp/health/ready")
+  _ <- waitForReadinessReportWithTimeout 180 manager (baseUrl <> "/api/health/ready")
+  waitForPortForwardedReadiness "service/studiomcp-worker" 39032 3002 180
+  waitForPortForwardedHealthz "service/studiomcp-llm-reference" 39033 8080 120
+
+waitForPortForwardedReadiness :: String -> Int -> Int -> Int -> IO ()
+waitForPortForwardedReadiness target localPort remotePort timeoutSeconds = do
+  resourceExists <- kubectlResourceExists target
+  when resourceExists $ do
+    manager <- newManager defaultManagerSettings
+    withPortForward target localPort remotePort $ \baseUrl ->
+      void (waitForReadinessReportWithTimeout timeoutSeconds manager (baseUrl <> "/health/ready"))
+
+waitForPortForwardedHealthz :: String -> Int -> Int -> Int -> IO ()
+waitForPortForwardedHealthz target localPort remotePort timeoutSeconds = do
+  resourceExists <- kubectlResourceExists target
+  when resourceExists $ do
+    manager <- newManager defaultManagerSettings
+    withPortForward target localPort remotePort $ \baseUrl ->
+      waitForHttpStatusWithTimeout timeoutSeconds manager (baseUrl <> "/healthz") [200]
 
 kubectlResourceExists :: String -> IO Bool
 kubectlResourceExists resourceName = do
@@ -2183,7 +2228,7 @@ validateInference = do
       38102
       (ReferenceModelConfig "http://127.0.0.1:38101/api/generate")
       $ do
-        waitForHttpStatus manager "http://127.0.0.1:38102/healthz" [200]
+        waitForHttpStatus manager "http://127.0.0.1:38102/health/ready" [200]
         response <-
           httpJsonRequest
             manager
@@ -2199,7 +2244,9 @@ validateInference = do
     38103
     (ReferenceModelConfig "http://127.0.0.1:39999/api/generate")
     $ do
-      waitForHttpStatus manager "http://127.0.0.1:38103/healthz" [200]
+      waitForHttpStatus manager "http://127.0.0.1:38103/health/live" [200]
+      waitForHttpStatus manager "http://127.0.0.1:38103/healthz" [503]
+      waitForHttpStatus manager "http://127.0.0.1:38103/health/ready" [503]
       failureResponse <-
         httpJsonRequest
           manager
@@ -2255,11 +2302,14 @@ validateObservability = do
         [ "studiomcp_method_calls_total{method=\"initialize\"} 1"
         , "studiomcp_method_calls_total{method=\"tools/call\"} 2"
         , "studiomcp_tool_calls_total{tool=\"workflow.submit\"} 1"
+        , "studiomcp_readiness 1"
         ]
     unless ("studiomcp_tool_calls_total{tool=\"workflow.submit\"} 1" `isInfixOf` metricsBody) $
       die "Expected /metrics to show workflow.submit tool metrics."
     unless ("studiomcp_method_calls_total{method=\"tools/call\"} 2" `isInfixOf` metricsBody) $
       die "Expected /metrics to show tools/call method metrics."
+    unless ("studiomcp_readiness 1" `isInfixOf` metricsBody) $
+      die "Expected /metrics to show a ready application readiness gauge."
     putStrLn "  ✓ /metrics exposes live MCP method and tool counters"
     initialHealthResponse <- httpJsonRequest manager "GET" (baseUrl <> "/healthz") Nothing
     initialHealthReport <- decodeResponseBody "initial health response" initialHealthResponse
@@ -2843,13 +2893,52 @@ clusterPushImagesWithConfig config = do
   credentials <- imageRegistryCredentials config
   let pushReference = imageRegistryPushReference config
   localDigest <- localImageConfigDigest "studiomcp:latest"
-  remoteDigest <- remoteImageConfigDigest config credentials
-  if remoteDigest == Just localDigest
-    then putStrLn ("Registry image already current: " <> pushReference)
+  cachedDigest <- cachedRegistryImageDigest config
+  if cachedDigest == Just localDigest
+    then putStrLn ("Registry image already current in this session: " <> pushReference)
     else do
-      putStrLn ("Pushing image to registry: " <> pushReference)
-      pushImageToRegistry config credentials
+      remoteDigest <- remoteImageConfigDigest config credentials
+      if remoteDigest == Just localDigest
+        then do
+          putStrLn ("Registry image already current: " <> pushReference)
+          writeCachedRegistryImageDigest config localDigest
+        else do
+          putStrLn ("Pushing image to registry: " <> pushReference)
+          pushImageToRegistry config credentials
+          writeCachedRegistryImageDigest config localDigest
   pure config
+
+cachedRegistryImageDigest :: ImageRegistryConfig -> IO (Maybe String)
+cachedRegistryImageDigest config = do
+  cachePath <- registryImageDigestCachePath config
+  cacheExists <- doesFileExist cachePath
+  if cacheExists
+    then do
+      cachedDigest <- trimWhitespace <$> readFile cachePath
+      pure $
+        if null cachedDigest
+          then Nothing
+          else Just cachedDigest
+    else pure Nothing
+
+writeCachedRegistryImageDigest :: ImageRegistryConfig -> String -> IO ()
+writeCachedRegistryImageDigest config digest = do
+  cachePath <- registryImageDigestCachePath config
+  writeFile cachePath digest
+
+registryImageDigestCachePath :: ImageRegistryConfig -> IO FilePath
+registryImageDigestCachePath config = do
+  tempDir <- getTemporaryDirectory
+  pure $
+    tempDir
+      </> ( "studiomcp-registry-digest-"
+              <> sanitizeCacheKey (imageRegistryPushReference config)
+              <> ".txt"
+          )
+
+sanitizeCacheKey :: String -> String
+sanitizeCacheKey =
+  map (\charValue -> if isAlphaNum charValue then charValue else '-')
 
 imageRegistryCredentials :: ImageRegistryConfig -> IO (Maybe (String, String))
 imageRegistryCredentials config
@@ -2885,10 +2974,14 @@ remoteImageConfigDigest config credentials = do
           <> registryCredentialArgs "--creds" credentials
           <> registryTlsArgs config
           <> ["docker://" <> imageRegistryPushReference config]
-  (exitCode, stdoutText, _) <-
-    readProcessWithExitCode "skopeo" args ""
+  (exitCode, stdoutText, stderrText) <-
+    retryReadProcessWithExitCode 3 3 "skopeo" args ""
   case exitCode of
-    ExitFailure _ -> pure Nothing
+    ExitFailure _ -> do
+      let detail = trimWhitespace stderrText
+      unless (null detail) $
+        putStrLn ("Unable to inspect remote registry image after retries: " <> detail)
+      pure Nothing
     ExitSuccess ->
       case decode (LBS.pack stdoutText) of
         Just value -> pure (lookupString ["config", "digest"] value)
@@ -2910,7 +3003,7 @@ pushImageToRegistry config credentials = do
                 <> registryCredentialArgs "--dest-creds" credentials
                 <> registryDestTlsArgs config
                 <> ["docker://" <> imageRegistryPushReference config]
-        callProcess "skopeo" args
+        callProcessWithRetry 3 5 "skopeo" args
     )
 
 registryCredentialArgs :: String -> Maybe (String, String) -> [String]
@@ -2959,11 +3052,14 @@ buildServerImage = do
             Just value -> setEnv "BUILDX_CONFIG" value
             Nothing -> unsetEnv "BUILDX_CONFIG"
         )
-        ( callProcess
+        ( callProcessWithRetry
+            3
+            5
             "docker"
             [ "buildx"
             , "build"
             , "--load"
+            , "--pull=false"
             , "--progress=plain"
             , "-t"
             , "studiomcp:latest"
@@ -2972,6 +3068,50 @@ buildServerImage = do
             , "."
             ]
         )
+
+callProcessWithRetry :: Int -> Int -> String -> [String] -> IO ()
+callProcessWithRetry maxAttempts retryDelaySeconds command args =
+  go (1 :: Int)
+  where
+    go attempt = do
+      result <- try (callProcess command args)
+      case result of
+        Right () -> pure ()
+        Left ex
+          | attempt < maxAttempts -> do
+              putStrLn $
+                "Retrying command after failure (attempt "
+                  <> show attempt
+                  <> "/"
+                  <> show maxAttempts
+                  <> "): "
+                  <> command
+              threadDelay (retryDelaySeconds * 1000000)
+              go (attempt + 1)
+          | otherwise -> throwIO (ex :: SomeException)
+
+retryReadProcessWithExitCode :: Int -> Int -> String -> [String] -> String -> IO (ExitCode, String, String)
+retryReadProcessWithExitCode maxAttempts retryDelaySeconds command args stdinText =
+  go (1 :: Int)
+  where
+    go attempt = do
+      result@(exitCode, _stdoutText, stderrText) <- readProcessWithExitCode command args stdinText
+      case exitCode of
+        ExitSuccess -> pure result
+        ExitFailure _
+          | attempt < maxAttempts -> do
+              let detail = trimWhitespace stderrText
+              putStrLn $
+                "Retrying command after failure (attempt "
+                  <> show attempt
+                  <> "/"
+                  <> show maxAttempts
+                  <> "): "
+                  <> command
+                  <> if null detail then "" else " [" <> take 240 detail <> "]"
+              threadDelay (retryDelaySeconds * 1000000)
+              go (attempt + 1)
+          | otherwise -> pure result
 
 data HttpResponse = HttpResponse
   { httpResponseStatus :: Int,
@@ -3161,6 +3301,51 @@ waitForHttpStatusWithTimeout timeoutSeconds manager url expectedStatuses =
         _ -> do
           threadDelay 1000000
           go (remainingAttempts - 1)
+
+waitForReadinessReportWithTimeout :: Int -> Manager -> String -> IO ReadinessReport
+waitForReadinessReportWithTimeout timeoutSeconds manager url =
+  go timeoutSeconds Nothing
+  where
+    go :: Int -> Maybe Text -> IO ReadinessReport
+    go 0 lastObservation =
+      die $
+        "Timed out waiting for readiness at "
+          <> url
+          <> maybe "" (\detail -> "\nLast observation: " <> Text.unpack detail) lastObservation
+    go remainingAttempts lastObservation = do
+      responseOrException <- tryHttp (httpJsonRequest manager "GET" url Nothing)
+      case responseOrException of
+        Right response ->
+          case decode (httpResponseBody response) of
+            Just readinessReport
+              | readinessStatus readinessReport == ReadinessReady ->
+                  pure readinessReport
+              | otherwise ->
+                  retry
+                    remainingAttempts
+                    ( Just
+                        ( "status="
+                            <> Text.pack (show (httpResponseStatus response))
+                            <> " "
+                            <> renderBlockingChecks readinessReport
+                        )
+                    )
+            Nothing ->
+              retry
+                remainingAttempts
+                ( Just
+                    ( "status="
+                        <> Text.pack (show (httpResponseStatus response))
+                        <> " body="
+                        <> Text.pack (take 400 (LBS.unpack (httpResponseBody response)))
+                    )
+                )
+        Left exn ->
+          retry remainingAttempts (Just (Text.pack (show exn)))
+
+    retry remainingAttempts lastObservation = do
+      threadDelay 1000000
+      go (remainingAttempts - 1) lastObservation
 
 waitForMetricsBody :: Manager -> String -> [String] -> IO String
 waitForMetricsBody manager baseUrl expectedFragments =

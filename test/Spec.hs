@@ -1,6 +1,7 @@
 module Main (main) where
 
 import qualified API.HealthSpec
+import qualified API.ReadinessSpec
 import qualified API.MetricsSpec
 import qualified Auth.ClaimsSpec
 import qualified Auth.ConfigSpec
@@ -88,6 +89,7 @@ main :: IO ()
 main =
   hspec $ do
     API.HealthSpec.spec
+    API.ReadinessSpec.spec
     API.MetricsSpec.spec
     Auth.TypesSpec.spec
     Auth.ConfigSpec.spec

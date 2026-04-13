@@ -51,7 +51,7 @@ dependencyApplication request respond =
   case (requestMethod request, pathInfo request) of
     (methodValue, ["admin", "v2", "clusters"]) | methodValue == methodGet ->
       respond (jsonReadyResponse "{\"status\":\"ready\"}")
-    (methodValue, ["minio", "health", "live"]) | methodValue == methodGet ->
+    (methodValue, ["minio", "health", "ready"]) | methodValue == methodGet ->
       respond (jsonReadyResponse "{\"status\":\"ready\"}")
     _ ->
       respond (jsonReadyResponse "{\"status\":\"ready\"}")
@@ -67,6 +67,7 @@ healthyConfig port =
       pulsarHttpUrl = baseUrl port,
       pulsarBinaryUrl = "pulsar://studiomcp-pulsar:6650",
       minioEndpoint = baseUrl port,
+      minioPublicEndpoint = baseUrl port,
       minioAccessKey = "minioadmin",
       minioSecretKey = "minioadmin123"
     }

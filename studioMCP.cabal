@@ -89,8 +89,10 @@ library
     StudioMCP.Worker.Protocol
     StudioMCP.Worker.Server
     StudioMCP.API.Health
+    StudioMCP.API.Readiness
     StudioMCP.API.Metrics
     StudioMCP.API.Version
+    StudioMCP.Util.Cabal
     StudioMCP.Util.Time
     StudioMCP.Util.Logging
     StudioMCP.Util.Json
@@ -211,6 +213,7 @@ test-suite unit-tests
   main-is: Spec.hs
   other-modules:
     API.HealthSpec
+    API.ReadinessSpec
     API.MetricsSpec
     DAG.ValidatorSpec
     DAG.ParserSpec

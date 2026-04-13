@@ -31,7 +31,7 @@ runBffMode = do
       (serverToolCatalog serverEnv)
       (serverTenantStorage serverEnv)
       (ReferenceModelConfig referenceModelUrl)
-  let ctx = newBFFContextWithService bffConfig service
+  ctx <- newBFFContextWithService bffConfig service
   putStrLn ("studioMCP BFF listening on 0.0.0.0:" <> show port)
   runSettings
     (setHost "0.0.0.0" (setPort port defaultSettings))

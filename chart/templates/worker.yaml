@@ -69,12 +69,16 @@ spec:
               port: {{ .Values.worker.health.livenessProbe.port }}
             initialDelaySeconds: {{ .Values.worker.health.livenessProbe.initialDelaySeconds }}
             periodSeconds: {{ .Values.worker.health.livenessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.worker.health.livenessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.worker.health.livenessProbe.failureThreshold }}
           readinessProbe:
             httpGet:
               path: {{ .Values.worker.health.readinessProbe.path }}
               port: {{ .Values.worker.health.readinessProbe.port }}
             initialDelaySeconds: {{ .Values.worker.health.readinessProbe.initialDelaySeconds }}
             periodSeconds: {{ .Values.worker.health.readinessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.worker.health.readinessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.worker.health.readinessProbe.failureThreshold }}
           {{- end }}
 ---
 apiVersion: v1

@@ -180,16 +180,38 @@ The BFF is a first-class Kubernetes workload published behind the shared ingress
 The development container does not own long-lived BFF startup. Helm manifests own the in-cluster
 runtime command and rollout behavior.
 
+## Startup And Readiness Contract
+
+The BFF reports ready only when browser traffic can complete real authenticated and workflow-backed
+operations.
+
+The implemented readiness contract checks:
+
+- workflow runtime and tool catalog wiring are present
+- the configured auth JWKS endpoint is reachable when auth is enabled
+- the advisory reference model is reachable through one of its supported health endpoints
+- Pulsar and MinIO are reachable through the shared runtime configuration used by BFF-backed flows
+
+Operational endpoints are available at both root and ingress-prefixed paths:
+
+- `/health/live` and `/api/health/live`
+- `/health/ready` and `/api/health/ready`
+- `/healthz` and `/api/healthz`
+
+`studiomcp cluster deploy server` now waits for the `/api/health/ready` contract to close before
+the live BFF validator starts session, upload, run, or logout traffic.
+
 ## Validation
 
 The supported validation path is:
 
 - `docker compose run --rm studiomcp studiomcp cluster ensure`
+- `docker compose run --rm studiomcp studiomcp cluster deploy server`
 - `docker compose run --rm studiomcp studiomcp validate web-bff`
 
 `validate web-bff` covers login, cookie issuance, browser-safe session summaries, cookie-over-bearer
 precedence, upload/download mediation, chat, run submission, run status, run-event streaming,
-refresh, and logout.
+refresh, and logout after the shared deploy-time readiness gate has already closed.
 
 ## Cross-References
 

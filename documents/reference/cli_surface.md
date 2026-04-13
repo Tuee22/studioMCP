@@ -127,13 +127,13 @@ The supported command surface must converge on one Haskell CLI with at least the
 | `studiomcp cluster down` | Stop local Kubernetes cluster |
 | `studiomcp cluster reset` | Reset the kind cluster to a clean Kubernetes state while preserving host-backed volumes |
 | `studiomcp cluster status` | Show cluster status |
-| `studiomcp cluster ensure` | Idempotent setup: up + Helm dependency reconcile + ingress edge + sidecars + Keycloak realm bootstrap + readiness waits (recommended for automation) |
+| `studiomcp cluster ensure` | Idempotent setup: up + Helm dependency reconcile + ingress edge + sidecars + Keycloak realm bootstrap + shared-service readiness waits (recommended for automation) |
 | `studiomcp cluster push-images` | Build and push application images to the configured registry |
 | `studiomcp cluster ensure-secrets` | Create/update CLI-managed Kubernetes secrets |
 | `studiomcp cluster storage reconcile` | Reconcile storage resources |
 | `studiomcp cluster storage delete <name>` | Delete a storage resource |
 | `studiomcp cluster deploy sidecars` | Reconcile Helm dependencies and deploy sidecar services |
-| `studiomcp cluster deploy server` | Reconcile Helm dependencies and deploy MCP server workloads |
+| `studiomcp cluster deploy server` | Reconcile Helm dependencies, deploy MCP/BFF/worker workloads, and wait for routing plus application readiness |
 
 ### Idempotency Guarantees
 
@@ -147,10 +147,10 @@ All cluster management commands are idempotent and safe to run repeatedly:
 | `cluster push-images` | Builds the application image from the repository Dockerfile, tags it for the configured registry, and pushes when the remote digest differs or is absent |
 | `cluster ensure-secrets` | Applies the required Kubernetes secrets with fixed names and stable keys |
 | `cluster deploy sidecars` | Ensures Helm dependencies are reconciled, ensures registry image availability, applies CLI-managed secrets, uses `helm upgrade --install`, ensures ingress-nginx, and bootstraps the checked-in Keycloak realm |
-| `cluster deploy server` | Ensures Helm dependencies are reconciled, ensures registry image availability, applies CLI-managed secrets, uses `helm upgrade --install`, bootstraps the checked-in Keycloak realm, and rolls server/BFF workloads |
+| `cluster deploy server` | Ensures Helm dependencies are reconciled, ensures registry image availability, applies CLI-managed secrets, uses `helm upgrade --install`, bootstraps the checked-in Keycloak realm, rolls server/BFF/worker/reference-model workloads, waits for rollout and `EndpointSlice` publication, and then waits for `/mcp`, `/api`, worker, and reference-model readiness |
 | `cluster storage reconcile` | Uses `kubectl apply` (idempotent) |
 | `cluster storage delete <name>` | Deletes the named PV if it exists |
-| `cluster ensure` | Single idempotent command: brings up the kind cluster, reconciles Helm dependencies, applies ingress-nginx, deploys sidecars, imports the checked-in Keycloak realm if missing, and waits for Redis, PostgreSQL, MinIO, Pulsar, and Keycloak. Recommended for automation and tests. |
+| `cluster ensure` | Single idempotent command: brings up the kind cluster, reconciles Helm dependencies, applies ingress-nginx, deploys sidecars, imports the checked-in Keycloak realm if missing, and waits for Redis, PostgreSQL, MinIO, Pulsar, and Keycloak, including shared-service application readiness. Recommended for automation and tests. |
 
 Running any of these commands multiple times produces the same result as running once. This design supports:
 - **Developer workflow**: Run `cluster ensure` at any point to guarantee a working environment
@@ -161,6 +161,18 @@ The default validated kind edge is:
 
 - control plane: `http://localhost:8081`
 - object storage: `http://localhost:9000`
+
+### Readiness And Wait Semantics
+
+The implemented cluster surface distinguishes three gates:
+
+- workload rollout
+- routing readiness through published Kubernetes service endpoints
+- application readiness through runtime `/health/ready` handlers and reference-model health checks
+
+Live validators rely on the CLI to close those gates before test traffic starts. Structured
+blocking reasons come from the readiness payloads, and the integration harness now preserves
+validator stdout and stderr when a readiness timeout fails.
 
 ### Validation Commands - Phase 1 Foundations
 

@@ -7,6 +7,7 @@ module StudioMCP.Worker.Server
 where
 
 import Data.Aeson (ToJSON, decode, encode, object, (.=))
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Text qualified as Text
 import Data.Time (getCurrentTime)
 import Data.Time.Format (defaultTimeLocale, formatTime)
@@ -34,7 +35,16 @@ import Network.Wai.Handler.Warp (defaultSettings, runSettings, setHost, setPort,
 import StudioMCP.API.Health
   ( HealthReport (healthStatus),
     HealthStatus (Degraded, Healthy),
-    probeDependencies,
+    healthReportFromChecks,
+    probePlatformDependencyChecks,
+  )
+import StudioMCP.API.Readiness
+  ( ReadinessCheck,
+    ReadinessReport (..),
+    ReadinessStatus (..),
+    buildReadinessReport,
+    readinessHttpStatus,
+    renderBlockingChecks,
   )
 import StudioMCP.API.Version (VersionInfo, versionInfoForMode)
 import StudioMCP.Config.Load (loadAppConfig)
@@ -53,7 +63,7 @@ import StudioMCP.Messaging.Topics (defaultExecutionTopic)
 import StudioMCP.Result.Failure (FailureDetail)
 import StudioMCP.Result.Types (Result (Failure, Success))
 import StudioMCP.Storage.MinIO (MinIOConfig (..))
-import StudioMCP.Util.Logging (configureProcessLogging)
+import StudioMCP.Util.Logging (configureProcessLogging, logInfo)
 import StudioMCP.Worker.Protocol
   ( WorkerExecutionRequest (..),
     WorkerExecutionResponse (..),
@@ -63,7 +73,8 @@ import System.Environment (lookupEnv)
 data WorkerEnv = WorkerEnv
   { workerAppConfig :: AppConfig,
     workerRuntimeConfig :: RuntimeConfig,
-    workerHttpManager :: Manager
+    workerHttpManager :: Manager,
+    workerReadinessSummaryRef :: IORef (Maybe Text.Text)
   }
 
 data WorkerExecutionResult
@@ -105,7 +116,7 @@ application workerEnv request respond =
     ["health", "live"] | requestMethod request == methodGet ->
       respond (jsonResponse status200 (object ["status" .= ("ok" :: String)]))
     ["health", "ready"] | requestMethod request == methodGet ->
-      respond (jsonResponse status200 (object ["status" .= ("ready" :: String)]))
+      handleReadiness workerEnv respond
     ["version"] | requestMethod request == methodGet ->
       respond (jsonResponse status200 (currentVersionInfo workerEnv))
     _ ->
@@ -135,17 +146,28 @@ handleHealth ::
   (Response -> IO b) ->
   IO b
 handleHealth workerEnv respond = do
-  healthReport <- currentHealthReport workerEnv
-  let statusValue =
+  readinessReport <- workerReadinessReport workerEnv
+  let healthReport = healthReportFromChecks (readinessChecks readinessReport)
+      statusValue =
         case healthStatus healthReport of
           Healthy -> status200
           Degraded -> status503
   respond (jsonResponse statusValue healthReport)
 
+handleReadiness ::
+  WorkerEnv ->
+  (Response -> IO b) ->
+  IO b
+handleReadiness workerEnv respond = do
+  readinessReport <- workerReadinessReport workerEnv
+  logReadinessTransition "studiomcp-worker" (workerReadinessSummaryRef workerEnv) readinessReport
+  respond (jsonResponse (readinessHttpStatus readinessReport) readinessReport)
+
 createWorkerEnv :: AppConfig -> IO WorkerEnv
 createWorkerEnv appConfig = do
   let AppConfig _ pulsarHttp pulsarBinary minioUrl _ minioAccess minioSecret = appConfig
   manager <- newManager defaultManagerSettings
+  readinessSummaryRef <- newIORef Nothing
   pure
     WorkerEnv
       { workerAppConfig = appConfig,
@@ -155,7 +177,8 @@ createWorkerEnv appConfig = do
               runtimeMinioConfig = MinIOConfig minioUrl minioAccess minioSecret,
               runtimeTopicName = defaultExecutionTopic
             },
-        workerHttpManager = manager
+        workerHttpManager = manager,
+        workerReadinessSummaryRef = readinessSummaryRef
       }
 
 executeDag :: WorkerEnv -> DagSpec -> IO WorkerExecutionResult
@@ -173,9 +196,33 @@ executeDag workerEnv dagSpec =
           Right persistedRun ->
             WorkerExecutionCompleted (executionResponse persistedRun)
 
-currentHealthReport :: WorkerEnv -> IO HealthReport
-currentHealthReport workerEnv =
-  probeDependencies (workerHttpManager workerEnv) (workerAppConfig workerEnv)
+workerReadinessReport :: WorkerEnv -> IO ReadinessReport
+workerReadinessReport workerEnv =
+  buildReadinessReport "studiomcp-worker" <$> workerReadinessChecks workerEnv
+
+workerReadinessChecks :: WorkerEnv -> IO [ReadinessCheck]
+workerReadinessChecks workerEnv =
+  probePlatformDependencyChecks (workerHttpManager workerEnv) (workerAppConfig workerEnv)
+
+logReadinessTransition :: Text.Text -> IORef (Maybe Text.Text) -> ReadinessReport -> IO ()
+logReadinessTransition serviceName summaryRef readinessReport = do
+  let summary =
+        case readinessStatus readinessReport of
+          ReadinessReady -> "ready"
+          ReadinessBlocked -> renderBlockingChecks readinessReport
+  previousSummary <- readIORef summaryRef
+  if previousSummary == Just summary
+    then pure ()
+    else do
+      writeIORef summaryRef (Just summary)
+      logInfo
+        ( "readiness["
+            <> serviceName
+            <> "] "
+            <> case readinessStatus readinessReport of
+              ReadinessReady -> "ready"
+              ReadinessBlocked -> "blocked: " <> summary
+        )
 
 currentVersionInfo :: WorkerEnv -> VersionInfo
 currentVersionInfo workerEnv =

@@ -146,6 +146,19 @@ The canonical validation entrypoints remain:
 
 When a validator or integration suite provisions external state, it must do so with deterministic inputs, unique namespaces, and cleanup rules that do not depend on manual intervention.
 
+## Shared Readiness Gating
+
+Cluster-dependent validation must reuse the shared readiness gate exposed by the runtime surfaces
+and cluster CLI.
+
+- `cluster ensure` is the canonical shared-service gate before live cluster validation
+- `cluster deploy server` is the canonical application gate before live `/mcp`, `/api`, worker, or
+  reference-model validation
+- validator-local retries are acceptable only as bounded last-mile hedges after the shared
+  readiness gate has already closed
+- integration harness failures must preserve validator stdout and stderr so readiness blocking
+  reasons survive into test output
+
 ## Protocol Validation
 
 Protocol validation is a first-class category and must not regress into ad hoc REST assertions.
@@ -241,7 +254,9 @@ Fixed names in use:
 
 The current repo already has strong example-based unit coverage and real-service integration coverage for execution and sidecar behavior. Its MCP transport and conformance coverage runs through `validate mcp-stdio`, `validate mcp-http`, and `validate mcp-conformance`, and the browser-facing BFF surface is exercised through `validate web-bff` plus the outer integration harness.
 
-The current doctrine refactor adds property testing, generated lifecycle traces, and interpreter-backed store laws on top of that existing validation surface rather than replacing the real-service checks.
+The current doctrine refactor adds property testing, generated lifecycle traces, interpreter-backed
+store laws, and readiness-condition coverage on top of that existing validation surface rather than
+replacing the real-service checks.
 
 ## Cross-References
 

@@ -81,6 +81,18 @@ ENV LANG="C.UTF-8" \
     LC_ALL="C.UTF-8" \
     PATH="/root/.ghcup/bin:/root/.cabal/bin:/usr/local/bin:${PATH}"
 
+RUN mkdir -p /root/.config/cabal /root/.cache/cabal /root/.local/state/cabal && \
+    cat > /root/.config/cabal/config <<'EOF'
+repository hackage.haskell.org
+  url: http://hackage.fpcomplete.com/
+  secure: False
+remote-repo-cache: /root/.cache/cabal/packages
+world-file: /root/.local/state/cabal/world
+store-dir: /root/.local/state/cabal/store
+install-dirs user
+  bindir: /root/.local/bin
+EOF
+
 WORKDIR /workspace
 
 COPY . /workspace
