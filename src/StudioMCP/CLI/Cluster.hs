@@ -359,7 +359,7 @@ import System.Directory
   )
 import System.Environment (lookupEnv, setEnv, unsetEnv)
 import System.Exit (ExitCode (..), die, exitFailure)
-import System.FilePath ((</>))
+import System.FilePath ((</>), dropExtension, splitDirectories, takeFileName)
 import System.IO (openTempFile)
 import System.Process
   ( CreateProcess (std_err, std_out),
@@ -987,7 +987,7 @@ ensureKindSidecars registryConfig = do
   when (imageRegistryManagedHarbor registryConfig) $ do
     ensureHarborDatabase
     runKindHelmUpgrade registryConfig True DeploySidecars
-    waitForHarborReady
+    waitForHarborReady registryConfig
 
 runKindHelmUpgrade :: ImageRegistryConfig -> Bool -> ClusterDeployTarget -> IO ()
 runKindHelmUpgrade registryConfig enableHarbor target =
@@ -1580,14 +1580,22 @@ harborDeploymentsPresent :: IO Bool
 harborDeploymentsPresent =
   and <$> forM harborDeploymentNames kubectlResourceExists
 
-waitForHarborReady :: IO ()
-waitForHarborReady = do
+waitForHarborReady :: ImageRegistryConfig -> IO ()
+waitForHarborReady registryConfig = do
   deployments <- waitForHarborDeployments 60
   forM_ deployments $ \deploymentName ->
     waitForWorkloadRollout deploymentName "480s"
+  waitForServiceEndpointPublication "harbor" "300s"
+  waitForServiceEndpointPublication "studiomcp-harbor-registry" "300s"
   manager <- newManager defaultManagerSettings
   withPortForward "service/studiomcp-harbor-core" 39031 80 $ \baseUrl ->
     waitForHttpStatusWithTimeout 120 manager (baseUrl <> "/api/v2.0/ping") [200]
+  waitForManagedHarborPushReady registryConfig
+
+waitForManagedHarborPushReady :: ImageRegistryConfig -> IO ()
+waitForManagedHarborPushReady registryConfig = do
+  manager <- newManager defaultManagerSettings
+  waitForHttpStatusWithTimeout 180 manager ("http://" <> imageRegistryPushHost registryConfig <> "/v2/") [200, 401]
 
 waitForHarborDeployments :: Int -> IO [String]
 waitForHarborDeployments retriesRemaining = do
@@ -2789,6 +2797,14 @@ data ImageRegistryConfig = ImageRegistryConfig
   }
   deriving (Eq, Show)
 
+newtype DockerArchiveManifestEntry = DockerArchiveManifestEntry
+  { dockerArchiveConfigPath :: FilePath
+  }
+
+instance FromJSON DockerArchiveManifestEntry where
+  parseJSON = withObject "DockerArchiveManifestEntry" $ \objectValue ->
+    DockerArchiveManifestEntry <$> objectValue .: "Config"
+
 managedHarborPullHost :: String
 managedHarborPullHost = "localhost:32443"
 
@@ -2887,9 +2903,9 @@ clusterPushImages = do
 
 clusterPushImagesWithConfig :: ImageRegistryConfig -> IO ImageRegistryConfig
 clusterPushImagesWithConfig config = do
-  when (imageRegistryManagedHarbor config) $
-    waitForHarborReady
   buildServerImage
+  when (imageRegistryManagedHarbor config) $
+    waitForHarborReady config
   credentials <- imageRegistryCredentials config
   let pushReference = imageRegistryPushReference config
   localDigest <- localImageConfigDigest "studiomcp:latest"
@@ -2904,7 +2920,8 @@ clusterPushImagesWithConfig config = do
           writeCachedRegistryImageDigest config localDigest
         else do
           putStrLn ("Pushing image to registry: " <> pushReference)
-          pushImageToRegistry config credentials
+          withSavedLocalImageArchive "studiomcp:latest" $
+            pushImageToRegistry config credentials
           writeCachedRegistryImageDigest config localDigest
   pure config
 
@@ -2954,8 +2971,20 @@ imageRegistryCredentials config
     _ ->
       die "Set both STUDIOMCP_HARBOR_USERNAME and STUDIOMCP_HARBOR_PASSWORD, or neither."
 
-localImageConfigDigest :: String -> IO String
-localImageConfigDigest imageRef = do
+withSavedLocalImageArchive :: String -> (FilePath -> IO a) -> IO a
+withSavedLocalImageArchive imageRef action = do
+  tempDir <- getTemporaryDirectory
+  bracket
+    (openTempFile tempDir "studiomcp-image.tar")
+    (\(archivePath, handle) -> hClose handle >> removeFileIfExists archivePath)
+    (\(archivePath, handle) -> do
+        hClose handle
+        callProcess "docker" ["save", "--output", archivePath, imageRef]
+        action archivePath
+    )
+
+localImageDescriptorDigest :: String -> IO String
+localImageDescriptorDigest imageRef = do
   (exitCode, stdoutText, stderrText) <-
     readProcessWithExitCode
       "docker"
@@ -2964,6 +2993,82 @@ localImageConfigDigest imageRef = do
   case exitCode of
     ExitSuccess -> pure (trimWhitespace stdoutText)
     ExitFailure _ -> die stderrText
+
+localImageConfigDigest :: String -> IO String
+localImageConfigDigest imageRef = do
+  descriptorDigest <- localImageDescriptorDigest imageRef
+  cachedConfigDigest <- readCachedLocalImageConfigDigest imageRef descriptorDigest
+  case cachedConfigDigest of
+    Just configDigest -> pure configDigest
+    Nothing ->
+      withSavedLocalImageArchive imageRef $ \archivePath -> do
+        configDigest <- localImageConfigDigestFromArchive archivePath
+        writeCachedLocalImageConfigDigest imageRef descriptorDigest configDigest
+        pure configDigest
+
+localImageConfigDigestFromArchive :: FilePath -> IO String
+localImageConfigDigestFromArchive archivePath = do
+  (exitCode, stdoutText, stderrText) <-
+    readProcessWithExitCode
+      "tar"
+      ["-xOf", archivePath, "manifest.json"]
+      ""
+  case exitCode of
+    ExitFailure _ -> die stderrText
+    ExitSuccess ->
+      case (decode (LBS.pack stdoutText) :: Maybe [DockerArchiveManifestEntry]) of
+        Just manifestEntries ->
+          case manifestEntries of
+            manifestEntry : _ ->
+              case dockerArchiveConfigDigest (dockerArchiveConfigPath manifestEntry) of
+                Just digest -> pure digest
+                Nothing ->
+                  die ("Could not determine local image config digest from archive path: " <> dockerArchiveConfigPath manifestEntry)
+            [] -> die "Local image archive manifest.json did not include any entries."
+        Nothing ->
+          die "Could not decode docker archive manifest.json while resolving the local image digest."
+
+readCachedLocalImageConfigDigest :: String -> String -> IO (Maybe String)
+readCachedLocalImageConfigDigest imageRef descriptorDigest = do
+  cachePath <- localImageConfigDigestCachePath imageRef
+  cacheExists <- doesFileExist cachePath
+  if not cacheExists
+    then pure Nothing
+    else do
+      cacheLines <- lines <$> readFile cachePath
+      pure $
+        case cacheLines of
+          cachedDescriptor : cachedConfig : _
+            | cachedDescriptor == descriptorDigest && not (null cachedConfig) ->
+                Just cachedConfig
+          _ -> Nothing
+
+writeCachedLocalImageConfigDigest :: String -> String -> String -> IO ()
+writeCachedLocalImageConfigDigest imageRef descriptorDigest configDigest = do
+  cachePath <- localImageConfigDigestCachePath imageRef
+  writeFile cachePath (descriptorDigest <> "\n" <> configDigest <> "\n")
+
+localImageConfigDigestCachePath :: String -> IO FilePath
+localImageConfigDigestCachePath imageRef = do
+  tempDir <- getTemporaryDirectory
+  pure (tempDir </> ("studiomcp-local-image-config-digest-" <> sanitizeCacheKey imageRef <> ".txt"))
+
+dockerArchiveConfigDigest :: FilePath -> Maybe String
+dockerArchiveConfigDigest configPath =
+  case reverse (splitDirectories configPath) of
+    digestPart : algorithmPart : _
+      | isKnownDigestAlgorithm algorithmPart && isHexDigest digestPart ->
+          Just (algorithmPart <> ":" <> digestPart)
+    _ ->
+      let digestPart = dropExtension (takeFileName configPath)
+       in if isHexDigest digestPart
+            then Just ("sha256:" <> digestPart)
+            else Nothing
+  where
+    isKnownDigestAlgorithm algorithm =
+      algorithm `elem` ["sha256", "sha384", "sha512"]
+    isHexDigest digestPart =
+      not (null digestPart) && all (`elem` ("0123456789abcdef" :: String)) digestPart
 
 remoteImageConfigDigest :: ImageRegistryConfig -> Maybe (String, String) -> IO (Maybe String)
 remoteImageConfigDigest config credentials = do
@@ -2987,24 +3092,44 @@ remoteImageConfigDigest config credentials = do
         Just value -> pure (lookupString ["config", "digest"] value)
         Nothing -> pure Nothing
 
-pushImageToRegistry :: ImageRegistryConfig -> Maybe (String, String) -> IO ()
-pushImageToRegistry config credentials = do
-  tempDir <- getTemporaryDirectory
-  bracket
-    (openTempFile tempDir "studiomcp-image.tar")
-    (\(archivePath, handle) -> hClose handle >> removeFileIfExists archivePath)
-    (\(archivePath, handle) -> do
-        hClose handle
-        callProcess "docker" ["save", "--output", archivePath, "studiomcp:latest"]
-        let args =
-              [ "copy"
-              , "docker-archive:" <> archivePath
-              ]
-                <> registryCredentialArgs "--dest-creds" credentials
-                <> registryDestTlsArgs config
-                <> ["docker://" <> imageRegistryPushReference config]
-        callProcessWithRetry 3 5 "skopeo" args
-    )
+pushImageToRegistry :: ImageRegistryConfig -> Maybe (String, String) -> FilePath -> IO ()
+pushImageToRegistry config credentials archivePath =
+  go (1 :: Int)
+  where
+    args =
+      [ "copy"
+      , "docker-archive:" <> archivePath
+      ]
+        <> registryCredentialArgs "--dest-creds" credentials
+        <> registryDestTlsArgs config
+        <> ["docker://" <> imageRegistryPushReference config]
+    maxAttempts =
+      if imageRegistryManagedHarbor config
+        then 5
+        else 3
+    retryDelaySeconds =
+      if imageRegistryManagedHarbor config
+        then 15
+        else 5
+    go attempt = do
+      when (imageRegistryManagedHarbor config) $
+        waitForManagedHarborPushReady config
+      (_, _, _, processHandle) <- createProcess (proc "skopeo" args)
+      exitCode <- waitForProcess processHandle
+      case exitCode of
+        ExitSuccess -> pure ()
+        ExitFailure _
+          | attempt < maxAttempts -> do
+              putStrLn $
+                "Retrying command after failure (attempt "
+                  <> show attempt
+                  <> "/"
+                  <> show maxAttempts
+                  <> "): skopeo"
+              threadDelay (retryDelaySeconds * 1000000)
+              go (attempt + 1)
+        ExitFailure _ ->
+          die ("Failed to push image to registry: " <> imageRegistryPushReference config)
 
 registryCredentialArgs :: String -> Maybe (String, String) -> [String]
 registryCredentialArgs _ Nothing = []

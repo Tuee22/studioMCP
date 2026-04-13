@@ -205,7 +205,7 @@ secrets:
 # ============================================================================
 # Third-Party Service Subcharts
 # All deployed via HA Helm charts per Third-Party Service Deployment Doctrine
-# See documents/engineering/k8s_storage.md and DEVELOPMENT_PLAN.md
+# See documents/engineering/k8s_storage.md and DEVELOPMENT_PLAN/README.md
 # ============================================================================
 
 # MinIO object storage (minio/minio official chart)

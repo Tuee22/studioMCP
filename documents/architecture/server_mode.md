@@ -3,7 +3,7 @@
 
 **Status**: Authoritative source
 **Supersedes**: legacy `documents/architecture/server-mode.md`
-**Referenced by**: [overview.md](overview.md#canonical-follow-on-documents), [../README.md](../README.md#documentation-suite), [../reference/mcp_surface.md](../reference/mcp_surface.md#cross-references), [../../DEVELOPMENT_PLAN.md](../../DEVELOPMENT_PLAN.md#documentation-governance)
+**Referenced by**: [overview.md](overview.md#canonical-follow-on-documents), [../README.md](../README.md#documentation-suite), [../reference/mcp_surface.md](../reference/mcp_surface.md#cross-references), [../../DEVELOPMENT_PLAN/README.md](../../DEVELOPMENT_PLAN/README.md#standards)
 
 > **Purpose**: Canonical definition of the authoritative Haskell server runtime in `studioMCP`, including its responsibilities as an MCP listener tier over the DAG execution system.
 

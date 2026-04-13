@@ -4,7 +4,6 @@ module Auth.JwksSpec (spec) where
 
 import Data.Aeson (decode, encode, Value(..))
 import qualified Data.Aeson.KeyMap as KM
-import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time (UTCTime, addUTCTime, diffUTCTime, getCurrentTime)
 import qualified Data.Vector as V

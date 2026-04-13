@@ -130,7 +130,7 @@ Validation checklist for each Mermaid diagram:
 - [ ] Validate Mermaid diagrams after edits.
 - [ ] Keep `../README.md` and this suite index aligned when the structure changes.
 - [ ] Keep the suite index aligned when canonical documents are added, renamed, or retired.
-- [ ] Keep `../DEVELOPMENT_PLAN/README.md` and `../DEVELOPMENT_PLAN.md` aligned when documentation governance changes.
+- [ ] Keep `../DEVELOPMENT_PLAN/README.md` and `../DEVELOPMENT_PLAN/development_plan_standards.md` aligned when documentation governance changes.
 
 ## Cross-References
 

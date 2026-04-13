@@ -3,8 +3,6 @@
 module Auth.ConfigSpec (spec) where
 
 import Data.Aeson (decode, encode)
-import Data.Text (Text)
-import qualified Data.Text as T
 import StudioMCP.Auth.Config
 import Test.Hspec
 

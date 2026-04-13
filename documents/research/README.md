@@ -3,7 +3,7 @@
 
 **Status**: Reference only
 **Supersedes**: N/A
-**Referenced by**: [../README.md](../README.md#studiomcp-documentation-index), [../../DEVELOPMENT_PLAN.md](../../DEVELOPMENT_PLAN.md#documentation-governance)
+**Referenced by**: [../README.md](../README.md#studiomcp-documentation-index), [../../DEVELOPMENT_PLAN/README.md](../../DEVELOPMENT_PLAN/README.md#standards)
 
 > **Purpose**: Explain how `documents/research/` is used in this repository and make clear that research notes are source material, not governed architectural or product contracts.
 > **📖 Authoritative Reference**: [Documentation Standards](../documentation_standards.md#4-required-header-metadata)

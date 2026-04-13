@@ -2,7 +2,7 @@
 
 module Session.StoreSpec (spec) where
 
-import Data.Time (UTCTime, addUTCTime, getCurrentTime)
+import Data.Time (addUTCTime, getCurrentTime)
 import StudioMCP.MCP.Session.Store
 import StudioMCP.MCP.Session.Types (SessionId (..))
 import Test.Hspec

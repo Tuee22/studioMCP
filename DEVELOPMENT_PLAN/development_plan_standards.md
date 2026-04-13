@@ -87,11 +87,11 @@ DEVELOPMENT_PLAN/
 ├── phase-9-cli-test-validate-consolidation.md
 ├── phase-10-build-artifact-isolation.md
 ├── phase-11-runtime-readiness-and-condition-driven-startup.md
+├── phase-12-aggregate-test-artifact-isolation-and-warning-closure.md
 └── legacy-tracking-for-deletion.md
 ```
 
-The root [../DEVELOPMENT_PLAN.md](../DEVELOPMENT_PLAN.md) file remains a compatibility index for
-existing links, but the authoritative plan narrative now lives under `DEVELOPMENT_PLAN/`.
+The authoritative plan narrative lives under `DEVELOPMENT_PLAN/`.
 
 ### F. System Component Inventory
 
@@ -227,7 +227,13 @@ containers:
 Rules:
 - The `studiomcp` CLI is the canonical interface for test and validation execution.
 - The CLI runs inside ephemeral containers, not on the host.
-- The CLI invokes `cabal test` internally for test suites with `--builddir=/opt/build/studiomcp`.
+- The CLI builds test suites with `cabal --builddir=/opt/build/studiomcp build test:<suite>`,
+  resolves the produced binary with `cabal --builddir=/opt/build/studiomcp list-bin test:<suite>`,
+  and executes that binary instead of relying on `cabal test` or `cabal install` paths that can
+  repopulate `dist-newstyle` in the workspace.
+- Repo-owned Cabal bootstrap paths must treat the image-baked package index as authoritative, and
+  any fallback `cabal update` must execute outside `/workspace` so it cannot recreate
+  `dist-newstyle/` in the bind mount.
 - The authoritative CLI reference lives at [../documents/reference/cli_reference.md](../documents/reference/cli_reference.md).
 
 ## Cross-Reference Conventions
@@ -235,8 +241,9 @@ Rules:
 - Links inside `DEVELOPMENT_PLAN/` use relative paths.
 - Links to governed docs use repository-relative paths.
 - If a file is renamed, update every plan and governed-doc reference in the same change.
-- Keep the compatibility anchors in [../DEVELOPMENT_PLAN.md](../DEVELOPMENT_PLAN.md) usable when the
-  authoritative plan structure changes.
+- Keep [README.md](README.md), [00-overview.md](00-overview.md), and
+  [system-components.md](system-components.md) aligned when the authoritative plan structure
+  changes.
 
 ## Maintenance Guidelines
 
@@ -246,7 +253,7 @@ Rules:
 3. Update governed docs under `documents/` that the phase lists in `Docs to update`.
 4. Update [legacy-tracking-for-deletion.md](legacy-tracking-for-deletion.md) whenever compatibility
    cleanup scope changes.
-5. Keep [../DEVELOPMENT_PLAN.md](../DEVELOPMENT_PLAN.md) aligned as the compatibility index.
+5. Keep [README.md](README.md) aligned as the authoritative plan entrypoint.
 6. Run `docker compose run --rm studiomcp studiomcp validate docs` before closing the work.
 7. If Mermaid changed, validate the diagram subset after the edit.
 

@@ -3,7 +3,7 @@
 
 **Status**: Authoritative source
 **Supersedes**: N/A
-**Referenced by**: [overview.md](overview.md#canonical-follow-on-documents), [../../DEVELOPMENT_PLAN.md](../../DEVELOPMENT_PLAN.md#current-repo-assessment-against-this-plan)
+**Referenced by**: [overview.md](overview.md#canonical-follow-on-documents), [../../DEVELOPMENT_PLAN/README.md](../../DEVELOPMENT_PLAN/00-overview.md#current-repo-assessment-against-this-plan)
 
 > **Purpose**: Canonical current-state contract for the deterministic parallel DAG scheduler in `studioMCP`.
 
@@ -83,4 +83,4 @@ This design implies that worker pool sizing affects parallel throughput, Pulsar 
 
 - [Architecture Overview](overview.md#architecture-overview)
 - [Server Mode](server_mode.md#server-mode)
-- [studioMCP Development Plan](../../DEVELOPMENT_PLAN.md#studiomcp-development-plan)
+- [studioMCP Development Plan](../../DEVELOPMENT_PLAN/README.md#studiomcp-development-plan)

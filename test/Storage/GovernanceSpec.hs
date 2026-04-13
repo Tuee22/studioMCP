@@ -2,7 +2,7 @@
 
 module Storage.GovernanceSpec (spec) where
 
-import Data.Time (UTCTime, getCurrentTime)
+import Data.Time (getCurrentTime)
 import StudioMCP.Auth.Types (SubjectId (..), TenantId (..))
 import StudioMCP.Storage.Governance
 import Test.Hspec

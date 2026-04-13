@@ -102,7 +102,7 @@ The project leans on existing tools instead of rebuilding them:
 - a local LLM host such as Ollama or `llama.cpp` for inference mode
 
 ## Development Roadmap
-The authoritative implementation plan now lives in [DEVELOPMENT_PLAN/README.md](/Users/matthewnowak/studioMCP/DEVELOPMENT_PLAN/README.md), with [DEVELOPMENT_PLAN.md](/Users/matthewnowak/studioMCP/DEVELOPMENT_PLAN.md) kept as a compatibility index. The roadmap is now split into an overview, system-component inventory, per-phase documents, and a cleanup ledger. Phases 1-10 are done on the supported path. The current gate is clean on build, cluster ensure, docs validation, the full test suite, and aggregate validation: 867 unit tests pass, 16 integration tests pass, and `docker compose run --rm studiomcp studiomcp validate all` passes 28/28. Redirect-based OAuth/PKCE remains intentionally deferred.
+The authoritative implementation plan lives in [DEVELOPMENT_PLAN/README.md](/Users/matthewnowak/studioMCP/DEVELOPMENT_PLAN/README.md). The roadmap is split into an overview, system-component inventory, per-phase documents, and a cleanup ledger. Phases 1-10 are done on the supported path. The current gate is clean on build, cluster ensure, docs validation, the full test suite, and aggregate validation: 867 unit tests pass, 16 integration tests pass, and `docker compose run --rm studiomcp studiomcp validate all` passes 28/28. Redirect-based OAuth/PKCE remains intentionally deferred.
 
 ## Status / Current Maturity
 Current state:

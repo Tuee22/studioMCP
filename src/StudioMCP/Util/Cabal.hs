@@ -5,7 +5,7 @@ module StudioMCP.Util.Cabal
 where
 
 import Control.Monad (unless)
-import System.Directory (createDirectoryIfMissing, doesFileExist)
+import System.Directory (createDirectoryIfMissing, doesFileExist, withCurrentDirectory)
 import System.FilePath ((</>))
 import System.Process (callProcess)
 
@@ -18,9 +18,10 @@ ensureCabalBootstrap = do
   createDirectoryIfMissing True cabalPackagesDir
   createDirectoryIfMissing True cabalStoreDir
   writeFile cabalConfigPath cabalConfigContents
-  hasPackageIndex <- doesFileExist cabalPackageIndexPath
+  hasPackageIndex <- or <$> mapM doesFileExist cabalPackageIndexPaths
   unless hasPackageIndex $
-    callProcess "cabal" ["update"]
+    withCurrentDirectory "/tmp" $
+      callProcess "cabal" ["--builddir=" <> cabalBuildDir, "update"]
 
 cabalConfigDir :: FilePath
 cabalConfigDir = "/root/.config/cabal"
@@ -40,9 +41,17 @@ cabalStoreDir = cabalStateDir </> "store"
 cabalConfigPath :: FilePath
 cabalConfigPath = cabalConfigDir </> "config"
 
-cabalPackageIndexPath :: FilePath
-cabalPackageIndexPath =
-  cabalPackagesDir </> "hackage.haskell.org" </> "01-index.tar"
+cabalPackageIndexPaths :: [FilePath]
+cabalPackageIndexPaths =
+  let packageDir = cabalPackagesDir </> "hackage.haskell.org"
+   in map (packageDir </>)
+        [ "00-index.tar"
+        , "00-index.cache"
+        , "00-index.tar.gz"
+        , "01-index.tar"
+        , "01-index.cache"
+        , "01-index.tar.gz"
+        ]
 
 cabalConfigContents :: String
 cabalConfigContents =

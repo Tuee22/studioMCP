@@ -13,7 +13,7 @@
 
 **Status**: Done
 **Implementation**: `docker/Dockerfile`, `docker-compose.yaml`, `chart/templates/studiomcp_deployment.yaml`, `chart/templates/worker.yaml`, `chart/templates/bff.yaml`, `src/StudioMCP/CLI/Test.hs`, `src/StudioMCP/CLI/Cluster.hs`, `test/Session/RedisStoreSpec.hs`
-**Docs to update**: `README.md`, `documents/engineering/docker_policy.md`, `documents/engineering/k8s_native_dev_policy.md`, `documents/reference/cli_reference.md`, `documents/reference/cli_surface.md`, `documents/development/local_dev.md`, `documents/operations/runbook_local_debugging.md`, `DEVELOPMENT_PLAN/system-components.md`, `DEVELOPMENT_PLAN/legacy-tracking-for-deletion.md`, `../DEVELOPMENT_PLAN.md`
+**Docs to update**: `README.md`, `documents/engineering/docker_policy.md`, `documents/engineering/k8s_native_dev_policy.md`, `documents/reference/cli_reference.md`, `documents/reference/cli_surface.md`, `documents/development/local_dev.md`, `documents/operations/runbook_local_debugging.md`, `DEVELOPMENT_PLAN/system-components.md`, `DEVELOPMENT_PLAN/legacy-tracking-for-deletion.md`
 
 ### Goal
 
@@ -26,7 +26,7 @@ init, and no Dockerfile `CMD` or compose `command`.
 | Item | File(s) | Status |
 |------|---------|--------|
 | Explicit `--builddir=/opt/build/studiomcp` in Dockerfile build and install steps | `docker/Dockerfile` | Done |
-| Explicit `--builddir=/opt/build/studiomcp` in CLI test entrypoints | `src/StudioMCP/CLI/Test.hs` | Done |
+| Explicit `--builddir=/opt/build/studiomcp` baseline in CLI test entrypoints | `src/StudioMCP/CLI/Test.hs` | Done |
 | One-command outer-container contract documented consistently (`docker compose run --rm`; no supported `docker compose up` or `docker compose exec` workflow) | `DEVELOPMENT_PLAN/`, governed docs, compatibility instructions | Done |
 | Single-stage Dockerfile for the supported repository workflow | `docker/Dockerfile` | Done |
 | `tini` installed and used as the supported init / entrypoint | `docker/Dockerfile` | Done |
@@ -39,12 +39,15 @@ init, and no Dockerfile `CMD` or compose `command`.
 
 ## Build Artifact Authority
 
-- The supported workflow relies on explicit `cabal --builddir=/opt/build/studiomcp` flags in the
-  Dockerfile and CLI.
+- The supported workflow relies on explicit `cabal --builddir=/opt/build/...` flags in the
+  Dockerfile and repo-owned automation.
 - The repo does not carry `CABAL_BUILDDIR` or a `cabal.project` `builddir` compatibility hint
   because nix-style builds ignore them.
-- Build output, test logs, and compiled artifacts must stay under `/opt/build/studiomcp` and never
-  land in the repo tree.
+- Build output, test logs, and compiled artifacts must stay under `/opt/build/` and never land in
+  the repo tree.
+- Phase 10 established the explicit-builddir baseline. Follow-on regression closure for aggregate
+  `studiomcp test all` execution and inner-container harness bootstrap is closed in
+  [phase-12-aggregate-test-artifact-isolation-and-warning-closure.md](phase-12-aggregate-test-artifact-isolation-and-warning-closure.md).
 
 ## Outer-Container Contract
 
@@ -74,7 +77,7 @@ docker compose build
 
 | Check | Evidence | Expected |
 |-------|----------|----------|
-| Container build | `docker compose build` | Repository container image builds with artifacts isolated to `/opt/build/studiomcp` |
+| Container build | `docker compose build` | Repository container image builds with artifacts isolated under `/opt/build/` |
 | Container contract probe | `docker compose run --rm studiomcp sh -lc 'command -v tini && command -v studiomcp && command -v mc && test ! -d /workspace/dist-newstyle'` | `tini`, `studiomcp`, and `mc` resolve on `PATH`; no workspace artifact leak |
 | Cluster ensure | `docker compose run --rm studiomcp studiomcp cluster ensure` | Supported kind sidecar path converges |
 | Cluster deploy server | `docker compose run --rm studiomcp studiomcp cluster deploy server` | Supported local deploy path converges with registry-backed image pulls |
@@ -88,12 +91,10 @@ docker compose build
 - `docker compose build` passes for the single-stage outer-container image.
 - `docker compose run --rm studiomcp sh -lc 'command -v tini && command -v studiomcp && command -v mc && test ! -d /workspace/dist-newstyle'` passes.
 - `docker compose run --rm studiomcp studiomcp cluster ensure` passes on the supported Kind path.
-- `docker compose run --rm studiomcp studiomcp test unit` passes with 867 examples and 0 failures on the current worktree.
-- `docker compose run --rm studiomcp studiomcp test integration` passes with 16 examples and 0 failures on the supported cluster path.
-- `docker compose run --rm studiomcp studiomcp test` passes through the one-command outer-container contract.
-- `docker compose run --rm studiomcp studiomcp validate docs` passes after the Phase 10 documentation closure edits.
-- `docker compose run --rm studiomcp studiomcp validate all` passes with 28/28 validators on the current worktree.
-- Build and test output remains targeted at `/opt/build/studiomcp/...`, not `dist-newstyle/` in the workspace bind mount.
+- `docker compose run --rm studiomcp studiomcp validate docs` passed for the original Phase 10 documentation closure.
+- The single-stage Dockerfile, `tini` entrypoint, no-`CMD` / no-`command` contract, minimal mount policy, and registry-backed rollout freshness remain implemented on the supported path.
+- Aggregate CLI test execution and the inner-container integration-harness bootstrap later reopened the workspace-leak concern, and that follow-on regression is now closed through
+  [phase-12-aggregate-test-artifact-isolation-and-warning-closure.md](phase-12-aggregate-test-artifact-isolation-and-warning-closure.md).
 - The local cluster deploy path now forces fresh pulls of the pushed registry image, so updated `latest` tags are not masked by kind node caches.
 
 ### Test Mapping
@@ -101,7 +102,7 @@ docker compose build
 | Test | File |
 |------|------|
 | Redis-backed outer-container unit path | `test/Session/RedisStoreSpec.hs` |
-| CLI test entrypoint with explicit builddir | `src/StudioMCP/CLI/Test.hs` exercised by `docker compose run --rm studiomcp studiomcp test unit` |
+| CLI test entrypoint explicit-builddir baseline | `src/StudioMCP/CLI/Test.hs` with aggregate leak closure carried forward in [phase-12-aggregate-test-artifact-isolation-and-warning-closure.md](phase-12-aggregate-test-artifact-isolation-and-warning-closure.md) |
 | Container contract closure surfaces | `docker/Dockerfile`, `docker-compose.yaml`, governed docs listed below |
 
 ### Remaining Work
@@ -125,8 +126,8 @@ None. This phase is complete on the current supported path.
 
 **Cross-references to add:**
 - Keep [README.md](README.md), [00-overview.md](00-overview.md), and [system-components.md](system-components.md) aligned if the outer-container contract changes.
-- Keep [../DEVELOPMENT_PLAN.md](../DEVELOPMENT_PLAN.md) aligned as the compatibility index when the phase closes.
 - Keep [development_plan_standards.md](development_plan_standards.md#l-container-execution-context) aligned if command context rules change.
+- Keep [phase-12-aggregate-test-artifact-isolation-and-warning-closure.md](phase-12-aggregate-test-artifact-isolation-and-warning-closure.md) aligned if repo-owned artifact-isolation mechanics change again.
 
 ## Cross-References
 
@@ -134,3 +135,4 @@ None. This phase is complete on the current supported path.
 - [00-overview.md](00-overview.md)
 - [development_plan_standards.md](development_plan_standards.md#l-container-execution-context)
 - [legacy-tracking-for-deletion.md](legacy-tracking-for-deletion.md)
+- [phase-12-aggregate-test-artifact-isolation-and-warning-closure.md](phase-12-aggregate-test-artifact-isolation-and-warning-closure.md)

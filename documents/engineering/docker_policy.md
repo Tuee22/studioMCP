@@ -3,7 +3,7 @@
 
 **Status**: Authoritative source
 **Supersedes**: N/A
-**Referenced by**: [k8s_native_dev_policy.md](k8s_native_dev_policy.md#cross-references), [k8s_storage.md](k8s_storage.md#cross-references), [../development/local_dev.md](../development/local_dev.md#cross-references), [../architecture/cli_architecture.md](../architecture/cli_architecture.md#cross-references), [../../README.md](../../README.md#docker-strategy), [../../DEVELOPMENT_PLAN.md](../../DEVELOPMENT_PLAN.md#documentation-governance)
+**Referenced by**: [k8s_native_dev_policy.md](k8s_native_dev_policy.md#cross-references), [k8s_storage.md](k8s_storage.md#cross-references), [../development/local_dev.md](../development/local_dev.md#cross-references), [../architecture/cli_architecture.md](../architecture/cli_architecture.md#cross-references), [../../README.md](../../README.md#docker-strategy), [../../DEVELOPMENT_PLAN/README.md](../../DEVELOPMENT_PLAN/README.md#standards)
 
 > **Purpose**: Canonical policy for the repository's Docker usage, including the no-scripts rule, the outer development container, and the runtime image boundary.
 
@@ -96,23 +96,36 @@ Cabal's nix-style builds (v2-commands) do not respect the `CABAL_BUILDDIR` envir
 
 Build artifact isolation is enforced through:
 
-1. **Dockerfile build commands**: Use `--builddir=/opt/build/studiomcp` explicitly
-2. **CLI test commands**: The `studiomcp` CLI passes `--builddir=/opt/build/studiomcp` to all cabal invocations
+1. **Dockerfile and repo-owned cabal commands**: Use explicit `--builddir=/opt/build/studiomcp`
+   paths
+2. **CLI test execution**: The `studiomcp` CLI builds `test:<suite>`, resolves the produced
+   binary with `cabal list-bin`, and executes that binary instead of relying on `cabal test`
+3. **Integration tests inside the outer container**: Reuse the installed `studiomcp` on `PATH`
+   instead of self-bootstrapping a second CLI executable through repo-owned cabal commands
 
 This ensures:
 
-- all `cabal build`, `cabal test`, and `cabal install` invocations write to `/opt/build/studiomcp` inside the container
+- canonical repo build and test output stays under `/opt/build/studiomcp` inside the container
 - no `dist-newstyle` directory appears in the workspace bind mount
 - no build artifacts leak to the host filesystem
+- Cabal bootstrap either uses the image-baked package index or refreshes from outside `/workspace`,
+  so CLI startup cannot recreate workspace-local `dist-newstyle` metadata
 
 ### Important Note
 
 The repository intentionally does not set `CABAL_BUILDDIR` or a `cabal.project` `builddir` value because they do not affect nix-style builds. The primary and only supported enforcement is the explicit `--builddir` flag.
 
+For the supported local cluster path, the CLI also compares local and remote image config digests
+before publishing to Harbor and waits for managed-registry upload readiness before the first
+`skopeo copy`, so a clean post-prune deploy does not republish unchanged images or race the first
+large push.
+
 Forbidden:
 
 - running `cabal` commands outside the outer container that write to the workspace
-- running `cabal` commands inside the container without `--builddir=/opt/build/studiomcp`
+- running repo-owned `cabal` commands inside the container without an explicit `--builddir` under `/opt/build/`
+- relying on repo-owned `cabal test` or `cabal install` automation paths that recreate workspace `dist-newstyle`
+- self-bootstrapping a second `studiomcp` executable inside the outer container through repo-owned cabal commands
 - manually specifying `--builddir` to a workspace-relative path
 
 ## Minimal Mount Policy
@@ -245,7 +258,7 @@ docker compose run --rm studiomcp studiomcp cluster deploy server
 This policy is materially embodied. The legacy top-level `scripts/` directory and Docker shell
 assets are gone, the Dockerfile is single-stage, the image entrypoint is `tini`, the Dockerfile
 has no `CMD`, the outer-container workflow is one command per `docker compose run --rm`, build
-artifacts stay under `/opt/build/studiomcp`, and cluster deploys use registry-backed image pulls
+artifacts stay under `/opt/build/`, and cluster deploys use registry-backed image pulls
 with Kubernetes-owned runtime startup and fresh local repulls of the pushed registry image.
 
 ## Cross-References

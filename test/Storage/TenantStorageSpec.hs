@@ -5,9 +5,8 @@ module Storage.TenantStorageSpec (spec) where
 import Control.Concurrent (threadDelay)
 import Data.Aeson (decode, encode)
 import qualified Data.Map.Strict as Map
-import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Time (UTCTime, addUTCTime, getCurrentTime)
+import Data.Time (getCurrentTime)
 import StudioMCP.Auth.Types (TenantId (..))
 import StudioMCP.Storage.Keys (BucketName (..), ObjectKey (..))
 import StudioMCP.Storage.TenantStorage
@@ -143,13 +142,14 @@ spec = do
         Left err -> expectationFailure $ "Failed to create artifact 1: " ++ show err
         Right artifact1 -> do
           threadDelay 1000  -- 1ms delay to ensure unique artifact IDs
-          result2 <- createTenantArtifact service (TenantId "t1") "text/plain" "b.txt" 20 Map.empty
+          Right artifact2 <- createTenantArtifact service (TenantId "t1") "text/plain" "b.txt" 20 Map.empty
           threadDelay 1000  -- 1ms delay to ensure unique artifact IDs
-          result3 <- createTenantArtifact service (TenantId "t2") "text/plain" "c.txt" 30 Map.empty
-          -- Just verify we can list and get at least the first artifact
+          Right artifact3 <- createTenantArtifact service (TenantId "t2") "text/plain" "c.txt" 30 Map.empty
           artifacts <- listTenantArtifacts service (TenantId "t1")
-          -- The first artifact should be in the list
-          any (\a -> taArtifactId a == taArtifactId artifact1) artifacts `shouldBe` True
+          length artifacts `shouldBe` 2
+          any (\artifact -> taArtifactId artifact == taArtifactId artifact1) artifacts `shouldBe` True
+          any (\artifact -> taArtifactId artifact == taArtifactId artifact2) artifacts `shouldBe` True
+          any (\artifact -> taArtifactId artifact == taArtifactId artifact3) artifacts `shouldBe` False
 
     it "returns empty list for tenant with no artifacts" $ do
       service <- newTenantStorageService defaultTenantStorageConfig
@@ -244,4 +244,3 @@ spec = do
       service <- newTenantStorageService defaultTenantStorageConfig
       Right url <- generateUploadUrl service (TenantId "t1") "a1" "video/mp4"
       (decode (encode url) :: Maybe PresignedUrl) `shouldBe` Just url
-

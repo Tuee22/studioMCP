@@ -2,7 +2,6 @@
 
 module MCP.ToolsSpec (spec) where
 
-import Data.Aeson (object, (.=))
 import StudioMCP.Auth.Types (SubjectId (..), TenantId (..))
 import StudioMCP.MCP.Protocol.Types (CallToolParams (..), ToolDefinition (..))
 import StudioMCP.MCP.Tools

@@ -79,4 +79,4 @@ flowchart TB
 
 - [Documentation Standards](../documentation_standards.md#studiomcp-documentation-standards)
 - [Testing Strategy](../development/testing_strategy.md#testing-strategy)
-- [studioMCP Development Plan](../../DEVELOPMENT_PLAN.md#studiomcp-development-plan)
+- [studioMCP Development Plan](../../DEVELOPMENT_PLAN/README.md#studiomcp-development-plan)

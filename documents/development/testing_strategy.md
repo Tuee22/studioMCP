@@ -3,7 +3,7 @@
 
 **Status**: Authoritative source
 **Supersedes**: legacy `documents/development/testing-strategy.md`
-**Referenced by**: [../README.md](../README.md#documentation-suite), [local_dev.md](local_dev.md#cross-references), [../architecture/overview.md](../architecture/overview.md#cross-references), [../reference/cli_surface.md](../reference/cli_surface.md#cross-references), [../../DEVELOPMENT_PLAN.md](../../DEVELOPMENT_PLAN.md#documentation-governance)
+**Referenced by**: [../README.md](../README.md#documentation-suite), [local_dev.md](local_dev.md#cross-references), [../architecture/overview.md](../architecture/overview.md#cross-references), [../reference/cli_surface.md](../reference/cli_surface.md#cross-references), [../../DEVELOPMENT_PLAN/README.md](../../DEVELOPMENT_PLAN/README.md#standards)
 
 > **Purpose**: Canonical testing policy for unit tests, property tests, state-machine tests, integration tests, protocol validation, and browser-surface validation in `studioMCP`.
 

@@ -12,7 +12,7 @@
 
 **Status**: Done
 **Implementation**: `test/Integration/HarnessSpec.hs`, `src/StudioMCP/CLI/Cluster.hs`, `chart/values-kind.yaml`, `docker-compose.yaml`, `docker/Dockerfile`, `DEVELOPMENT_PLAN/README.md`, `documents/README.md`
-**Docs to update**: `README.md`, `documents/README.md`, `documents/documentation_standards.md`, `documents/development/testing_strategy.md`, `documents/engineering/testing.md`, `documents/development/local_dev.md`, `documents/engineering/local_dev.md`, `DEVELOPMENT_PLAN/README.md`, `DEVELOPMENT_PLAN/00-overview.md`, `DEVELOPMENT_PLAN/legacy-tracking-for-deletion.md`, `DEVELOPMENT_PLAN.md`
+**Docs to update**: `README.md`, `documents/README.md`, `documents/documentation_standards.md`, `documents/development/testing_strategy.md`, `documents/engineering/testing.md`, `documents/development/local_dev.md`, `documents/engineering/local_dev.md`, `DEVELOPMENT_PLAN/README.md`, `DEVELOPMENT_PLAN/00-overview.md`, `DEVELOPMENT_PLAN/legacy-tracking-for-deletion.md`
 
 ### Goal
 
@@ -26,7 +26,7 @@ workflow while keeping the validated surface explicit.
 | Phase 4-7 closure criteria remain satisfied on the supported path | various | Done |
 | Aggregate validation reruns cleanly on the supported live path | `src/StudioMCP/CLI/Cluster.hs`, `test/Integration/HarnessSpec.hs` | Done |
 | The outer development container exposes the canonical `studiomcp` binary on `PATH` | `docker/Dockerfile`, `docker-compose.yaml` | Done |
-| Plan and docs remain aligned | `DEVELOPMENT_PLAN/`, `DEVELOPMENT_PLAN.md`, `documents/` | Done |
+| Plan and docs remain aligned | `DEVELOPMENT_PLAN/`, `documents/` | Done |
 | Regression command set is documented | `DEVELOPMENT_PLAN/README.md`, this file | Done |
 
 ### Validation
@@ -115,7 +115,6 @@ None. This phase is complete on the current supported path.
 - `DEVELOPMENT_PLAN/README.md` - authoritative plan index and validation summary
 - `DEVELOPMENT_PLAN/00-overview.md` - phase-status snapshot and topology baseline
 - `DEVELOPMENT_PLAN/legacy-tracking-for-deletion.md` - cleanup ledger alignment for compatibility removals
-- `DEVELOPMENT_PLAN.md` - compatibility index for existing links and tooling
 - `documents/documentation_standards.md` - plan/governed-doc alignment references if canonical docs move or suite governance changes
 - `documents/development/testing_strategy.md` and `documents/engineering/testing.md` - converge testing policy back to one canonical document
 - `documents/development/local_dev.md` and `documents/engineering/local_dev.md` - converge outer-container local-development guidance back to one canonical document
@@ -127,7 +126,6 @@ None. This phase is complete on the current supported path.
 - Keep [../README.md](../README.md#development-roadmap) aligned with the phase-status table.
 - Keep [../documents/README.md](../documents/README.md#studiomcp-documentation-index) aligned with the canonical suite after governance cleanup.
 - Keep [README.md](README.md) aligned with the validated command set.
-- Keep [../DEVELOPMENT_PLAN.md](../DEVELOPMENT_PLAN.md) aligned as the compatibility index.
 - Keep [phase-11-runtime-readiness-and-condition-driven-startup.md](phase-11-runtime-readiness-and-condition-driven-startup.md) aligned when the aggregate readiness gate changes validator behavior.
 
 ## Cross-References

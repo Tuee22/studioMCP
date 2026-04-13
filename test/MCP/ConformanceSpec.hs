@@ -17,8 +17,6 @@ import qualified Data.ByteString.Lazy as LBS
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import StudioMCP.MCP.Core
-import StudioMCP.MCP.JsonRpc
-import StudioMCP.MCP.Protocol.Types
 import Test.Hspec
 
 spec :: Spec

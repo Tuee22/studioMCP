@@ -77,7 +77,7 @@ See [../operations/keycloak_realm_bootstrap_runbook.md](../operations/keycloak_r
 
 ## Current Maturity
 
-The repo includes Keycloak in the deployment topology for authentication. Current implementation status is tracked in [../../DEVELOPMENT_PLAN.md](../../DEVELOPMENT_PLAN.md#current-repo-assessment-against-this-plan).
+The repo includes Keycloak in the deployment topology for authentication. Current implementation status is tracked in [../../DEVELOPMENT_PLAN/README.md](../../DEVELOPMENT_PLAN/00-overview.md#current-repo-assessment-against-this-plan).
 
 ## Storage Policy
 

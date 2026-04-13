@@ -2,7 +2,9 @@
 
 module Web.HandlersSpec (spec) where
 
-import Network.Wai (defaultRequest, Request(..))
+import Data.IORef (newIORef, readIORef, writeIORef)
+import Network.HTTP.Types (Status, status404)
+import Network.Wai (Application, Request(..), defaultRequest, responseStatus)
 import StudioMCP.DAG.Types (DagSpec (..))
 import StudioMCP.Web.BFF (createWebSession, defaultBFFConfig)
 import StudioMCP.Web.Handlers
@@ -32,21 +34,19 @@ spec = do
   describe "bffApplication" $ do
     it "returns 404 for unknown routes" $ do
       ctx <- newBFFContext defaultBFFConfig
-      let app = bffApplication ctx
-          req = defaultRequest { pathInfo = ["unknown", "route"] }
-      -- The app should handle unknown routes
-      -- Just verify we can create the application
-      pure ()
+      status <- runRequestStatus (bffApplication ctx) defaultRequest { pathInfo = ["unknown", "route"] }
+      status `shouldBe` status404
 
-    it "handles healthz endpoint" $ do
+    it "routes healthz without falling through to 404" $ do
       ctx <- newBFFContext defaultBFFConfig
-      let app = bffApplication ctx
-          req = defaultRequest
+      status <-
+        runRequestStatus
+          (bffApplication ctx)
+          defaultRequest
             { requestMethod = "GET"
             , pathInfo = ["healthz"]
             }
-      -- Should return healthy status
-      pure ()
+      status `shouldNotBe` status404
 
   describe "handleUploadRequest" $ do
     it "creates an upload response when given a parsed upload body" $ do
@@ -142,3 +142,11 @@ spec = do
                   [("Authorization", "Bearer web-bearer")]
               }
       extractSessionId defaultBFFConfig request `shouldBe` Just (WebSessionId "web-bearer")
+
+runRequestStatus :: Application -> Request -> IO Status
+runRequestStatus app request = do
+  statusRef <- newIORef status404
+  _ <- app request $ \response -> do
+    writeIORef statusRef (responseStatus response)
+    pure (error "ResponseReceived sentinel for Web.HandlersSpec")
+  readIORef statusRef

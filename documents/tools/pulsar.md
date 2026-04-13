@@ -49,7 +49,7 @@ HA deployment is the preferred mode where possible. See [../engineering/k8s_stor
 
 ## Current Maturity
 
-The repo currently includes Pulsar in the deployment topology, pure execution-event contracts, stable topic naming, a tested execution-state transition model, and a real Haskell wrapper that validates publish, consume, ordering, invalid-namespace failure behavior, and end-to-end run lifecycle behavior against the deployed cluster. The deployment now uses the official Apache Pulsar Helm chart in HA mode. Broader messaging features beyond the current runtime remain future expansion work. Current implementation status is tracked in [../../DEVELOPMENT_PLAN.md](../../DEVELOPMENT_PLAN.md#current-repo-assessment-against-this-plan).
+The repo currently includes Pulsar in the deployment topology, pure execution-event contracts, stable topic naming, a tested execution-state transition model, and a real Haskell wrapper that validates publish, consume, ordering, invalid-namespace failure behavior, and end-to-end run lifecycle behavior against the deployed cluster. The deployment now uses the official Apache Pulsar Helm chart in HA mode. Broader messaging features beyond the current runtime remain future expansion work. Current implementation status is tracked in [../../DEVELOPMENT_PLAN/README.md](../../DEVELOPMENT_PLAN/00-overview.md#current-repo-assessment-against-this-plan).
 
 ## Storage Policy
 

@@ -5,8 +5,7 @@ where
 
 import Control.Monad (unless, when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import StudioMCP.Util.Cabal (ensureCabalBootstrap)
-import System.Directory (createDirectoryIfMissing, doesDirectoryExist, doesFileExist, removePathForcibly)
+import System.Directory (doesDirectoryExist, doesFileExist, findExecutable)
 import System.Exit (ExitCode (ExitSuccess, ExitFailure))
 import System.IO.Unsafe (unsafePerformIO)
 import System.Process (readProcessWithExitCode)
@@ -102,8 +101,10 @@ ensureOuterContainer = do
     insideOuterContainer <- isInsideOuterContainer
     if insideOuterContainer
       then do
-        buildOuterContainerBinary
-        pure ()
+        installedBinary <- findExecutable "studiomcp"
+        case installedBinary of
+          Just _ -> pure ()
+          Nothing -> expectationFailure "Expected 'studiomcp' on PATH inside the outer container."
       else do
         _ <- runComposeExpectSuccess ["build", "studiomcp"]
         pure ()
@@ -137,7 +138,9 @@ runOuterCliExpectSuccess args = do
   insideOuterContainer <- isInsideOuterContainer
   (exitCode, stdoutText, stderrText) <-
     if insideOuterContainer
-      then readProcessWithExitCode "studiomcp" args ""
+      then
+        withWorkspaceArtifactLeakCheck $
+          readProcessWithExitCode "studiomcp" args ""
       else
         readProcessWithExitCode
           "docker"
@@ -163,7 +166,9 @@ runOuterCliExpectSuccessWithDiagnostics args = do
   insideOuterContainer <- isInsideOuterContainer
   (exitCode, stdoutText, stderrText) <-
     if insideOuterContainer
-      then readProcessWithExitCode "studiomcp" args ""
+      then
+        withWorkspaceArtifactLeakCheck $
+          readProcessWithExitCode "studiomcp" args ""
       else
         readProcessWithExitCode
           "docker"
@@ -189,32 +194,18 @@ outerEnvironmentReadyRef :: IORef Bool
 outerEnvironmentReadyRef = unsafePerformIO (newIORef False)
 {-# NOINLINE outerEnvironmentReadyRef #-}
 
-buildOuterContainerBinary :: IO ()
-buildOuterContainerBinary = do
-  ensureCabalBootstrap
-  let buildDir = "/opt/build/studiomcp-cli"
-  buildDirExists <- doesDirectoryExist buildDir
-  when buildDirExists $
-    removePathForcibly buildDir
-  createDirectoryIfMissing True buildDir
-  (exitCode, stdoutText, stderrText) <-
-    readProcessWithExitCode
-      "cabal"
-      [ "--builddir=" <> buildDir
-      , "install"
-      , "exe:studiomcp"
-      , "--installdir"
-      , "/usr/local/bin"
-      , "--overwrite-policy=always"
-      ]
-      ""
-  case exitCode of
-    ExitSuccess -> pure ()
-    ExitFailure code ->
-      expectationFailure $
-        "Command 'cabal install exe:studiomcp' failed with exit code " <> show code <> ":\n"
-          <> "--- stdout ---\n" <> stdoutText <> "\n"
-          <> "--- stderr ---\n" <> stderrText
+withWorkspaceArtifactLeakCheck :: IO a -> IO a
+withWorkspaceArtifactLeakCheck action = do
+  hadWorkspaceArtifactsBefore <- doesDirectoryExist workspaceBuildArtifactDir
+  result <- action
+  hasWorkspaceArtifactsAfter <- doesDirectoryExist workspaceBuildArtifactDir
+  when (not hadWorkspaceArtifactsBefore && hasWorkspaceArtifactsAfter) $
+    expectationFailure $
+      "Unexpected workspace build artifact leak: " <> workspaceBuildArtifactDir
+  pure result
+
+workspaceBuildArtifactDir :: FilePath
+workspaceBuildArtifactDir = "/workspace/dist-newstyle"
 
 isInsideOuterContainer :: IO Bool
 isInsideOuterContainer = doesFileExist "/.dockerenv"

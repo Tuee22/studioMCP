@@ -2,7 +2,7 @@
 # studioMCP Development Plan
 
 **Status**: Authoritative source
-**Supersedes**: [../DEVELOPMENT_PLAN.md](../DEVELOPMENT_PLAN.md) as the monolithic plan layout
+**Supersedes**: legacy monolithic development plan layout
 **Referenced by**: [../README.md](../README.md#development-roadmap), [../documents/documentation_standards.md](../documents/documentation_standards.md#8-documentation-maintenance-checklist)
 
 > **Purpose**: Provide the single execution-ordered development plan for `studioMCP`, including
@@ -31,6 +31,7 @@ govern this plan.
 | [phase-9-cli-test-validate-consolidation.md](phase-9-cli-test-validate-consolidation.md) | CLI test and validate command consolidation |
 | [phase-10-build-artifact-isolation.md](phase-10-build-artifact-isolation.md) | Build artifact isolation and one-command container configuration closure |
 | [phase-11-runtime-readiness-and-condition-driven-startup.md](phase-11-runtime-readiness-and-condition-driven-startup.md) | Runtime readiness, condition-driven startup, and shared wait-gate closure |
+| [phase-12-aggregate-test-artifact-isolation-and-warning-closure.md](phase-12-aggregate-test-artifact-isolation-and-warning-closure.md) | Aggregate test artifact isolation regression closure and repo-owned warning cleanup |
 | [legacy-tracking-for-deletion.md](legacy-tracking-for-deletion.md) | Cleanup and compatibility removal ledger |
 
 ## Status Vocabulary
@@ -68,24 +69,26 @@ A phase can move to `Done` only when all of the following are true:
 | 9 | CLI Test and Validate Consolidation | Done | [phase-9-cli-test-validate-consolidation.md](phase-9-cli-test-validate-consolidation.md) |
 | 10 | Build Artifact Isolation and Container Configuration | Done | [phase-10-build-artifact-isolation.md](phase-10-build-artifact-isolation.md) |
 | 11 | Runtime Readiness and Condition-Driven Startup | Done | [phase-11-runtime-readiness-and-condition-driven-startup.md](phase-11-runtime-readiness-and-condition-driven-startup.md) |
+| 12 | Aggregate Test Artifact Isolation and Warning Closure | Done | [phase-12-aggregate-test-artifact-isolation-and-warning-closure.md](phase-12-aggregate-test-artifact-isolation-and-warning-closure.md) |
 
 ## Current Validation State
 
 **Passing:**
 - `docker compose build` passes for the single-stage outer-container image.
 - `docker compose run --rm studiomcp sh -lc 'command -v tini && command -v studiomcp && command -v mc && test ! -d /workspace/dist-newstyle'` passes.
-- `docker compose run --rm studiomcp studiomcp test unit` passes with 870 examples and 0 failures on the readiness-updated worktree.
+- `docker compose run --rm studiomcp studiomcp test unit` passes with 870 examples and 0 failures on the current worktree.
 - `docker compose run --rm studiomcp studiomcp validate docs` passes for structural documentation checks on the current worktree.
-- `docker compose run --rm studiomcp studiomcp test` passes after the requested `kind` teardown, Docker prune, and clean outer-image rebuild.
-- Build artifacts go to `/opt/build/studiomcp/` and never leak to the workspace bind mount.
+- The repaired current-source unit-test path and a targeted integration-harness check both complete without recreating `/workspace/dist-newstyle`.
+- Repo-owned build artifacts stay under `/opt/build/` and never leak to the workspace bind mount.
 - `docker/Dockerfile` is single-stage, uses `tini`, and carries no Dockerfile `CMD`; `docker-compose.yaml` carries no service `command`.
 - Helm owns explicit in-cluster startup commands for the server, worker, and BFF workloads.
+- `docker compose run --rm studiomcp studiomcp test all` passes after `studiomcp cluster down` and `docker system prune -af --volumes`, and the workspace remains free of `dist-newstyle/`.
 
 **Cluster-Dependent Coverage:**
 - `cluster ensure` now waits for shared-service application readiness for MinIO, Pulsar, and Keycloak after workload rollout.
 - `cluster deploy server` now blocks on rollout, Kubernetes service endpoint publication, ingress-edge readiness for `/mcp` and `/api`, worker readiness, and reference-model health before live validators proceed.
 - The integration harness now preserves validator stdout and stderr when a shared readiness gate fails, so blocking reasons survive into test output.
-- The requested teardown, Docker prune, rebuild, and aggregate test rerun completed cleanly on the current worktree.
+- The cold-path `validate mcp-http` validator now survives Harbor publication after a full prune, because the CLI compares like-for-like image config digests and waits for managed-registry push readiness before the first large upload.
 - Integration tests and aggregate validation continue to exercise Keycloak, MinIO, Pulsar, ingress routing, MCP HTTP, BFF session flows, horizontal scale, observability, and conformance through the live cluster path.
 
 ## Phase Details
@@ -101,14 +104,9 @@ A phase can move to `Done` only when all of the following are true:
 | 7 | Done | None | `documents/operations/keycloak_realm_bootstrap_runbook.md` |
 | 8 | Done | None | `README.md`, `documents/README.md`, `documents/documentation_standards.md`, `documents/development/testing_strategy.md`, `documents/engineering/testing.md`, `documents/development/local_dev.md`, `documents/engineering/local_dev.md`, plan index files as needed |
 | 9 | Done | None | `documents/reference/cli_reference.md`, `documents/reference/cli_surface.md`, `DEVELOPMENT_PLAN/development_plan_standards.md` |
-| 10 | Done | None | `README.md`, `documents/engineering/docker_policy.md`, `documents/engineering/k8s_native_dev_policy.md`, `documents/reference/cli_reference.md`, `documents/reference/cli_surface.md`, `documents/development/local_dev.md`, `documents/operations/runbook_local_debugging.md`, `DEVELOPMENT_PLAN.md` |
+| 10 | Done | None | `README.md`, `documents/engineering/docker_policy.md`, `documents/engineering/k8s_native_dev_policy.md`, `documents/reference/cli_reference.md`, `documents/reference/cli_surface.md`, `documents/development/local_dev.md`, `documents/operations/runbook_local_debugging.md` |
 | 11 | Done | None | `documents/architecture/overview.md`, `documents/architecture/server_mode.md`, `documents/architecture/bff_architecture.md`, `documents/architecture/mcp_protocol_architecture.md`, `documents/engineering/k8s_native_dev_policy.md`, `documents/engineering/session_scaling.md`, `documents/development/testing_strategy.md`, `documents/reference/cli_reference.md`, `documents/reference/cli_surface.md`, `documents/operations/runbook_local_debugging.md` |
-
-## Compatibility Entry Point
-
-The root [../DEVELOPMENT_PLAN.md](../DEVELOPMENT_PLAN.md) file remains available as a compatibility
-index for existing links and tooling. It should summarize, not replace, the authoritative plan
-documents in this directory.
+| 12 | Done | None | `documents/engineering/docker_policy.md`, `DEVELOPMENT_PLAN/development_plan_standards.md`, `DEVELOPMENT_PLAN/README.md`, `DEVELOPMENT_PLAN/00-overview.md`, `DEVELOPMENT_PLAN/system-components.md`, `DEVELOPMENT_PLAN/phase-10-build-artifact-isolation.md` |
 
 ## Cross-References
 

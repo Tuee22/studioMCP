@@ -2,8 +2,7 @@
 
 module MCP.CoreSpec (spec) where
 
-import Data.Aeson (Value(..), encode, object, (.=))
-import qualified Data.Aeson.KeyMap as KM
+import Data.Aeson (Value(..), object, (.=))
 import StudioMCP.MCP.Core
 import StudioMCP.MCP.Protocol.Types
 import Test.Hspec
@@ -60,7 +59,7 @@ spec = do
       let invalidMsg = String "not-an-object"
       result <- handleMessage server invalidMsg
       case result of
-        Just resp -> pure ()  -- Should return error response
+        Just _ -> pure ()  -- Should return error response
         Nothing -> expectationFailure "Expected response for invalid message"
 
     it "returns error response for unparseable request" $ do

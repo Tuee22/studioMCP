@@ -35,8 +35,9 @@
 | 7 | Done | Keycloak realm bootstrap is automated and idempotent on the default cluster path, and the runbook now documents the CLI-driven path without retired compose-era guidance |
 | 8 | Done | The canonical regression gate remains `docker compose run --rm studiomcp studiomcp validate all`, and the final closure work now includes aligned suite indexes, one canonical doc per governed concept, and refreshed top-level status summaries |
 | 9 | Done | CLI test and validate commands consolidated with unified interface and documentation |
-| 10 | Done | Build artifact isolation and the one-command container contract are implemented: single-stage Dockerfile, `tini`, no Dockerfile `CMD`, no compose `command`, and Kubernetes-owned runtime startup |
+| 10 | Done | Build artifact isolation baseline and the one-command container contract are implemented: single-stage Dockerfile, `tini`, no Dockerfile `CMD`, no compose `command`, and Kubernetes-owned runtime startup |
 | 11 | Done | Dependency-aware readiness is implemented across workloads, CLI waits, validators, and governed docs, with the post-cleanup full-suite verification closed |
+| 12 | Done | Aggregate `studiomcp test all` now survives the post-prune Harbor publish path and keeps canonical clean runs under `/opt/build/` without recreating workspace `dist-newstyle/` |
 
 ## Public Topology Baseline
 
@@ -86,10 +87,12 @@ The supported local and cluster topology is:
 - Bulk artifact bytes stay off the control plane. The BFF authorizes access and returns presigned
   object-storage URLs.
 - Durable repo-local state must live under `./.data/`; `.studiomcp-data/` is a removed legacy path.
-- Build artifacts are isolated to `/opt/build/studiomcp` via explicit `--builddir` flags on all
-  cabal invocations. The repo does not rely on `CABAL_BUILDDIR` or a `cabal.project` `builddir`
-  directive because nix-style builds ignore them. The repo tree must remain free of compiled
-  output.
+- Build artifacts are isolated to `/opt/build/studiomcp` via explicit `--builddir` flags on
+  repo-owned cabal invocations. The repo does not rely on `CABAL_BUILDDIR` or a `cabal.project`
+  `builddir` directive because nix-style builds ignore them. Integration tests that already run
+  inside the outer container reuse the installed `studiomcp` on `PATH` instead of self-bootstrapping
+  a second CLI binary, and any fallback Cabal index refresh runs outside `/workspace` so the repo
+  tree stays free of compiled output and `dist-newstyle/` metadata.
 
 ## Completion Rules
 
@@ -119,3 +122,4 @@ The supported local and cluster topology is:
 - [phase-9-cli-test-validate-consolidation.md](phase-9-cli-test-validate-consolidation.md)
 - [phase-10-build-artifact-isolation.md](phase-10-build-artifact-isolation.md)
 - [phase-11-runtime-readiness-and-condition-driven-startup.md](phase-11-runtime-readiness-and-condition-driven-startup.md)
+- [phase-12-aggregate-test-artifact-isolation-and-warning-closure.md](phase-12-aggregate-test-artifact-isolation-and-warning-closure.md)

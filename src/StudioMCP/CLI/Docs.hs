@@ -23,9 +23,7 @@ type DocProblem = Text
 
 markdownFilesToCheck :: [FilePath]
 markdownFilesToCheck =
-  [ "README.md"
-  , "DEVELOPMENT_PLAN.md"
-  ]
+  ["README.md"]
 
 validateDocsCommand :: IO ()
 validateDocsCommand = do

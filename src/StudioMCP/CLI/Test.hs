@@ -7,7 +7,7 @@ import Control.Monad (unless)
 import StudioMCP.CLI.Command (TestCommand (..))
 import StudioMCP.Util.Cabal (cabalBuildDir, ensureCabalBootstrap)
 import System.Exit (ExitCode (..), exitFailure, exitWith)
-import System.Process (createProcess, proc, waitForProcess)
+import System.Process (createProcess, proc, readProcessWithExitCode, waitForProcess)
 
 -- | Run test command
 runTestCommand :: TestCommand -> IO ()
@@ -64,13 +64,47 @@ runTestAll = do
 
 runCabalTest :: String -> IO ExitCode
 runCabalTest suiteName = do
+  buildExitCode <- buildTestSuite suiteName
+  case buildExitCode of
+    ExitFailure _ -> pure buildExitCode
+    ExitSuccess -> do
+      binaryPathExitCodeOrPath <- resolveTestBinaryPath suiteName
+      case binaryPathExitCodeOrPath of
+        Left exitCode -> pure exitCode
+        Right binaryPath -> runTestBinary binaryPath
+
+buildTestSuite :: String -> IO ExitCode
+buildTestSuite suiteName = do
   (_, _, _, processHandle) <-
     createProcess $
       proc
         "cabal"
         [ "--builddir=" <> cabalBuildDir
-        , "test"
-        , suiteName
-        , "--test-show-details=direct"
+        , "build"
+        , "test:" <> suiteName
         ]
+  waitForProcess processHandle
+
+resolveTestBinaryPath :: String -> IO (Either ExitCode FilePath)
+resolveTestBinaryPath suiteName = do
+  (exitCode, stdoutText, _stderrText) <-
+    readProcessWithExitCode
+      "cabal"
+      [ "--builddir=" <> cabalBuildDir
+      , "list-bin"
+      , "test:" <> suiteName
+      ]
+      ""
+  case exitCode of
+    ExitFailure _ -> pure (Left exitCode)
+    ExitSuccess ->
+      case lines stdoutText of
+        binaryPath : _ | not (null binaryPath) -> pure (Right binaryPath)
+        _ -> pure (Left (ExitFailure 1))
+
+runTestBinary :: FilePath -> IO ExitCode
+runTestBinary binaryPath = do
+  (_, _, _, processHandle) <-
+    createProcess $
+      proc binaryPath []
   waitForProcess processHandle
