@@ -33,12 +33,23 @@
 | 5 | Done | Browser login, session, refresh, and logout behavior are cookie-first, validated, and aligned across the BFF and web-surface docs |
 | 6 | Done | The cluster plan uses an in-cluster Harbor deployment as the registry source for all Helm workloads, with the CLI responsible for Harbor population and event-driven service endpoint publication before live edge validation |
 | 7 | Done | Keycloak realm bootstrap is automated and idempotent on the default cluster path, and the runbook now documents the CLI-driven path without retired compose-era guidance |
-| 8 | Done | The canonical regression gate remains `docker compose run --rm studiomcp studiomcp validate all`, and the final closure work now includes aligned suite indexes, one canonical doc per governed concept, and refreshed top-level status summaries |
+| 8 | Done | The canonical regression gate remains `docker compose run --rm studiomcp studiomcp validate all`, and the April 14, 2026 reruns closed the former Whisper runtime follow-on with `studiomcp test` and `validate all` both green again |
 | 9 | Done | CLI test and validate commands consolidated with unified interface and documentation |
 | 10 | Done | Build artifact isolation baseline and the one-command container contract are implemented: single-stage Dockerfile, `tini`, no Dockerfile `CMD`, no compose `command`, and Kubernetes-owned runtime startup |
 | 11 | Done | Dependency-aware readiness is implemented across workloads, CLI waits, validators, and governed docs, with the post-cleanup full-suite verification closed |
 | 12 | Done | Aggregate test artifact isolation and repo-owned warning closure are complete: canonical build and test paths stay under `/opt/build/`, repo-owned compiler warnings are closed, and the workspace remains free of `dist-newstyle/` even when aggregate validation fails elsewhere |
 | 13 | Done | Harbor-backed MCP HTTP validation and aggregate-suite reliability are now closed: the source tree uses persistent filesystem-backed local Harbor storage with relative upload URLs, reconciles Harbor registry storage through the manual-PV path, waits for PostgreSQL/Redis plus Harbor health before managed-registry publication, retries managed publication with extended backoff and remote-digest confirmation, and the April 14, 2026 clean post-prune rerun closed the April 13, 2026 `validate mcp-http` failure |
+| 14 | Done | The legacy `Makefile` is removed, the compose-only repository workflow is authoritative, and the cleanup ledger records the removal |
+| 15 | Done | The outer image carries the expanded boundary-tool inventory, including a `whisper.cpp` build plus deterministic `demucs` and `basic-pitch` compatibility shims; the April 14, 2026 Phase 24 follow-on restored loader-visible Whisper shared libraries in the supported outer image |
+| 16 | Done | MinIO-backed model registry, sync/list/verify commands, source overrides, and local model-cache support are implemented and documented |
+| 17 | Done | Haskell boundary adapters, runtime tool-registry entries, and CLI validators are implemented for SoX, Demucs, Whisper, BasicPitch, FluidSynth, Rubberband, ImageMagick, and MediaInfo, and the repaired Whisper runtime path validates cleanly again through the outer container |
+| 18 | Done | Deterministic fixture generation, MinIO seed/verify commands, and the fixture manifest are implemented and documented |
+| 19 | Done | Adapter contract tests and registry coverage execute against deterministic fixtures and the installed boundary tools, and the repaired Whisper adapter path is back inside the green aggregate test gate |
+| 20 | Done | Example DAG chains parse, validate, and resolve through the runtime tool registry in the integration suite |
+| 21 | Done | Synthetic recovery-budget chaos coverage and the `test chaos` CLI entrypoint are implemented and documented |
+| 22 | Done | SES request signing, email templates, fake-endpoint integration coverage, IAM policy guidance, and `email send-test` are implemented |
+| 23 | Done | Tool docs, supporting engineering docs, and the MCP workflow-boundary catalog update are complete |
+| 24 | Done | The rebuilt outer-container image exposes loader-visible `libwhisper.so.1`, `whisper --help` and `validate whisper-adapter` pass, `studiomcp test` returns `897 examples, 0 failures` plus `26 examples, 0 failures`, and `validate all` passes `36/36` on April 14, 2026 |
 
 ## Public Topology Baseline
 
@@ -81,6 +92,8 @@ The supported local and cluster topology is:
   chart deployment.
 - The CLI treats workload rollout, Kubernetes service endpoint publication, and application
   readiness as separate gates for live `/mcp` and `/api` validation.
+- Raw media executables remain workflow boundary tools referenced by DAG `tool:` names; they are
+  documented in the MCP catalog but are not exposed as tenant-facing direct `tools/list` entries.
 - Cluster secrets are managed by the CLI on deploy; no env files.
 - Stateful Helm workloads bind only to the CLI-reconciled `studiomcp-manual` StorageClass; no
   default dynamic storage class remains on the supported local path.
@@ -125,3 +138,14 @@ The supported local and cluster topology is:
 - [phase-11-runtime-readiness-and-condition-driven-startup.md](phase-11-runtime-readiness-and-condition-driven-startup.md)
 - [phase-12-aggregate-test-artifact-isolation-and-warning-closure.md](phase-12-aggregate-test-artifact-isolation-and-warning-closure.md)
 - [phase-13-harbor-push-reliability-and-mcp-http-closure.md](phase-13-harbor-push-reliability-and-mcp-http-closure.md)
+- [phase-14-makefile-removal.md](phase-14-makefile-removal.md)
+- [phase-15-monocontainer-tool-expansion.md](phase-15-monocontainer-tool-expansion.md)
+- [phase-16-minio-model-storage.md](phase-16-minio-model-storage.md)
+- [phase-17-haskell-tool-adapters.md](phase-17-haskell-tool-adapters.md)
+- [phase-18-minio-fixture-seeding.md](phase-18-minio-fixture-seeding.md)
+- [phase-19-individual-tool-tests.md](phase-19-individual-tool-tests.md)
+- [phase-20-dag-chain-integration-tests.md](phase-20-dag-chain-integration-tests.md)
+- [phase-21-chaos-engineering.md](phase-21-chaos-engineering.md)
+- [phase-22-ses-email-integration.md](phase-22-ses-email-integration.md)
+- [phase-23-tool-documentation.md](phase-23-tool-documentation.md)
+- [phase-24-whisper-runtime-closure.md](phase-24-whisper-runtime-closure.md)

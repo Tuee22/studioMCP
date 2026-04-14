@@ -1,0 +1,55 @@
+name: podcast-production
+description: Multi-step podcast cleanup and transcript preparation chain.
+nodes:
+  - id: ingest
+    kind: pure
+    inputs: []
+    outputType: media/input
+    timeout:
+      seconds: 5
+    memoization: memoize
+  - id: stems
+    kind: boundary
+    tool: demucs
+    inputs:
+      - ingest
+    outputType: audio/stems
+    timeout:
+      seconds: 60
+    memoization: memoize
+  - id: transcript
+    kind: boundary
+    tool: whisper
+    inputs:
+      - stems
+    outputType: text/transcript
+    timeout:
+      seconds: 60
+    memoization: memoize
+  - id: polish
+    kind: boundary
+    tool: sox
+    inputs:
+      - stems
+    outputType: audio/master
+    timeout:
+      seconds: 30
+    memoization: memoize
+  - id: package
+    kind: boundary
+    tool: ffmpeg
+    inputs:
+      - polish
+    outputType: audio/final
+    timeout:
+      seconds: 30
+    memoization: memoize
+  - id: summary
+    kind: summary
+    inputs:
+      - transcript
+      - package
+    outputType: summary/run
+    timeout:
+      seconds: 5
+    memoization: no-memoize

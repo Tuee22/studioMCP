@@ -1,0 +1,6 @@
+Hello {{recipient_name}},
+
+Please verify your studioMCP email address by opening the link below:
+{{primary_url}}
+
+If you did not request this email, contact {{support_email}}.

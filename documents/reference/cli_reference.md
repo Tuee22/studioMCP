@@ -60,6 +60,20 @@ All test entrypoints route through the CLI.
 | `studiomcp test all` | Run all tests (unit + integration) |
 | `studiomcp test unit` | Run unit tests only |
 | `studiomcp test integration` | Run integration tests only |
+| `studiomcp test seed-fixtures` | Seed deterministic media fixtures into MinIO |
+| `studiomcp test verify-fixtures` | Verify deterministic media fixtures in MinIO |
+| `studiomcp test chaos` | Run chaos-focused recovery coverage |
+
+### Model And Email Commands
+
+Operational helpers for model sync and SES validation.
+
+| Command | Description |
+|---------|-------------|
+| `studiomcp models sync` | Sync registered models into MinIO |
+| `studiomcp models list` | List registered model status in MinIO |
+| `studiomcp models verify` | Verify MinIO model bytes against configured sources |
+| `studiomcp email send-test` | Render and send a test SES email |
 
 ### Validate Commands
 
@@ -76,6 +90,14 @@ Validators for individual subsystems and aggregate validation.
 | `studiomcp validate minio` | MinIO storage validation |
 | `studiomcp validate boundary` | Boundary service validation |
 | `studiomcp validate ffmpeg-adapter` | FFmpeg adapter validation |
+| `studiomcp validate sox-adapter` | SoX adapter validation |
+| `studiomcp validate demucs-adapter` | Demucs adapter validation |
+| `studiomcp validate whisper-adapter` | Whisper adapter validation |
+| `studiomcp validate basic-pitch-adapter` | Basic Pitch adapter validation |
+| `studiomcp validate fluidsynth-adapter` | FluidSynth adapter validation |
+| `studiomcp validate rubberband-adapter` | Rubberband adapter validation |
+| `studiomcp validate imagemagick-adapter` | ImageMagick adapter validation |
+| `studiomcp validate mediainfo-adapter` | MediaInfo adapter validation |
 | `studiomcp validate executor` | Sequential executor validation |
 | `studiomcp validate mcp-stdio` | MCP over stdio transport |
 | `studiomcp validate mcp-http` | MCP over HTTP transport |
@@ -154,6 +176,10 @@ docker compose run --rm studiomcp studiomcp test unit
 
 # Run only integration tests (requires cluster)
 docker compose run --rm studiomcp studiomcp test integration
+
+# Seed and verify deterministic fixtures
+docker compose run --rm studiomcp studiomcp test seed-fixtures
+docker compose run --rm studiomcp studiomcp test verify-fixtures
 ```
 
 ### Validation Workflow

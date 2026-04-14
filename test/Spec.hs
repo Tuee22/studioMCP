@@ -54,9 +54,12 @@ import qualified Config.LoadSpec
 import qualified Config.TypesSpec
 import qualified DAG.HashingSpec
 import qualified DAG.TypesSpec
+import qualified Email.TemplatesSpec
+import qualified FixturesSpec
 import qualified Inference.HostSpec
 import qualified Inference.ReferenceModelSpec
 import qualified Inference.TypesSpec
+import qualified Models.RegistrySpec
 import qualified MCP.ContextSpec
 import qualified MCP.HandlersSpec
 import qualified MCP.PromptsSpec
@@ -74,6 +77,7 @@ import qualified Result.FailureSpec
 import qualified Result.SummaryFailureSpec
 import qualified Result.TypesSpec
 import qualified Storage.VersioningSpec
+import qualified Tools.AdaptersSpec
 import qualified Tools.FFmpegSpec
 import qualified Tools.RegistrySpec
 import qualified Tools.TypesSpec
@@ -142,9 +146,12 @@ main =
     Config.TypesSpec.spec
     DAG.HashingSpec.spec
     DAG.TypesSpec.spec
+    Email.TemplatesSpec.spec
+    FixturesSpec.spec
     Inference.HostSpec.spec
     Inference.ReferenceModelSpec.spec
     Inference.TypesSpec.spec
+    Models.RegistrySpec.spec
     MCP.ContextSpec.spec
     MCP.HandlersSpec.spec
     MCP.PromptsSpec.spec
@@ -162,6 +169,7 @@ main =
     Result.SummaryFailureSpec.spec
     Result.TypesSpec.spec
     Storage.VersioningSpec.spec
+    Tools.AdaptersSpec.spec
     Tools.FFmpegSpec.spec
     Tools.RegistrySpec.spec
     Tools.TypesSpec.spec

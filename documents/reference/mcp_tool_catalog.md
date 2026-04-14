@@ -15,6 +15,10 @@ This document defines the target release-priority MCP capability catalog. It is 
 
 The repository now exposes this catalog through the MCP surface using the stable tool names below. The current implementation returns `CallToolResult` text content for tool responses, so the examples here describe the semantic payload rather than the exact wire wrapper.
 
+The public `tools/list` catalog remains focused on tenant-facing orchestration and artifact
+operations. Raw media-process adapters are registered separately as DAG boundary tool names that
+`workflow.submit` can reference.
+
 ## Tools
 
 | Name | Purpose | Auth Scope | Mutation Class |
@@ -38,6 +42,23 @@ The repository now exposes this catalog through the MCP surface using the stable
 - no tool may permanently delete media artifacts
 - artifact mutation tools are metadata-oriented unless they are explicitly creating new versions
 - artifact governance tools may hide, archive, supersede, or revoke future access, but they may not hard delete backing media
+
+## Workflow Boundary Tool Registry
+
+These names are valid `tool:` values inside DAG nodes submitted through `workflow.submit`. They are
+resolved through the runtime tool registry rather than exposed as direct MCP `tools/list` entries.
+
+| DAG Tool Name | Backing Command | Purpose |
+|---------------|-----------------|---------|
+| `ffmpeg` | `ffmpeg` | media transforms, muxing, and transcode normalization |
+| `sox` | `sox` | audio trim, fade, normalization, and effects |
+| `demucs` | `demucs` | stem separation |
+| `whisper` | `whisper` | speech transcription |
+| `basicpitch` | `basic-pitch` | audio-to-MIDI conversion |
+| `fluidsynth` | `fluidsynth` | MIDI synthesis |
+| `rubberband` | `rubberband` | time-stretch and pitch-shift |
+| `imagemagick` | `convert` | image resizing and thumbnail generation |
+| `mediainfo` | `mediainfo` | media inspection and JSON metadata extraction |
 
 ## Tool Schemas
 

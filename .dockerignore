@@ -12,6 +12,7 @@ __pycache__
 .data/
 .studiomcp-data/
 coverage
+core
 logs
 traces
 tmp

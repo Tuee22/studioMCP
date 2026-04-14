@@ -9,6 +9,8 @@ import StudioMCP.CLI.Command
     ClusterStorageCommand (..),
     Command (..),
     DagCommand (..),
+    EmailCommand (..),
+    ModelsCommand (..),
     TestCommand (..),
     ValidateCommand (..),
     parseCommand,
@@ -71,9 +73,29 @@ spec = do
       parseCommand ["validate", "ffmpeg-adapter"]
         `shouldBe` Right (ValidateCommand ValidateFFmpegAdapterCommand)
 
+    it "parses validate sox-adapter" $
+      parseCommand ["validate", "sox-adapter"]
+        `shouldBe` Right (ValidateCommand ValidateSoXAdapterCommand)
+
+    it "parses validate demucs-adapter" $
+      parseCommand ["validate", "demucs-adapter"]
+        `shouldBe` Right (ValidateCommand ValidateDemucsAdapterCommand)
+
+    it "parses validate whisper-adapter" $
+      parseCommand ["validate", "whisper-adapter"]
+        `shouldBe` Right (ValidateCommand ValidateWhisperAdapterCommand)
+
     it "parses validate executor" $
       parseCommand ["validate", "executor"]
         `shouldBe` Right (ValidateCommand ValidateExecutorCommand)
+
+    it "parses email send-test" $
+      parseCommand ["email", "send-test"]
+        `shouldBe` Right (EmailCommand EmailSendTestCommand)
+
+    it "parses models sync" $
+      parseCommand ["models", "sync"]
+        `shouldBe` Right (ModelsCommand ModelsSyncCommand)
 
     it "parses validate mcp-session-store" $
       parseCommand ["validate", "mcp-session-store"]
@@ -142,6 +164,18 @@ spec = do
     it "parses test integration" $
       parseCommand ["test", "integration"]
         `shouldBe` Right (TestCommand TestIntegrationCommand)
+
+    it "parses test seed-fixtures" $
+      parseCommand ["test", "seed-fixtures"]
+        `shouldBe` Right (TestCommand TestSeedFixturesCommand)
+
+    it "parses test verify-fixtures" $
+      parseCommand ["test", "verify-fixtures"]
+        `shouldBe` Right (TestCommand TestVerifyFixturesCommand)
+
+    it "parses test chaos" $
+      parseCommand ["test", "chaos"]
+        `shouldBe` Right (TestCommand TestChaosCommand)
 
     it "parses dag validate path" $
       parseCommand ["dag", "validate", "examples/dags/transcode-basic.yaml"]

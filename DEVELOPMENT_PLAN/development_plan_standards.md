@@ -89,6 +89,17 @@ DEVELOPMENT_PLAN/
 ├── phase-11-runtime-readiness-and-condition-driven-startup.md
 ├── phase-12-aggregate-test-artifact-isolation-and-warning-closure.md
 ├── phase-13-harbor-push-reliability-and-mcp-http-closure.md
+├── phase-14-makefile-removal.md
+├── phase-15-monocontainer-tool-expansion.md
+├── phase-16-minio-model-storage.md
+├── phase-17-haskell-tool-adapters.md
+├── phase-18-minio-fixture-seeding.md
+├── phase-19-individual-tool-tests.md
+├── phase-20-dag-chain-integration-tests.md
+├── phase-21-chaos-engineering.md
+├── phase-22-ses-email-integration.md
+├── phase-23-tool-documentation.md
+├── phase-24-whisper-runtime-closure.md
 └── legacy-tracking-for-deletion.md
 ```
 

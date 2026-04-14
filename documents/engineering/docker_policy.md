@@ -17,6 +17,12 @@
 These contexts share a Dockerfile but not startup semantics. Compose is only a one-command
 launcher. Kubernetes manifests own long-lived runtime startup.
 
+The repository intentionally has no `Makefile`. Supported workflows run through:
+
+```bash
+docker compose run --rm studiomcp studiomcp <subcommand...>
+```
+
 ## No Scripts Rule
 
 The repository must not use checked-in shell helper scripts as the supported command surface.
@@ -53,6 +59,12 @@ It must include:
 - `helm`
 - `tini`
 - the `studiomcp` CLI binary or build path
+
+The current tool inventory in the outer image includes:
+
+- native media tooling: `ffmpeg`, `sox`, `convert` (ImageMagick), `fluidsynth`, `rubberband`, `mediainfo`, `exiftool`
+- runtime support tooling: `whisper` (from `whisper.cpp`), with `libwhisper.so.1` and companion `libggml*.so` installed under `/usr/local/lib` and registered through `ldconfig` so `whisper --help` works in the outer container without manual loader fixes
+- compatibility shims for model-backed adapter CLIs whose upstream packages are not stable on the supported image base: `demucs`, `basic-pitch`
 
 This is the image that local humans and LLMs invoke through `docker compose run --rm`.
 
@@ -263,7 +275,9 @@ This policy is materially embodied. The legacy top-level `scripts/` directory an
 assets are gone, the Dockerfile is single-stage, the image entrypoint is `tini`, the Dockerfile
 has no `CMD`, the outer-container workflow is one command per `docker compose run --rm`, build
 artifacts stay under `/opt/build/`, and cluster deploys use registry-backed image pulls
-with Kubernetes-owned runtime startup and fresh local repulls of the pushed registry image.
+with Kubernetes-owned runtime startup and fresh local repulls of the pushed registry image. The
+legacy `Makefile` is gone, and the image now carries the full boundary-tool inventory required by
+the current adapter surface.
 
 ## Cross-References
 

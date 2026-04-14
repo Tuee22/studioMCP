@@ -23,6 +23,13 @@ The codebase currently implements this subset:
 - `studiomcp test all`
 - `studiomcp test unit`
 - `studiomcp test integration`
+- `studiomcp test seed-fixtures`
+- `studiomcp test verify-fixtures`
+- `studiomcp test chaos`
+- `studiomcp email send-test`
+- `studiomcp models sync`
+- `studiomcp models list`
+- `studiomcp models verify`
 - `studiomcp validate all`
 - `studiomcp validate-dag <path>`
 - `studiomcp dag validate <path>`
@@ -35,6 +42,14 @@ The codebase currently implements this subset:
 - `studiomcp validate minio`
 - `studiomcp validate boundary`
 - `studiomcp validate ffmpeg-adapter`
+- `studiomcp validate sox-adapter`
+- `studiomcp validate demucs-adapter`
+- `studiomcp validate whisper-adapter`
+- `studiomcp validate basic-pitch-adapter`
+- `studiomcp validate fluidsynth-adapter`
+- `studiomcp validate rubberband-adapter`
+- `studiomcp validate imagemagick-adapter`
+- `studiomcp validate mediainfo-adapter`
 - `studiomcp validate executor`
 - `studiomcp validate mcp-stdio`
 - `studiomcp validate mcp-http`
@@ -104,6 +119,18 @@ The supported command surface must converge on one Haskell CLI with at least the
 | `studiomcp test all` | Run all tests (unit + integration) | ✅ Implemented |
 | `studiomcp test unit` | Run unit tests only | ✅ Implemented |
 | `studiomcp test integration` | Run integration tests only | ✅ Implemented |
+| `studiomcp test seed-fixtures` | Seed deterministic fixtures into MinIO | ✅ Implemented |
+| `studiomcp test verify-fixtures` | Verify deterministic fixtures in MinIO | ✅ Implemented |
+| `studiomcp test chaos` | Run chaos-focused recovery coverage | ✅ Implemented |
+
+### Model And Email Commands
+
+| Command | Description | Status |
+|---------|-------------|--------|
+| `studiomcp models sync` | Sync registered models into MinIO | ✅ Implemented |
+| `studiomcp models list` | List model presence in MinIO | ✅ Implemented |
+| `studiomcp models verify` | Verify MinIO model bytes against their configured sources | ✅ Implemented |
+| `studiomcp email send-test` | Render and send a test SES email | ✅ Implemented |
 
 ### Aggregate Validation
 
@@ -184,6 +211,14 @@ validator stdout and stderr when a readiness timeout fails.
 | `studiomcp validate minio` | Validate MinIO connectivity | ✅ Implemented |
 | `studiomcp validate boundary` | Validate boundary runtime | ✅ Implemented |
 | `studiomcp validate ffmpeg-adapter` | Validate FFmpeg adapter | ✅ Implemented |
+| `studiomcp validate sox-adapter` | Validate SoX adapter | ✅ Implemented |
+| `studiomcp validate demucs-adapter` | Validate Demucs adapter | ✅ Implemented |
+| `studiomcp validate whisper-adapter` | Validate Whisper adapter | ✅ Implemented |
+| `studiomcp validate basic-pitch-adapter` | Validate Basic Pitch adapter | ✅ Implemented |
+| `studiomcp validate fluidsynth-adapter` | Validate FluidSynth adapter | ✅ Implemented |
+| `studiomcp validate rubberband-adapter` | Validate Rubberband adapter | ✅ Implemented |
+| `studiomcp validate imagemagick-adapter` | Validate ImageMagick adapter | ✅ Implemented |
+| `studiomcp validate mediainfo-adapter` | Validate MediaInfo adapter | ✅ Implemented |
 | `studiomcp validate executor` | Validate DAG executor | ✅ Implemented |
 | `studiomcp validate e2e` | End-to-end validation | ✅ Implemented |
 | `studiomcp validate worker` | Validate worker mode | ✅ Implemented |

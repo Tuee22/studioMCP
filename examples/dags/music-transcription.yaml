@@ -1,0 +1,45 @@
+name: music-transcription
+description: Stem separation followed by audio-to-MIDI round-trip.
+nodes:
+  - id: ingest
+    kind: pure
+    inputs: []
+    outputType: media/input
+    timeout:
+      seconds: 5
+    memoization: memoize
+  - id: stems
+    kind: boundary
+    tool: demucs
+    inputs:
+      - ingest
+    outputType: audio/stems
+    timeout:
+      seconds: 60
+    memoization: memoize
+  - id: midi
+    kind: boundary
+    tool: basicpitch
+    inputs:
+      - stems
+    outputType: midi/file
+    timeout:
+      seconds: 60
+    memoization: memoize
+  - id: synth
+    kind: boundary
+    tool: fluidsynth
+    inputs:
+      - midi
+    outputType: audio/render
+    timeout:
+      seconds: 30
+    memoization: memoize
+  - id: summary
+    kind: summary
+    inputs:
+      - synth
+    outputType: summary/run
+    timeout:
+      seconds: 5
+    memoization: no-memoize

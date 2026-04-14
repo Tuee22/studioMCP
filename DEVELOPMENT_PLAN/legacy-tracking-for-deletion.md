@@ -3,14 +3,15 @@
 
 **Status**: Authoritative source
 **Supersedes**: N/A
-**Referenced by**: [README.md](README.md), [phase-3-keycloak-auth-shared-sessions.md](phase-3-keycloak-auth-shared-sessions.md), [phase-5-browser-session-contract.md](phase-5-browser-session-contract.md), [phase-7-keycloak-realm-bootstrap.md](phase-7-keycloak-realm-bootstrap.md), [phase-8-final-closure-regression-gate.md](phase-8-final-closure-regression-gate.md)
+**Referenced by**: [README.md](README.md), [phase-3-keycloak-auth-shared-sessions.md](phase-3-keycloak-auth-shared-sessions.md), [phase-5-browser-session-contract.md](phase-5-browser-session-contract.md), [phase-7-keycloak-realm-bootstrap.md](phase-7-keycloak-realm-bootstrap.md), [phase-8-final-closure-regression-gate.md](phase-8-final-closure-regression-gate.md), [phase-14-makefile-removal.md](phase-14-makefile-removal.md)
 
 > **Purpose**: Provide the explicit ledger of deprecated compatibility surfaces, stale configuration
 > retained only for future work, and completed cleanup/removal work in `studioMCP`.
 
 ## Pending Removal
 
-None. No pending removal items remain on the current supported path.
+None. The current supported repository path does not retain any repo-local compatibility surfaces
+that are still waiting on a future cleanup phase.
 
 ## Completed
 
@@ -18,6 +19,7 @@ None. No pending removal items remain on the current supported path.
 |------|-----------------|--------------|
 | `builddir: /opt/build/studiomcp` compatibility hint | `cabal.project` | Removed; explicit `--builddir` flags in the Dockerfile and CLI remain authoritative |
 | `CABAL_BUILDDIR=/opt/build/studiomcp` compatibility hint | `docker/Dockerfile` | Removed; nix-style builds rely only on explicit `--builddir` flags |
+| Makefile workflow wrapper | `/Makefile` | Removed; the supported repo entrypoint is `docker compose run --rm studiomcp studiomcp ...` |
 | BFF redirect URIs | `docker/keycloak/realm/studiomcp-realm.json` | Removed from the imported realm definition |
 | `studiomcp-cli` Keycloak client | `docker/keycloak/realm/studiomcp-realm.json` | Removed from the imported realm definition |
 | `PKCEChallenge` type | `src/StudioMCP/Auth/PKCE.hs` | Removed |
@@ -65,3 +67,4 @@ These items are not pending removal because the current implementation still dep
 - [phase-5-browser-session-contract.md](phase-5-browser-session-contract.md)
 - [phase-7-keycloak-realm-bootstrap.md](phase-7-keycloak-realm-bootstrap.md)
 - [phase-8-final-closure-regression-gate.md](phase-8-final-closure-regression-gate.md)
+- [phase-14-makefile-removal.md](phase-14-makefile-removal.md)

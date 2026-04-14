@@ -6,6 +6,7 @@ Repository policy for LLM tooling:
 - LLMs may run local validation commands.
 - LLMs may not create git commits.
 - LLMs may not push branches or tags.
+- The repository intentionally has no `Makefile`; supported workflows run through `docker compose run --rm studiomcp studiomcp ...`.
 
 All git commits and pushes are for the human user only.
 

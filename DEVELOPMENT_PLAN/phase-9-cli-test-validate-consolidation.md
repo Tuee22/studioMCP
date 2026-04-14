@@ -48,21 +48,24 @@ docker compose run --rm studiomcp studiomcp cluster ensure  # Required for integ
 |-------|---------|----------|
 | Default test command | `docker compose run --rm studiomcp studiomcp test` | Runs unit and integration suites through the CLI |
 | Aggregate test command | `docker compose run --rm studiomcp studiomcp test all` | Runs unit and integration suites through the CLI |
-| Unit tests | `docker compose run --rm studiomcp studiomcp test unit` | 867 examples, 0 failures on the current worktree |
-| Integration tests | `docker compose run --rm studiomcp studiomcp test integration` | 16 examples, 0 failures on the supported cluster path |
+| Unit tests | `docker compose run --rm studiomcp studiomcp test unit` | Pass on the current worktree; latest suite counts are tracked in `DEVELOPMENT_PLAN/README.md` |
+| Integration tests | `docker compose run --rm studiomcp studiomcp test integration` | Pass on the supported path; latest suite counts are tracked in `DEVELOPMENT_PLAN/README.md` |
 | Aggregate validation command | `docker compose run --rm studiomcp studiomcp validate all` | Runs the aggregate validator runner through the CLI and emits an aggregate summary |
 | Docs validation | `docker compose run --rm studiomcp studiomcp validate docs` | PASS |
 | CLI usage text | `docker compose run --rm studiomcp studiomcp --help` | Prints usage text containing `test` and `validate all` commands |
 
 ### Current Validation State
 
-- `docker compose run --rm studiomcp studiomcp test unit` passes with 867 examples and 0 failures on the current worktree.
-- `docker compose run --rm studiomcp studiomcp test integration` passes with 16 examples and 0 failures on the supported cluster path.
-- `docker compose run --rm studiomcp studiomcp test` passes through the canonical aggregate CLI entrypoint.
-- `validate all` remains the aggregate validator runner; it invokes 28 validators sequentially and emits an aggregate summary.
-- `docker compose run --rm studiomcp studiomcp validate all` passes with 28/28 validators on the current worktree.
-- The canonical `studiomcp` binary exposes `test`, `test all`, `test unit`, `test integration`, and `validate all` as first-class commands.
-- `docker compose run --rm studiomcp studiomcp --help` exits successfully and prints the supported CLI surface, including the reconciled cluster deploy commands.
+- `docker compose run --rm studiomcp studiomcp --help` exits successfully and prints the supported
+  CLI surface, including `test`, the `test all` alias, `validate whisper-adapter`, `email`, and
+  `models`.
+- `docker compose run --rm studiomcp studiomcp test unit` passes on April 14, 2026 with `897 examples, 0 failures`.
+- `docker compose run --rm studiomcp studiomcp test` passes on April 14, 2026 with `897 examples, 0 failures` in the unit suite, `26 examples, 0 failures` in the integration suite, and `All tests passed.`
+- `docker compose run --rm studiomcp studiomcp validate all` passes on April 14, 2026 with `Passed: 36/36`; the aggregate validator runner still invokes 36 validators sequentially and emits an aggregate summary.
+- The canonical `studiomcp` binary exposes `test`, the `test all` alias, `test unit`,
+  `test integration`, and `validate all` as first-class commands.
+- [phase-24-whisper-runtime-closure.md](phase-24-whisper-runtime-closure.md) now records the closed
+  Whisper runtime repair that returned the aggregate CLI test path to green.
 
 ### Test Mapping
 
@@ -89,11 +92,13 @@ None. This phase is complete on the current supported path.
 **Cross-references to add:**
 - Keep [README.md](README.md) and [00-overview.md](00-overview.md) aligned when CLI validation entrypoints change.
 - Keep [legacy-tracking-for-deletion.md](legacy-tracking-for-deletion.md) aligned if compatibility aliases are retired.
+- Keep [phase-24-whisper-runtime-closure.md](phase-24-whisper-runtime-closure.md) aligned as the closed follow-on record for the Whisper runtime repair.
 
 ## Cross-References
 
 - [README.md](README.md#phase-overview)
 - [00-overview.md](00-overview.md)
+- [phase-24-whisper-runtime-closure.md](phase-24-whisper-runtime-closure.md)
 - [development_plan_standards.md](development_plan_standards.md#cli-first-testing-policy)
 - [../documents/reference/cli_reference.md](../documents/reference/cli_reference.md#studiomcp-cli-reference)
 - [../documents/reference/cli_surface.md](../documents/reference/cli_surface.md)

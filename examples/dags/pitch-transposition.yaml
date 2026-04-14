@@ -1,0 +1,36 @@
+name: pitch-transposition
+description: Time and pitch manipulation followed by final cleanup.
+nodes:
+  - id: ingest
+    kind: pure
+    inputs: []
+    outputType: media/input
+    timeout:
+      seconds: 5
+    memoization: memoize
+  - id: transpose
+    kind: boundary
+    tool: rubberband
+    inputs:
+      - ingest
+    outputType: audio/transposed
+    timeout:
+      seconds: 30
+    memoization: memoize
+  - id: polish
+    kind: boundary
+    tool: sox
+    inputs:
+      - transpose
+    outputType: audio/polished
+    timeout:
+      seconds: 30
+    memoization: memoize
+  - id: summary
+    kind: summary
+    inputs:
+      - polish
+    outputType: summary/run
+    timeout:
+      seconds: 5
+    memoization: no-memoize

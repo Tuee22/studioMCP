@@ -39,6 +39,7 @@ __pycache__/
 
 # Logs and traces
 *.log
+core
 logs/
 traces/
 

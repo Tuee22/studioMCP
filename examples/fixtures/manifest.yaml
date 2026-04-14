@@ -1,0 +1,25 @@
+fixtures:
+  - id: tone-440hz-1s
+    path: audio/tone-440hz-1s.wav
+    purpose: Single-tone audio fixture for adapter smoke tests
+  - id: speech-sample-10s
+    path: audio/speech-sample-10s.wav
+    purpose: Speech-like audio fixture for transcription flows
+  - id: music-stems-30s
+    path: audio/music-stems-30s.wav
+    purpose: Mixed-tone music fixture for separation flows
+  - id: simple-melody
+    path: midi/simple-melody.mid
+    purpose: Short MIDI line for synthesis validation
+  - id: chord-progression
+    path: midi/chord-progression.mid
+    purpose: Multi-note MIDI progression for synthesis validation
+  - id: test-pattern-1080p
+    path: image/test-pattern-1080p.png
+    purpose: Deterministic high-resolution image fixture
+  - id: photo-sample
+    path: image/photo-sample.jpg
+    purpose: JPEG fixture derived from the canonical test pattern
+  - id: test-video-10s
+    path: video/test-video-10s.mp4
+    purpose: Deterministic audio-video fixture for chain tests

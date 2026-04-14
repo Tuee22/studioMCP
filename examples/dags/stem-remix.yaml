@@ -1,0 +1,55 @@
+name: stem-remix
+description: Branch a demucs separation into per-stem cleanup and remix packaging.
+nodes:
+  - id: ingest
+    kind: pure
+    inputs: []
+    outputType: media/input
+    timeout:
+      seconds: 5
+    memoization: memoize
+  - id: stems
+    kind: boundary
+    tool: demucs
+    inputs:
+      - ingest
+    outputType: audio/stems
+    timeout:
+      seconds: 60
+    memoization: memoize
+  - id: vocals-clean
+    kind: boundary
+    tool: sox
+    inputs:
+      - stems
+    outputType: audio/vocals
+    timeout:
+      seconds: 30
+    memoization: memoize
+  - id: drums-clean
+    kind: boundary
+    tool: sox
+    inputs:
+      - stems
+    outputType: audio/drums
+    timeout:
+      seconds: 30
+    memoization: memoize
+  - id: remix
+    kind: boundary
+    tool: ffmpeg
+    inputs:
+      - vocals-clean
+      - drums-clean
+    outputType: audio/remix
+    timeout:
+      seconds: 30
+    memoization: memoize
+  - id: summary
+    kind: summary
+    inputs:
+      - remix
+    outputType: summary/run
+    timeout:
+      seconds: 5
+    memoization: no-memoize

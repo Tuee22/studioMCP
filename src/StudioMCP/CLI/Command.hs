@@ -4,6 +4,8 @@ module StudioMCP.CLI.Command
     ClusterCommand (..),
     ClusterDeployTarget (..),
     ClusterStorageCommand (..),
+    EmailCommand (..),
+    ModelsCommand (..),
     ValidateCommand (..),
     TestCommand (..),
     parseCommand,
@@ -20,6 +22,8 @@ data Command
   | WorkerCommand
   | ValidateDagCommand FilePath
   | DagCommand DagCommand
+  | EmailCommand EmailCommand
+  | ModelsCommand ModelsCommand
   | ValidateCommand ValidateCommand
   | ClusterCommand ClusterCommand
   | TestCommand TestCommand
@@ -27,6 +31,16 @@ data Command
 
 data DagCommand
   = DagValidateFixturesCommand
+  deriving (Eq, Show)
+
+data ModelsCommand
+  = ModelsSyncCommand
+  | ModelsListCommand
+  | ModelsVerifyCommand
+  deriving (Eq, Show)
+
+data EmailCommand
+  = EmailSendTestCommand
   deriving (Eq, Show)
 
 data ValidateCommand
@@ -39,6 +53,14 @@ data ValidateCommand
   | ValidateMinioCommand
   | ValidateBoundaryCommand
   | ValidateFFmpegAdapterCommand
+  | ValidateSoXAdapterCommand
+  | ValidateDemucsAdapterCommand
+  | ValidateWhisperAdapterCommand
+  | ValidateBasicPitchAdapterCommand
+  | ValidateFluidSynthAdapterCommand
+  | ValidateRubberbandAdapterCommand
+  | ValidateImageMagickAdapterCommand
+  | ValidateMediaInfoAdapterCommand
   | ValidateExecutorCommand
   | ValidateMcpStdioCommand -- Phase 13: MCP over stdio transport
   | ValidateMcpHttpCommand -- Phase 13: MCP over HTTP transport
@@ -87,6 +109,9 @@ data TestCommand
   = TestAllCommand
   | TestUnitCommand
   | TestIntegrationCommand
+  | TestSeedFixturesCommand
+  | TestVerifyFixturesCommand
+  | TestChaosCommand
   deriving (Eq, Show)
 
 parseCommand :: [String] -> Either String Command
@@ -103,6 +128,10 @@ parseCommand args =
     ["validate-dag", dagPath] -> Right (ValidateDagCommand dagPath)
     ["dag", "validate", dagPath] -> Right (ValidateDagCommand dagPath)
     ["dag", "validate-fixtures"] -> Right (DagCommand DagValidateFixturesCommand)
+    ["email", "send-test"] -> Right (EmailCommand EmailSendTestCommand)
+    ["models", "sync"] -> Right (ModelsCommand ModelsSyncCommand)
+    ["models", "list"] -> Right (ModelsCommand ModelsListCommand)
+    ["models", "verify"] -> Right (ModelsCommand ModelsVerifyCommand)
     ["validate", "all"] -> Right (ValidateCommand ValidateAllCommand)
     ["validate", "docs"] -> Right (ValidateCommand ValidateDocsCommand)
     ["validate", "cluster"] -> Right (ValidateCommand ValidateClusterCommand)
@@ -112,6 +141,14 @@ parseCommand args =
     ["validate", "minio"] -> Right (ValidateCommand ValidateMinioCommand)
     ["validate", "boundary"] -> Right (ValidateCommand ValidateBoundaryCommand)
     ["validate", "ffmpeg-adapter"] -> Right (ValidateCommand ValidateFFmpegAdapterCommand)
+    ["validate", "sox-adapter"] -> Right (ValidateCommand ValidateSoXAdapterCommand)
+    ["validate", "demucs-adapter"] -> Right (ValidateCommand ValidateDemucsAdapterCommand)
+    ["validate", "whisper-adapter"] -> Right (ValidateCommand ValidateWhisperAdapterCommand)
+    ["validate", "basic-pitch-adapter"] -> Right (ValidateCommand ValidateBasicPitchAdapterCommand)
+    ["validate", "fluidsynth-adapter"] -> Right (ValidateCommand ValidateFluidSynthAdapterCommand)
+    ["validate", "rubberband-adapter"] -> Right (ValidateCommand ValidateRubberbandAdapterCommand)
+    ["validate", "imagemagick-adapter"] -> Right (ValidateCommand ValidateImageMagickAdapterCommand)
+    ["validate", "mediainfo-adapter"] -> Right (ValidateCommand ValidateMediaInfoAdapterCommand)
     ["validate", "executor"] -> Right (ValidateCommand ValidateExecutorCommand)
     ["validate", "mcp-stdio"] -> Right (ValidateCommand ValidateMcpStdioCommand)
     ["validate", "mcp-http"] -> Right (ValidateCommand ValidateMcpHttpCommand)
@@ -149,6 +186,9 @@ parseCommand args =
     ["test", "all"] -> Right (TestCommand TestAllCommand)
     ["test", "unit"] -> Right (TestCommand TestUnitCommand)
     ["test", "integration"] -> Right (TestCommand TestIntegrationCommand)
+    ["test", "seed-fixtures"] -> Right (TestCommand TestSeedFixturesCommand)
+    ["test", "verify-fixtures"] -> Right (TestCommand TestVerifyFixturesCommand)
+    ["test", "chaos"] -> Right (TestCommand TestChaosCommand)
     _ -> Left usageText
 
 usageText :: String
@@ -163,6 +203,10 @@ usageText =
     , "  studiomcp validate-dag <path>"
     , "  studiomcp dag validate <path>"
     , "  studiomcp dag validate-fixtures"
+    , "  studiomcp email send-test"
+    , "  studiomcp models sync"
+    , "  studiomcp models list"
+    , "  studiomcp models verify"
     , "  studiomcp validate all             # Run all validators"
     , "  studiomcp validate docs"
     , "  studiomcp validate cluster"
@@ -172,6 +216,14 @@ usageText =
     , "  studiomcp validate minio"
     , "  studiomcp validate boundary"
     , "  studiomcp validate ffmpeg-adapter"
+    , "  studiomcp validate sox-adapter"
+    , "  studiomcp validate demucs-adapter"
+    , "  studiomcp validate whisper-adapter"
+    , "  studiomcp validate basic-pitch-adapter"
+    , "  studiomcp validate fluidsynth-adapter"
+    , "  studiomcp validate rubberband-adapter"
+    , "  studiomcp validate imagemagick-adapter"
+    , "  studiomcp validate mediainfo-adapter"
     , "  studiomcp validate executor"
     , "  studiomcp validate mcp-stdio        # MCP over stdio transport"
     , "  studiomcp validate mcp-http         # MCP over HTTP transport"
@@ -209,4 +261,7 @@ usageText =
     , "  studiomcp test all                 # Run all tests (unit + integration)"
     , "  studiomcp test unit                # Run unit tests only"
     , "  studiomcp test integration         # Run integration tests only"
+    , "  studiomcp test seed-fixtures       # Seed deterministic fixtures to MinIO"
+    , "  studiomcp test verify-fixtures     # Verify deterministic fixtures in MinIO"
+    , "  studiomcp test chaos               # Run chaos-focused test coverage"
     ]

@@ -7,8 +7,10 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     ca-certificates \
+    cmake \
     curl \
     ffmpeg \
+    fluidsynth \
     git \
     gstreamer1.0-libav \
     gstreamer1.0-plugins-base \
@@ -18,15 +20,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     libffi-dev \
     libgmp-dev \
+    libimage-exiftool-perl \
     libopencv-dev \
     libyaml-dev \
+    mediainfo \
     openjdk-21-jre-headless \
     pkg-config \
     python3 \
     python3-pip \
+    rubberband-cli \
     sox \
     tar \
     tini \
+    timgm6mb-soundfont \
     unzip \
     wget \
     xz-utils \
@@ -96,6 +102,24 @@ EOF
 WORKDIR /workspace
 
 COPY . /workspace
+
+RUN git clone --depth 1 https://github.com/ggml-org/whisper.cpp.git /tmp/whisper.cpp && \
+    cmake -S /tmp/whisper.cpp -B /tmp/whisper.cpp/build -DCMAKE_BUILD_TYPE=Release -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_EXAMPLES=ON && \
+    cmake --build /tmp/whisper.cpp/build -j"$(nproc)" && \
+    if [ -x /tmp/whisper.cpp/build/bin/whisper-cli ]; then \
+      install -m 0755 /tmp/whisper.cpp/build/bin/whisper-cli /usr/local/bin/whisper; \
+    elif [ -x /tmp/whisper.cpp/build/bin/main ]; then \
+      install -m 0755 /tmp/whisper.cpp/build/bin/main /usr/local/bin/whisper; \
+    else \
+      echo "whisper.cpp build did not produce a CLI binary" >&2; exit 1; \
+    fi && \
+    find /tmp/whisper.cpp/build \( -name 'libwhisper.so*' -o -name 'libggml*.so*' \) -exec cp -d {} /usr/local/lib/ \; && \
+    ldconfig && \
+    rm -rf /tmp/whisper.cpp
+
+RUN install -d /opt/studiomcp/tool-shims && \
+    install -m 0755 /workspace/docker/tool-shims/demucs.py /usr/local/bin/demucs && \
+    install -m 0755 /workspace/docker/tool-shims/basic_pitch.py /usr/local/bin/basic-pitch
 
 RUN mkdir -p /opt/build/studiomcp && \
     cabal update && \

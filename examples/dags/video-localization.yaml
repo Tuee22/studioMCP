@@ -1,0 +1,46 @@
+name: video-localization
+description: Extract speech, transcribe it, and republish a localized asset.
+nodes:
+  - id: ingest
+    kind: pure
+    inputs: []
+    outputType: media/input
+    timeout:
+      seconds: 5
+    memoization: memoize
+  - id: audio
+    kind: boundary
+    tool: ffmpeg
+    inputs:
+      - ingest
+    outputType: audio/extracted
+    timeout:
+      seconds: 30
+    memoization: memoize
+  - id: transcript
+    kind: boundary
+    tool: whisper
+    inputs:
+      - audio
+    outputType: text/subtitles
+    timeout:
+      seconds: 60
+    memoization: memoize
+  - id: localized
+    kind: boundary
+    tool: ffmpeg
+    inputs:
+      - audio
+    outputType: video/localized
+    timeout:
+      seconds: 30
+    memoization: memoize
+  - id: summary
+    kind: summary
+    inputs:
+      - transcript
+      - localized
+    outputType: summary/run
+    timeout:
+      seconds: 5
+    memoization: no-memoize

@@ -148,7 +148,15 @@ import StudioMCP.Storage.MinIO
     validateMinioRoundTrip,
   )
 import StudioMCP.Tools.Boundary (validateBoundaryRuntime)
+import StudioMCP.Tools.BasicPitch (validateBasicPitchAdapter)
+import StudioMCP.Tools.Demucs (validateDemucsAdapter)
 import StudioMCP.Tools.FFmpeg (validateFFmpegAdapter)
+import StudioMCP.Tools.FluidSynth (validateFluidSynthAdapter)
+import StudioMCP.Tools.ImageMagick (validateImageMagickAdapter)
+import StudioMCP.Tools.MediaInfo (validateMediaInfoAdapter)
+import StudioMCP.Tools.Rubberband (validateRubberbandAdapter)
+import StudioMCP.Tools.SoX (validateSoXAdapter)
+import StudioMCP.Tools.Whisper (validateWhisperAdapter)
 import StudioMCP.DAG.Executor (validateExecutorRuntime)
 import StudioMCP.Worker.Protocol
   ( WorkerExecutionRequest (..),
@@ -402,6 +410,14 @@ runValidateCommand command =
     ValidateMinioCommand -> validateMinio
     ValidateBoundaryCommand -> validateBoundary
     ValidateFFmpegAdapterCommand -> validateFFmpeg
+    ValidateSoXAdapterCommand -> validateSoX
+    ValidateDemucsAdapterCommand -> validateDemucs
+    ValidateWhisperAdapterCommand -> validateWhisper
+    ValidateBasicPitchAdapterCommand -> validateBasicPitch
+    ValidateFluidSynthAdapterCommand -> validateFluidSynth
+    ValidateRubberbandAdapterCommand -> validateRubberband
+    ValidateImageMagickAdapterCommand -> validateImageMagick
+    ValidateMediaInfoAdapterCommand -> validateMediaInfo
     ValidateExecutorCommand -> validateExecutor
     ValidateMcpStdioCommand -> validateMcpStdio
     ValidateMcpHttpCommand -> validateMcpHttp
@@ -1587,6 +1603,14 @@ validateAll = do
         , ("minio", validateMinio)
         , ("boundary", validateBoundary)
         , ("ffmpeg-adapter", validateFFmpeg)
+        , ("sox-adapter", validateSoX)
+        , ("demucs-adapter", validateDemucs)
+        , ("whisper-adapter", validateWhisper)
+        , ("basic-pitch-adapter", validateBasicPitch)
+        , ("fluidsynth-adapter", validateFluidSynth)
+        , ("rubberband-adapter", validateRubberband)
+        , ("imagemagick-adapter", validateImageMagick)
+        , ("mediainfo-adapter", validateMediaInfo)
         , ("executor", validateExecutor)
         , ("mcp-stdio", validateMcpStdio)
         , ("mcp-http", validateMcpHttp)
@@ -1822,6 +1846,70 @@ validateFFmpeg = do
   case result of
     Left failureDetail -> die (renderFailureDetail failureDetail)
     Right () -> putStrLn "FFmpeg adapter validation passed."
+
+validateSoX :: IO ()
+validateSoX = do
+  requireExecutables ["sox"]
+  result <- validateSoXAdapter
+  case result of
+    Left failureDetail -> die (renderFailureDetail failureDetail)
+    Right () -> putStrLn "SoX adapter validation passed."
+
+validateDemucs :: IO ()
+validateDemucs = do
+  requireExecutables ["demucs"]
+  result <- validateDemucsAdapter
+  case result of
+    Left failureDetail -> die (renderFailureDetail failureDetail)
+    Right () -> putStrLn "Demucs adapter validation passed."
+
+validateWhisper :: IO ()
+validateWhisper = do
+  requireExecutables ["whisper"]
+  result <- validateWhisperAdapter
+  case result of
+    Left failureDetail -> die (renderFailureDetail failureDetail)
+    Right () -> putStrLn "Whisper adapter validation passed."
+
+validateBasicPitch :: IO ()
+validateBasicPitch = do
+  requireExecutables ["basic-pitch"]
+  result <- validateBasicPitchAdapter
+  case result of
+    Left failureDetail -> die (renderFailureDetail failureDetail)
+    Right () -> putStrLn "BasicPitch adapter validation passed."
+
+validateFluidSynth :: IO ()
+validateFluidSynth = do
+  requireExecutables ["fluidsynth"]
+  result <- validateFluidSynthAdapter
+  case result of
+    Left failureDetail -> die (renderFailureDetail failureDetail)
+    Right () -> putStrLn "FluidSynth adapter validation passed."
+
+validateRubberband :: IO ()
+validateRubberband = do
+  requireExecutables ["rubberband"]
+  result <- validateRubberbandAdapter
+  case result of
+    Left failureDetail -> die (renderFailureDetail failureDetail)
+    Right () -> putStrLn "Rubberband adapter validation passed."
+
+validateImageMagick :: IO ()
+validateImageMagick = do
+  requireExecutables ["convert"]
+  result <- validateImageMagickAdapter
+  case result of
+    Left failureDetail -> die (renderFailureDetail failureDetail)
+    Right () -> putStrLn "ImageMagick adapter validation passed."
+
+validateMediaInfo :: IO ()
+validateMediaInfo = do
+  requireExecutables ["mediainfo"]
+  result <- validateMediaInfoAdapter
+  case result of
+    Left failureDetail -> die (renderFailureDetail failureDetail)
+    Right () -> putStrLn "MediaInfo adapter validation passed."
 
 validateExecutor :: IO ()
 validateExecutor = do

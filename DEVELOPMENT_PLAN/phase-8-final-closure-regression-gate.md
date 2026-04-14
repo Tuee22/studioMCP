@@ -45,23 +45,21 @@ docker compose run --rm studiomcp studiomcp cluster ensure
 | Check | Command | Expected | Review state |
 |-------|---------|----------|--------------|
 | Build | `docker compose run --rm studiomcp cabal --builddir=/opt/build/studiomcp build all` | Success | Container rebuild reran via `docker compose build` |
-| Unit tests | `docker compose run --rm studiomcp studiomcp test unit` | Success | 870 pass, 0 failures |
-| Integration tests | `docker compose run --rm studiomcp studiomcp test integration` | 0 failures | 16 pass, 0 failures |
+| Unit tests | `docker compose run --rm studiomcp studiomcp test unit` | Success | Pass on the current worktree; latest suite counts are tracked in `DEVELOPMENT_PLAN/README.md` |
+| Integration tests | `docker compose run --rm studiomcp studiomcp test integration` | 0 failures | Pass on the supported path; latest suite counts are tracked in `DEVELOPMENT_PLAN/README.md` |
 | Full regression gate | `docker compose run --rm studiomcp studiomcp test` | 0 failures | Pass; aggregate CLI run completed on the supported path |
 | Outer container CLI availability | `docker compose run --rm studiomcp sh -lc 'command -v studiomcp'` | `/usr/local/bin/studiomcp` | Pass |
 | Kind edge matrix | cluster validators through `/kc`, `/mcp`, `/api` | PASS | Pass through the aggregate validator set on the supported cluster path |
 | Docs validation | `docker compose run --rm studiomcp studiomcp validate docs` | PASS | Pass |
-| Full validation | `docker compose run --rm studiomcp studiomcp validate all` | PASS | Pass; 28/28 validators |
+| Full validation | `docker compose run --rm studiomcp studiomcp validate all` | PASS | Aggregate validator runner remains the supported live gate; the current source tree enumerates 36 validators |
 
 ### Current Validation State
 
-- `docker compose build` passes for the current worktree.
-- `docker compose run --rm studiomcp studiomcp cluster ensure` passes on the supported Kind path.
-- `docker compose run --rm studiomcp studiomcp test unit` passes with 870 examples and 0 failures on the current worktree.
-- `docker compose run --rm studiomcp studiomcp test integration` passes with 16 examples and 0 failures on the supported cluster path.
-- `docker compose run --rm studiomcp studiomcp test` passes and runs both suites through the canonical aggregate CLI entrypoint.
 - `docker compose run --rm studiomcp studiomcp validate docs` passes on the current worktree.
-- `docker compose run --rm studiomcp studiomcp validate all` passes with 28/28 validators on the current worktree.
+- `docker compose run --rm studiomcp whisper --help` passes on April 14, 2026 without shared-library loader errors.
+- `docker compose run --rm studiomcp studiomcp test` passes on April 14, 2026 with `897 examples, 0 failures` in the unit suite, `26 examples, 0 failures` in the integration suite, and `All tests passed.`
+- `docker compose run --rm studiomcp studiomcp validate all` passes on April 14, 2026 with `Passed: 36/36`; the current source tree still enumerates 36 validators in `src/StudioMCP/CLI/Cluster.hs`.
+- [phase-24-whisper-runtime-closure.md](phase-24-whisper-runtime-closure.md) now records the closed Whisper runtime repair that restored the aggregate regression gate.
 - The cross-cutting readiness contract introduced later in
   [phase-11-runtime-readiness-and-condition-driven-startup.md](phase-11-runtime-readiness-and-condition-driven-startup.md)
   now provides the shared deploy-time gate that live validators enter through.
@@ -127,11 +125,13 @@ None. This phase is complete on the current supported path.
 - Keep [../documents/README.md](../documents/README.md#studiomcp-documentation-index) aligned with the canonical suite after governance cleanup.
 - Keep [README.md](README.md) aligned with the validated command set.
 - Keep [phase-11-runtime-readiness-and-condition-driven-startup.md](phase-11-runtime-readiness-and-condition-driven-startup.md) aligned when the aggregate readiness gate changes validator behavior.
+- Keep [phase-24-whisper-runtime-closure.md](phase-24-whisper-runtime-closure.md) aligned as the closed follow-on record for the Whisper runtime repair.
 
 ## Cross-References
 
 - [README.md](README.md)
 - [00-overview.md](00-overview.md)
 - [phase-11-runtime-readiness-and-condition-driven-startup.md](phase-11-runtime-readiness-and-condition-driven-startup.md)
+- [phase-24-whisper-runtime-closure.md](phase-24-whisper-runtime-closure.md)
 - [legacy-tracking-for-deletion.md](legacy-tracking-for-deletion.md)
 - [../README.md](../README.md#development-roadmap)

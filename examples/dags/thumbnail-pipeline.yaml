@@ -1,0 +1,45 @@
+name: thumbnail-pipeline
+description: Create still thumbnails from a source video.
+nodes:
+  - id: ingest
+    kind: pure
+    inputs: []
+    outputType: media/input
+    timeout:
+      seconds: 5
+    memoization: memoize
+  - id: frame
+    kind: boundary
+    tool: ffmpeg
+    inputs:
+      - ingest
+    outputType: image/frame
+    timeout:
+      seconds: 30
+    memoization: memoize
+  - id: thumbnail
+    kind: boundary
+    tool: imagemagick
+    inputs:
+      - frame
+    outputType: image/thumbnail
+    timeout:
+      seconds: 30
+    memoization: memoize
+  - id: inspect
+    kind: boundary
+    tool: mediainfo
+    inputs:
+      - thumbnail
+    outputType: metadata/json
+    timeout:
+      seconds: 30
+    memoization: memoize
+  - id: summary
+    kind: summary
+    inputs:
+      - inspect
+    outputType: summary/run
+    timeout:
+      seconds: 5
+    memoization: no-memoize

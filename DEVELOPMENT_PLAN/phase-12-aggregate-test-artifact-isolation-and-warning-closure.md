@@ -32,7 +32,7 @@ run.
 | Repo-owned source and test warnings are removed, and the weak route/storage tests exposed by those warnings are strengthened | `src/StudioMCP/Auth/Claims.hs`, `src/StudioMCP/Auth/Jwks.hs`, `src/StudioMCP/Auth/Middleware.hs`, `src/StudioMCP/Auth/Scopes.hs`, `src/StudioMCP/Auth/ServiceAccount.hs`, `src/StudioMCP/MCP/Context.hs`, `src/StudioMCP/MCP/Core.hs`, `src/StudioMCP/MCP/Prompts.hs`, `src/StudioMCP/MCP/Session/RedisStore.hs`, `src/StudioMCP/MCP/Tools.hs`, `src/StudioMCP/MCP/Transport/Http.hs`, `src/StudioMCP/MCP/Transport/Stdio.hs`, `src/StudioMCP/MCP/Transport/Types.hs`, `src/StudioMCP/Observability/McpMetrics.hs`, `src/StudioMCP/Observability/Quotas.hs`, `src/StudioMCP/Storage/AuditTrail.hs`, `src/StudioMCP/Storage/Governance.hs`, `src/StudioMCP/Storage/TenantStorage.hs`, `src/StudioMCP/Util/Startup.hs`, `test/Auth/ConfigSpec.hs`, `test/Auth/JwksSpec.hs`, `test/MCP/ConformanceSpec.hs`, `test/MCP/CoreSpec.hs`, `test/MCP/ToolsSpec.hs`, `test/Session/StoreSpec.hs`, `test/Storage/GovernanceSpec.hs`, `test/Storage/TenantStorageSpec.hs`, `test/Web/HandlersSpec.hs` | Done |
 | Cabal bootstrap no longer recreates workspace-local `dist-newstyle` metadata when the outer-container CLI starts a test command | `src/StudioMCP/Util/Cabal.hs` | Done |
 
-## Reopened Gap
+### Reopened Gap
 
 - Explicit `--builddir` flags remained necessary but were not sufficient on their own: the
   repo-owned `cabal test`, `cabal install`, and helper-binary bootstrap paths were still capable of recreating
@@ -46,7 +46,7 @@ run.
 - Repo-owned test warnings from stale imports and unused bindings inflated the full test log and
   made real failures harder to spot.
 
-## Validation
+### Validation
 
 ### Validation Prerequisites
 
@@ -70,7 +70,7 @@ docker compose build
 - `docker compose build` passed on April 13, 2026, confirming that the repaired source tree still
   rebuilds from a cold Docker state without repo-owned compiler warnings on the `src/StudioMCP/...`
   path.
-- `docker compose run --rm studiomcp studiomcp test unit` passed on April 13, 2026, with `870 examples, 0 failures`.
+- `docker compose run --rm studiomcp studiomcp test unit` passed on April 13, 2026.
   The unit-suite compile path emitted only third-party package warnings; no repo-owned warning
   lines remained under `src/StudioMCP/...` or `test/...`.
 - `docker compose run --rm studiomcp sh -lc 'rm -rf /workspace/dist-newstyle; cabal --builddir=/opt/build/studiomcp build test:integration-tests && test_bin=$(cabal --builddir=/opt/build/studiomcp list-bin test:integration-tests) && "$test_bin" --match "deterministic helper processes"'`

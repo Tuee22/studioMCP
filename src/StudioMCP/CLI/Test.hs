@@ -5,18 +5,29 @@ where
 
 import Control.Monad (unless)
 import StudioMCP.CLI.Command (TestCommand (..))
+import StudioMCP.Config.Load (loadAppConfig)
+import StudioMCP.Config.Types (AppConfig (..))
+import qualified StudioMCP.Config.Types as ConfigTypes
+import StudioMCP.Storage.MinIO (MinIOConfig (..))
+import StudioMCP.Test.Fixtures
+  ( seedFixturesToMinio,
+    verifyFixturesInMinio,
+  )
+import StudioMCP.Tools.AdapterSupport (adapterFixturesRoot)
 import StudioMCP.Util.Cabal (cabalBuildDir, ensureCabalBootstrap)
-import System.Exit (ExitCode (..), exitFailure, exitWith)
+import System.Exit (ExitCode (..), die, exitFailure, exitWith)
 import System.Process (createProcess, proc, readProcessWithExitCode, waitForProcess)
 
 -- | Run test command
 runTestCommand :: TestCommand -> IO ()
-runTestCommand command = do
-  ensureCabalBootstrap
+runTestCommand command =
   case command of
-    TestAllCommand -> runTestAll
-    TestUnitCommand -> runTestUnit
-    TestIntegrationCommand -> runTestIntegration
+    TestAllCommand -> ensureCabalBootstrap >> runTestAll
+    TestUnitCommand -> ensureCabalBootstrap >> runTestUnit
+    TestIntegrationCommand -> ensureCabalBootstrap >> runTestIntegration
+    TestSeedFixturesCommand -> runSeedFixtures
+    TestVerifyFixturesCommand -> runVerifyFixtures
+    TestChaosCommand -> ensureCabalBootstrap >> runChaosTests
 
 -- | Run unit tests via cabal
 runTestUnit :: IO ()
@@ -62,6 +73,33 @@ runTestAll = do
     exitFailure
   putStrLn "All tests passed."
 
+runSeedFixtures :: IO ()
+runSeedFixtures = do
+  appConfig <- loadAppConfig
+  fixtureResult <- seedFixturesToMinio (appConfigMinioConfig appConfig) adapterFixturesRoot
+  case fixtureResult of
+    Left failureDetail -> die (show failureDetail)
+    Right fixtureIds -> do
+      putStrLn "Seeded fixtures:"
+      mapM_ (putStrLn . ("- " <>) . show) fixtureIds
+
+runVerifyFixtures :: IO ()
+runVerifyFixtures = do
+  appConfig <- loadAppConfig
+  fixtureResult <- verifyFixturesInMinio (appConfigMinioConfig appConfig) adapterFixturesRoot
+  case fixtureResult of
+    Left failureDetail -> die (show failureDetail)
+    Right fixtureIds -> do
+      putStrLn "Verified fixtures:"
+      mapM_ (putStrLn . ("- " <>) . show) fixtureIds
+
+appConfigMinioConfig :: AppConfig -> MinIOConfig
+appConfigMinioConfig appConfig =
+  MinIOConfig
+    (minioEndpoint appConfig)
+    (ConfigTypes.minioAccessKey appConfig)
+    (ConfigTypes.minioSecretKey appConfig)
+
 runCabalTest :: String -> IO ExitCode
 runCabalTest suiteName = do
   buildExitCode <- buildTestSuite suiteName
@@ -71,7 +109,28 @@ runCabalTest suiteName = do
       binaryPathExitCodeOrPath <- resolveTestBinaryPath suiteName
       case binaryPathExitCodeOrPath of
         Left exitCode -> pure exitCode
-        Right binaryPath -> runTestBinary binaryPath
+        Right binaryPath -> runTestBinary binaryPath []
+
+runChaosTests :: IO ()
+runChaosTests = do
+  putStrLn "Running chaos-focused integration tests..."
+  exitCode <- runCabalTestWithArgs "integration-tests" ["--match", "chaos"]
+  case exitCode of
+    ExitSuccess -> putStrLn "Chaos tests passed."
+    ExitFailure code -> do
+      putStrLn $ "Chaos tests failed with exit code " <> show code
+      exitWith exitCode
+
+runCabalTestWithArgs :: String -> [String] -> IO ExitCode
+runCabalTestWithArgs suiteName testArgs = do
+  buildExitCode <- buildTestSuite suiteName
+  case buildExitCode of
+    ExitFailure _ -> pure buildExitCode
+    ExitSuccess -> do
+      binaryPathExitCodeOrPath <- resolveTestBinaryPath suiteName
+      case binaryPathExitCodeOrPath of
+        Left exitCode -> pure exitCode
+        Right binaryPath -> runTestBinary binaryPath testArgs
 
 buildTestSuite :: String -> IO ExitCode
 buildTestSuite suiteName = do
@@ -102,9 +161,9 @@ resolveTestBinaryPath suiteName = do
         binaryPath : _ | not (null binaryPath) -> pure (Right binaryPath)
         _ -> pure (Left (ExitFailure 1))
 
-runTestBinary :: FilePath -> IO ExitCode
-runTestBinary binaryPath = do
+runTestBinary :: FilePath -> [String] -> IO ExitCode
+runTestBinary binaryPath args = do
   (_, _, _, processHandle) <-
     createProcess $
-      proc binaryPath []
+      proc binaryPath args
   waitForProcess processHandle

@@ -8,6 +8,8 @@ import StudioMCP.CLI.Command
     usageText,
   )
 import StudioMCP.CLI.Dag (runDagCommand, validateDagFileCommand)
+import StudioMCP.CLI.Email (runEmailCommand)
+import StudioMCP.CLI.Models (runModelsCommand)
 import StudioMCP.CLI.Test (runTestCommand)
 import StudioMCP.Inference.Host (runInferenceMode)
 import StudioMCP.MCP.Server (runServer, runServerStdio)
@@ -30,6 +32,8 @@ main = do
         WorkerCommand -> runWorkerMode
         ValidateDagCommand dagPath -> validateDagFileCommand dagPath
         DagCommand dagCommand -> runDagCommand dagCommand
+        EmailCommand emailCommand -> runEmailCommand emailCommand
+        ModelsCommand modelsCommand -> runModelsCommand modelsCommand
         ValidateCommand validateCommand -> runValidateCommand validateCommand
         ClusterCommand clusterCommand -> runClusterCommand clusterCommand
         TestCommand testCommand -> runTestCommand testCommand

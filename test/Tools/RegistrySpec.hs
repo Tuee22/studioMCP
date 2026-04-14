@@ -28,3 +28,10 @@ spec = do
     it "has no tools" $ do
       let registry = emptyToolRegistry
       Map.lookup (ToolName "ffmpeg") (unToolRegistry registry) `shouldBe` Nothing
+
+  describe "defaultToolRegistry" $ do
+    it "registers the expanded boundary tool set" $ do
+      let registry = defaultToolRegistry
+      Map.lookup (ToolName "ffmpeg") (unToolRegistry registry) `shouldBe` Just "ffmpeg"
+      Map.lookup (ToolName "sox") (unToolRegistry registry) `shouldBe` Just "sox"
+      Map.lookup (ToolName "imagemagick") (unToolRegistry registry) `shouldBe` Just "convert"

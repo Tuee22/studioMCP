@@ -16,7 +16,7 @@
 ### Goal
 
 Make Harbor-backed image publication reliable enough that `studiomcp validate mcp-http` and the
-canonical `studiomcp test all` run pass end to end on the supported outer-container path.
+canonical `studiomcp test` run pass end to end on the supported outer-container path.
 
 ### Deliverables
 
@@ -24,9 +24,9 @@ canonical `studiomcp test all` run pass end to end on the supported outer-contai
 |------|---------|--------|
 | Local kind Harbor publication uses persistent filesystem-backed registry storage with relative upload URLs, waits for Harbor backing services plus stable Harbor health, and still keeps extended managed-registry retry/backoff with remote-digest confirmation before giving up on publication | `chart/values-kind.yaml`, `src/StudioMCP/CLI/Cluster.hs` | Done |
 | `validate mcp-http` passes through the integration harness without manual retries or warm-up runs | `src/StudioMCP/CLI/Cluster.hs`, `test/Integration/HarnessSpec.hs` | Done |
-| The canonical `studiomcp test all` run returns success after the Harbor-backed MCP HTTP validator closes | `src/StudioMCP/CLI/Test.hs`, `test/Integration/HarnessSpec.hs` | Done |
+| The canonical `studiomcp test` run returns success after the Harbor-backed MCP HTTP validator closes | `src/StudioMCP/CLI/Test.hs`, `test/Integration/HarnessSpec.hs` | Done |
 
-## Reopened Gap
+### Reopened Gap
 
 - On April 13, 2026, the canonical `docker compose run --rm studiomcp studiomcp test all` run
   failed in `test/Integration/HarnessSpec.hs:155` while executing `studiomcp validate mcp-http`.
@@ -38,7 +38,7 @@ canonical `studiomcp test all` run pass end to end on the supported outer-contai
   `/workspace/dist-newstyle` remained absent and the only warning lines in the canonical logs were
   from third-party packages.
 
-## Validation
+### Validation
 
 ### Validation Prerequisites
 
@@ -54,7 +54,7 @@ docker compose build
 |-------|---------|----------|
 | Container build | `docker compose build` | Updated repository image contains the current `studiomcp` CLI |
 | Direct MCP HTTP validator | `docker compose run --rm studiomcp studiomcp validate mcp-http` | Harbor-backed MCP HTTP validator passes without registry upload failures |
-| Aggregate tests | `docker compose run --rm studiomcp studiomcp test all` | Unit and integration suites both pass on the canonical CLI path |
+| Aggregate tests | `docker compose run --rm studiomcp studiomcp test` | Unit and integration suites both pass on the canonical CLI path |
 | Docs validation | `docker compose run --rm studiomcp studiomcp validate docs` | PASS on the updated plan and registry-policy docs |
 
 ### Current Validation State
@@ -62,10 +62,9 @@ docker compose build
 - On April 14, 2026, the supported clean-room workflow completed successfully:
   `docker compose down --remove-orphans`, `docker system prune -af --volumes`,
   `.data/` removal, `docker compose build`, and
-  `docker compose run --rm studiomcp studiomcp test all`.
-- The clean April 14, 2026 aggregate run passed end to end with `870 examples, 0 failures` in the
-  unit suite, `16 examples, 0 failures` in the integration suite, and the final aggregate summary
-  `All tests passed.`
+  `docker compose run --rm studiomcp studiomcp test`.
+- The clean April 14, 2026 aggregate run passed end to end, and the final aggregate summary
+  reported `All tests passed.` The current suite counts are tracked in `DEVELOPMENT_PLAN/README.md`.
 - `docker compose run --rm studiomcp studiomcp validate mcp-http` passed on April 14, 2026, on
   the repaired Harbor-backed cluster path without manual retries or warm-up runs.
 - The host workspace still left `dist-newstyle/` absent after the clean-room aggregate run.

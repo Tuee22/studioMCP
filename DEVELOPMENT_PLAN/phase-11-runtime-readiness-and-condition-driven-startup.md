@@ -42,7 +42,7 @@ Make readiness a first-class runtime contract throughout `studioMCP` by:
 | Shared readiness diagnostics reused by validators and the integration harness | `src/StudioMCP/CLI/Cluster.hs`, `test/Integration/HarnessSpec.hs` | Done |
 | Readiness metrics and logs with blocking reasons | `src/StudioMCP/MCP/Server.hs`, `src/StudioMCP/Web/Handlers.hs`, `src/StudioMCP/Worker/Server.hs`, `src/StudioMCP/Inference/Host.hs` | Done |
 
-## Implemented Closure
+### Implemented Closure
 
 The supported path now closes the cross-cutting readiness gap in code:
 
@@ -60,11 +60,11 @@ The supported path now closes the cross-cutting readiness gap in code:
 - the MCP `/metrics` surface now emits readiness gauges and blocking-check detail labels, while
   all runtime surfaces log readiness transitions with the active blocking summary
 
-## Target Readiness Architecture
+### Target Readiness Architecture
 
 ### 1. Readiness Model
 
-`studioMCP` should treat readiness as a pure state model driven by observed signals.
+`studioMCP` treats readiness as a pure state model driven by observed signals.
 
 - input signals come from Kubernetes watches, HTTP health checks, dependency checks, and bootstrap
   completion notifications
@@ -76,54 +76,54 @@ The supported path now closes the cross-cutting readiness gap in code:
 
 ### 2. Kubernetes Contract
 
-Kubernetes readiness should reflect real application capability, not just process liveness.
+Kubernetes readiness reflects real application capability, not just process liveness.
 
 - `readinessProbe` returns success only when the role-specific application conditions have closed
-- one-time bootstrap work should surface explicit completion conditions, preferably as Kubernetes
-  `Job` completion or an equivalent explicit control-plane gate
+- one-time bootstrap work surfaces explicit completion conditions through Kubernetes `Job`
+  completion or an equivalent explicit control-plane gate
 - routing readiness and application readiness remain distinct:
   rollout plus `EndpointSlice` publication prove routability, while application conditions prove
   the backend can actually serve authenticated MCP, browser, worker, or inference traffic
-- `PodReadinessGate` or status conditions may be introduced when external dependencies must close
-  before traffic is safe
+- status conditions remain the supported extension point when external dependency closure must be
+  reflected before traffic is safe
 
 ### 3. CLI Contract
 
-The cluster CLI should own one shared readiness waiter.
+The cluster CLI owns one shared readiness waiter.
 
-- `cluster ensure` and `cluster deploy server` should use `LIST + WATCH` semantics over the
+- `cluster ensure` and `cluster deploy server` use `LIST + WATCH` semantics over the
   relevant Kubernetes resources instead of sleeping and retrying blind
-- correctness should come from the reconciled current snapshot, not from trusting Kubernetes
+- correctness comes from the reconciled current snapshot, not from trusting Kubernetes
   `Event` objects as the source of truth
-- validators and integration tests should call the same readiness helper instead of each command
+- validators and integration tests call the same readiness helper instead of each command
   inventing its own startup logic
-- timeout failures should name the exact blocking condition, resource, and last observed reason
+- timeout failures name the exact blocking condition, resource, and last observed reason
 
 ### 4. Runtime Contract
 
-Each major runtime surface should expose the conditions it requires before it is safe to receive
+Each major runtime surface exposes the conditions it requires before it is safe to receive
 traffic.
 
 - MCP server: auth service initialized, JWKS issuer path usable, shared session store reachable,
   required runtime dependencies reachable for the exposed surface
 - BFF: auth and session dependencies ready, cookie/session flows usable, downstream APIs reachable
 - worker and inference surfaces: role-specific dependencies ready before the workload reports ready
-- readiness payloads should return structured JSON reasons rather than a single generic `ready`
+- readiness payloads return structured JSON reasons rather than a single generic `ready`
   response
 
 ### 5. Validation Contract
 
-Validation should prove the shared readiness contract rather than mask it.
+Validation proves the shared readiness contract rather than mask it.
 
 - `validate mcp-http`, `validate web-bff`, `validate mcp-auth`, `validate mcp-conformance`,
-  integration tests, and the aggregate `test` and `validate all` flows should depend on the same
+  integration tests, and the aggregate `test` and `validate all` flows depend on the same
   readiness gating primitive
 - validator-local transport retries remain acceptable only as bounded final-request hedges after
   the shared readiness gate has already closed
-- the integration harness should surface validator stdout and stderr for readiness failures so the
+- the integration harness surfaces validator stdout and stderr for readiness failures so the
   blocking reason survives into test output
 
-## Validation
+### Validation
 
 ### Validation Prerequisites
 
@@ -155,7 +155,7 @@ docker compose run --rm studiomcp studiomcp cluster ensure
   after the requested teardown, prune, rebuild, and full-suite rerun.
 - `docker compose run --rm studiomcp studiomcp validate docs` passes on the governed-doc updates
   for this phase.
-- the governed docs listed for this phase are aligned with the implemented readiness contract in
+- The governed docs listed for this phase are aligned with the implemented readiness contract in
   this change set.
 
 ### Remaining Work

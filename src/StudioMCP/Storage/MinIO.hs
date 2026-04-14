@@ -3,8 +3,12 @@
 module StudioMCP.Storage.MinIO
   ( MinIOConfig (..),
     classifyMinioFailure,
+    ensureBucketExists,
+    objectExists,
+    readObjectBytes,
     readManifest,
     readMemoObject,
+    writeObjectBytes,
     writeArtifactObject,
     readSummary,
     validateMinioRoundTrip,
@@ -171,6 +175,37 @@ validateMinioRoundTrip config = do
                                   | otherwise -> do
                                       missingReadResult <- readMemoObject config missingMemoRef
                                       pure (validateMissingObjectFailure missingMemoRef missingReadResult)
+
+ensureBucketExists :: MinIOConfig -> BucketName -> IO (Either FailureDetail ())
+ensureBucketExists config bucketName = do
+  commandResult <-
+    runMcCommand
+      config
+      "ensure-bucket"
+      bucketName
+      (ObjectKey "_bucket")
+      ["mb", "--ignore-existing", Text.unpack ("local/" <> unBucketName bucketName)]
+      LBS.empty
+  case commandResult of
+    Left failureDetail -> pure (Left failureDetail)
+    Right _ -> pure (Right ())
+
+objectExists :: MinIOConfig -> BucketName -> ObjectKey -> IO (Either FailureDetail Bool)
+objectExists config bucketName objectKey = do
+  commandResult <-
+    runMcCommand
+      config
+      "stat"
+      bucketName
+      objectKey
+      ["stat", objectTarget bucketName objectKey]
+      LBS.empty
+  pure $
+    case commandResult of
+      Right _ -> Right True
+      Left failureDetail
+        | failureCode failureDetail == "minio-object-not-found" -> Right False
+        | otherwise -> Left failureDetail
 
 classifyMinioFailure :: Text -> BucketName -> ObjectKey -> Maybe Int -> Text -> FailureDetail
 classifyMinioFailure operationName bucketName objectKey maybeExitCode commandOutput =

@@ -30,6 +30,8 @@ library
     StudioMCP.CLI.Cluster
     StudioMCP.CLI.Dag
     StudioMCP.CLI.Docs
+    StudioMCP.CLI.Email
+    StudioMCP.CLI.Models
     StudioMCP.CLI.Test
     StudioMCP.MCP.Server
     StudioMCP.MCP.Protocol
@@ -73,14 +75,30 @@ library
     StudioMCP.Storage.Governance
     StudioMCP.Storage.Versioning
     StudioMCP.Storage.AuditTrail
+    StudioMCP.Email.Templates
+    StudioMCP.Email.SES
+    StudioMCP.Models.Registry
+    StudioMCP.Models.Sync
+    StudioMCP.Models.Loader
     StudioMCP.Messaging.Pulsar
     StudioMCP.Messaging.Topics
     StudioMCP.Messaging.Events
     StudioMCP.Messaging.ExecutionState
     StudioMCP.Tools.Types
     StudioMCP.Tools.Registry
+    StudioMCP.Tools.AdapterSupport
     StudioMCP.Tools.Boundary
     StudioMCP.Tools.FFmpeg
+    StudioMCP.Tools.SoX
+    StudioMCP.Tools.Demucs
+    StudioMCP.Tools.Whisper
+    StudioMCP.Tools.BasicPitch
+    StudioMCP.Tools.FluidSynth
+    StudioMCP.Tools.Rubberband
+    StudioMCP.Tools.ImageMagick
+    StudioMCP.Tools.MediaInfo
+    StudioMCP.Test.Chaos
+    StudioMCP.Test.Fixtures
     StudioMCP.Inference.Types
     StudioMCP.Inference.Host
     StudioMCP.Inference.Prompts
@@ -261,6 +279,8 @@ test-suite unit-tests
     Web.HandlersSpec
     API.VersionSpec
     CLI.DagSpec
+    Email.TemplatesSpec
+    FixturesSpec
     Config.EnvSpec
     Config.LoadSpec
     Config.TypesSpec
@@ -269,6 +289,7 @@ test-suite unit-tests
     Inference.HostSpec
     Inference.ReferenceModelSpec
     Inference.TypesSpec
+    Models.RegistrySpec
     MCP.ContextSpec
     MCP.HandlersSpec
     MCP.PromptsSpec
@@ -286,6 +307,7 @@ test-suite unit-tests
     Result.SummaryFailureSpec
     Result.TypesSpec
     Storage.VersioningSpec
+    Tools.AdaptersSpec
     Tools.FFmpegSpec
     Tools.RegistrySpec
     Tools.TypesSpec
@@ -301,6 +323,7 @@ test-suite unit-tests
     , bytestring
     , containers
     , directory
+    , filepath
     , hspec >=2.11 && <2.12
     , http-client
     , http-types
@@ -320,9 +343,16 @@ test-suite integration-tests
   main-is: IntegrationSpec.hs
   other-modules:
     Integration.HarnessSpec
+    Integration.DAGChainsSpec
+    Integration.ChaosSpec
+    Integration.EmailFlowsSpec
   build-depends:
       base
     , directory
     , hspec >=2.11 && <2.12
+    , http-types
     , process
     , studioMCP
+    , text
+    , wai
+    , warp
