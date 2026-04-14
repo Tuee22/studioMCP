@@ -282,10 +282,8 @@ getValidToken client = do
       -- No cached token, acquire new one
       result <- acquireServiceToken client
       pure $ fmap cstAccessToken result
-    Just cached -> do
-      -- Check if token is still valid (with buffer)
-      let expiryWithBuffer = addUTCTime (negate tokenRefreshBuffer) (cstExpiresAt cached)
-      if now < expiryWithBuffer
+    Just cached ->
+      if isTokenValid now cached
         then pure $ Right (cstAccessToken cached)
         else do
           -- Token expired or about to expire, acquire new one

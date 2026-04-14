@@ -53,13 +53,9 @@ import Data.Aeson
     encode,
     fromJSON,
     object,
-    withObject,
     withText,
-    (.:),
-    (.:?),
     (.=),
   )
-import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString.Lazy as LBS

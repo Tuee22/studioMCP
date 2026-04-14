@@ -27,26 +27,18 @@ module StudioMCP.MCP.Context
   )
 where
 
-import Data.Aeson (ToJSON (toJSON), Value, object, (.=))
+import Data.Aeson (ToJSON (toJSON), Value)
 import Data.Text (Text)
-import qualified Data.Text as T
-import Data.UUID (UUID)
 import qualified Data.UUID as UUID
 import qualified Data.UUID.V4 as UUID
 import GHC.Generics (Generic)
 import StudioMCP.Auth.Types
-  ( AuthContext (..),
-    Subject (..),
-    SubjectId (..),
-    Tenant (..),
-    TenantId (..),
+  ( AuthContext (..)
   )
 import StudioMCP.MCP.Session.Types
   ( Session (..),
-    SessionId (..),
     SubjectContext (..),
     TenantContext (..),
-    TenantId (..),
   )
 import qualified StudioMCP.Auth.Types as Auth
 import qualified StudioMCP.MCP.Session.Types as Session
@@ -90,7 +82,6 @@ newRequestContext method reqId = do
 -- | Create a new request context with auth
 newRequestContextWithAuth :: Text -> Maybe Value -> AuthContext -> IO RequestContext
 newRequestContextWithAuth method reqId authCtx = do
-  corrId <- newCorrelationId
   pure
     RequestContext
       { ctxCorrelationId = CorrelationId (acCorrelationId authCtx),
@@ -146,7 +137,7 @@ contextLogFields ctx =
     authContextFields = case ctxAuthContext ctx of
       Just ac ->
         [ ("authTenantId", toJSON (Auth.tenantId (acTenant ac))),
-          ("authSubjectId", toJSON (subjectId (acSubject ac)))
+          ("authSubjectId", toJSON (Auth.subjectId (acSubject ac)))
         ]
       Nothing -> []
 

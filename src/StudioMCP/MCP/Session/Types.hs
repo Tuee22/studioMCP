@@ -40,9 +40,7 @@ import Data.Aeson
     (.=),
   )
 import Data.Text (Text)
-import qualified Data.Text as T
 import Data.Time (NominalDiffTime, UTCTime, diffUTCTime, getCurrentTime)
-import Data.UUID (UUID)
 import qualified Data.UUID as UUID
 import qualified Data.UUID.V4 as UUID
 import GHC.Generics (Generic)

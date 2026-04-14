@@ -31,7 +31,8 @@ govern this plan.
 | [phase-9-cli-test-validate-consolidation.md](phase-9-cli-test-validate-consolidation.md) | CLI test and validate command consolidation |
 | [phase-10-build-artifact-isolation.md](phase-10-build-artifact-isolation.md) | Build artifact isolation and one-command container configuration closure |
 | [phase-11-runtime-readiness-and-condition-driven-startup.md](phase-11-runtime-readiness-and-condition-driven-startup.md) | Runtime readiness, condition-driven startup, and shared wait-gate closure |
-| [phase-12-aggregate-test-artifact-isolation-and-warning-closure.md](phase-12-aggregate-test-artifact-isolation-and-warning-closure.md) | Aggregate test artifact isolation regression closure and repo-owned warning cleanup |
+| [phase-12-aggregate-test-artifact-isolation-and-warning-closure.md](phase-12-aggregate-test-artifact-isolation-and-warning-closure.md) | Aggregate test artifact isolation and repo-owned warning closure |
+| [phase-13-harbor-push-reliability-and-mcp-http-closure.md](phase-13-harbor-push-reliability-and-mcp-http-closure.md) | Harbor-backed MCP HTTP validation and aggregate-suite reliability closure |
 | [legacy-tracking-for-deletion.md](legacy-tracking-for-deletion.md) | Cleanup and compatibility removal ledger |
 
 ## Status Vocabulary
@@ -70,26 +71,31 @@ A phase can move to `Done` only when all of the following are true:
 | 10 | Build Artifact Isolation and Container Configuration | Done | [phase-10-build-artifact-isolation.md](phase-10-build-artifact-isolation.md) |
 | 11 | Runtime Readiness and Condition-Driven Startup | Done | [phase-11-runtime-readiness-and-condition-driven-startup.md](phase-11-runtime-readiness-and-condition-driven-startup.md) |
 | 12 | Aggregate Test Artifact Isolation and Warning Closure | Done | [phase-12-aggregate-test-artifact-isolation-and-warning-closure.md](phase-12-aggregate-test-artifact-isolation-and-warning-closure.md) |
+| 13 | Harbor Push Reliability and MCP HTTP Closure | Done | [phase-13-harbor-push-reliability-and-mcp-http-closure.md](phase-13-harbor-push-reliability-and-mcp-http-closure.md) |
 
 ## Current Validation State
 
 **Passing:**
 - `docker compose build` passes for the single-stage outer-container image.
 - `docker compose run --rm studiomcp sh -lc 'command -v tini && command -v studiomcp && command -v mc && test ! -d /workspace/dist-newstyle'` passes.
-- `docker compose run --rm studiomcp studiomcp test unit` passes with 870 examples and 0 failures on the current worktree.
-- `docker compose run --rm studiomcp studiomcp validate docs` passes for structural documentation checks on the current worktree.
-- The repaired current-source unit-test path and a targeted integration-harness check both complete without recreating `/workspace/dist-newstyle`.
+- `docker compose run --rm studiomcp studiomcp test unit` passes with 870 examples and 0 failures on April 14, 2026.
+- Repo-owned compiler warnings are closed on the current `src/StudioMCP/...` and `test/...` build paths; the remaining warnings in canonical logs are third-party dependency warnings.
+- `docker compose run --rm studiomcp studiomcp validate mcp-http` passed on April 14, 2026, on the repaired Harbor-backed path.
+- The repaired current-source unit-test path and the clean April 14, 2026 aggregate test run both complete without recreating `/workspace/dist-newstyle`.
+- `docker compose run --rm studiomcp studiomcp test all` passed on April 14, 2026, after `docker compose down --remove-orphans`, `docker system prune -af --volumes`, `.data/` removal, and `docker compose build`, with `870 examples, 0 failures` in the unit suite and `16 examples, 0 failures` in the integration suite.
 - Repo-owned build artifacts stay under `/opt/build/` and never leak to the workspace bind mount.
 - `docker/Dockerfile` is single-stage, uses `tini`, and carries no Dockerfile `CMD`; `docker-compose.yaml` carries no service `command`.
 - Helm owns explicit in-cluster startup commands for the server, worker, and BFF workloads.
-- `docker compose run --rm studiomcp studiomcp test all` passes after `studiomcp cluster down` and `docker system prune -af --volumes`, and the workspace remains free of `dist-newstyle/`.
 
 **Cluster-Dependent Coverage:**
 - `cluster ensure` now waits for shared-service application readiness for MinIO, Pulsar, and Keycloak after workload rollout.
 - `cluster deploy server` now blocks on rollout, Kubernetes service endpoint publication, ingress-edge readiness for `/mcp` and `/api`, worker readiness, and reference-model health before live validators proceed.
 - The integration harness now preserves validator stdout and stderr when a shared readiness gate fails, so blocking reasons survive into test output.
-- The cold-path `validate mcp-http` validator now survives Harbor publication after a full prune, because the CLI compares like-for-like image config digests and waits for managed-registry push readiness before the first large upload.
 - Integration tests and aggregate validation continue to exercise Keycloak, MinIO, Pulsar, ingress routing, MCP HTTP, BFF session flows, horizontal scale, observability, and conformance through the live cluster path.
+
+**Recently Closed Follow-On:**
+- Phase 13 is now closed: the local kind Harbor registry uses persistent filesystem-backed image storage with relative upload URLs, the Harbor registry PVC is reconciled on the manual-PV path, the CLI waits for PostgreSQL and Redis plus Harbor `/api/v2.0/health` and registry `/v2/` readiness before managed publication, and the managed-registry push path still applies extended retry/backoff with remote-digest confirmation.
+- The April 13, 2026 Harbor-backed `validate mcp-http` regression is closed by the April 14, 2026 clean-room `validate mcp-http` pass and the clean-room `test all` pass.
 
 ## Phase Details
 
@@ -107,6 +113,7 @@ A phase can move to `Done` only when all of the following are true:
 | 10 | Done | None | `README.md`, `documents/engineering/docker_policy.md`, `documents/engineering/k8s_native_dev_policy.md`, `documents/reference/cli_reference.md`, `documents/reference/cli_surface.md`, `documents/development/local_dev.md`, `documents/operations/runbook_local_debugging.md` |
 | 11 | Done | None | `documents/architecture/overview.md`, `documents/architecture/server_mode.md`, `documents/architecture/bff_architecture.md`, `documents/architecture/mcp_protocol_architecture.md`, `documents/engineering/k8s_native_dev_policy.md`, `documents/engineering/session_scaling.md`, `documents/development/testing_strategy.md`, `documents/reference/cli_reference.md`, `documents/reference/cli_surface.md`, `documents/operations/runbook_local_debugging.md` |
 | 12 | Done | None | `documents/engineering/docker_policy.md`, `DEVELOPMENT_PLAN/development_plan_standards.md`, `DEVELOPMENT_PLAN/README.md`, `DEVELOPMENT_PLAN/00-overview.md`, `DEVELOPMENT_PLAN/system-components.md`, `DEVELOPMENT_PLAN/phase-10-build-artifact-isolation.md` |
+| 13 | Done | None | `documents/engineering/docker_policy.md`, `DEVELOPMENT_PLAN/README.md`, `DEVELOPMENT_PLAN/00-overview.md`, `DEVELOPMENT_PLAN/system-components.md`, `DEVELOPMENT_PLAN/phase-12-aggregate-test-artifact-isolation-and-warning-closure.md` |
 
 ## Cross-References
 

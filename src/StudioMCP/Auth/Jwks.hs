@@ -31,13 +31,12 @@ module StudioMCP.Auth.Jwks
   )
 where
 
-import Control.Concurrent.STM (TVar, atomically, newTVarIO, readTVar, readTVarIO, writeTVar)
-import Control.Exception (SomeException, catch, try)
+import Control.Concurrent.STM (TVar, atomically, newTVarIO, readTVarIO, writeTVar)
+import Control.Exception (SomeException, try)
 import Data.Aeson
   ( FromJSON (parseJSON),
     ToJSON (toJSON),
     Value (..),
-    decode,
     eitherDecode,
     object,
     withObject,
@@ -45,17 +44,15 @@ import Data.Aeson
     (.:?),
     (.=),
   )
-import qualified Data.Aeson.KeyMap as KM
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base64.URL as B64
 import qualified Data.ByteString.Lazy as LBS
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
-import Data.Time (NominalDiffTime, UTCTime, addUTCTime, diffUTCTime, getCurrentTime)
+import Data.Time (UTCTime, addUTCTime, getCurrentTime)
 import GHC.Generics (Generic)
-import Network.HTTP.Client (Manager, Request, httpLbs, parseRequest, responseBody, responseStatus)
+import Network.HTTP.Client (Manager, httpLbs, parseRequest, responseBody, responseStatus)
 import Network.HTTP.Types (statusCode)
 import StudioMCP.Auth.Config (AuthConfig (..), KeycloakConfig (..), jwksEndpoint)
 import StudioMCP.Auth.Types
@@ -280,8 +277,8 @@ validateTokenTiming config payload now = do
   -- Check expiration
   case jpExp payload of
     Nothing -> Left $ MissingClaim "exp"
-    Just exp -> do
-      let expTime = posixToUTC exp
+    Just expiresAtEpoch -> do
+      let expTime = posixToUTC expiresAtEpoch
           leeway = fromIntegral $ acTokenLeewaySeconds config
       if addUTCTime leeway now > expTime
         then Left TokenExpired

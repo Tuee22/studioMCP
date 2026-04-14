@@ -36,9 +36,7 @@ import Data.Aeson
   ( FromJSON (parseJSON),
     ToJSON (toJSON),
     object,
-    withObject,
     withText,
-    (.:),
     (.=),
   )
 import qualified Data.Map.Strict as Map

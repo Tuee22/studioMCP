@@ -14,17 +14,13 @@ module StudioMCP.MCP.Transport.Stdio
 where
 
 import Control.Concurrent (MVar, newMVar, putMVar, takeMVar)
-import Control.Exception (SomeException, catch, try)
-import Control.Monad (unless, when)
+import Control.Exception (SomeException, try)
 import Data.Aeson (Value, decode, encode)
-import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.ByteString.Lazy.Char8 as LBS8
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
-import Data.Text (Text)
 import qualified Data.Text as T
-import qualified Data.Text.Encoding as TE
 import StudioMCP.MCP.Transport.Types
 import System.IO (BufferMode (..), Handle, hFlush, hIsEOF, hSetBinaryMode, hSetBuffering, stdin, stdout)
 

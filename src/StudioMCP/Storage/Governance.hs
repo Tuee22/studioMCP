@@ -38,7 +38,6 @@ module StudioMCP.Storage.Governance
   )
 where
 
-import Control.Applicative ((<|>))
 import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO, readTVarIO)
 import Data.Aeson
   ( FromJSON (parseJSON),
@@ -58,7 +57,7 @@ import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Time (UTCTime, getCurrentTime)
+import Data.Time (UTCTime)
 import System.Directory (createDirectoryIfMissing, doesFileExist)
 import System.FilePath (takeDirectory)
 import StudioMCP.Auth.Types (SubjectId (..), TenantId (..))

@@ -194,5 +194,5 @@ resourcePermissions uri
 
 -- | Authorize MCP prompt get
 authorizePromptGet :: Text -> AuthContext -> AuthDecision
-authorizePromptGet promptName ctx =
+authorizePromptGet _promptName ctx =
   checkPermission PromptRead (acSubject ctx)

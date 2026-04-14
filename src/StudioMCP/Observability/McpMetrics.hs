@@ -240,20 +240,20 @@ recordToolCall service toolName tenantId latencyMs success = do
           Map.insertWith (+) tenantId 1 (mcpTenantRequests s)
       }
   where
-    updateTool lat succ Nothing =
+    updateTool lat wasSuccessful Nothing =
       Just
         emptyToolMetrics
           { tmCallCount = 1,
-            tmSuccessCount = if succ then 1 else 0,
-            tmErrorCount = if succ then 0 else 1,
+            tmSuccessCount = if wasSuccessful then 1 else 0,
+            tmErrorCount = if wasSuccessful then 0 else 1,
             tmTotalLatencyMs = lat
           }
-    updateTool lat succ (Just m) =
+    updateTool lat wasSuccessful (Just m) =
       Just
         m
           { tmCallCount = tmCallCount m + 1,
-            tmSuccessCount = tmSuccessCount m + (if succ then 1 else 0),
-            tmErrorCount = tmErrorCount m + (if succ then 0 else 1),
+            tmSuccessCount = tmSuccessCount m + (if wasSuccessful then 1 else 0),
+            tmErrorCount = tmErrorCount m + (if wasSuccessful then 0 else 1),
             tmTotalLatencyMs = tmTotalLatencyMs m + lat
           }
 
@@ -274,18 +274,18 @@ recordResourceRead service resourceUri tenantId success cacheHit = do
           Map.insertWith (+) tenantId 1 (mcpTenantRequests s)
       }
   where
-    updateResource succ hit Nothing =
+    updateResource wasSuccessful hit Nothing =
       Just
         emptyResourceMetrics
           { rmReadCount = 1,
-            rmErrorCount = if succ then 0 else 1,
+            rmErrorCount = if wasSuccessful then 0 else 1,
             rmCacheHits = if hit then 1 else 0
           }
-    updateResource succ hit (Just m) =
+    updateResource wasSuccessful hit (Just m) =
       Just
         m
           { rmReadCount = rmReadCount m + 1,
-            rmErrorCount = rmErrorCount m + (if succ then 0 else 1),
+            rmErrorCount = rmErrorCount m + (if wasSuccessful then 0 else 1),
             rmCacheHits = rmCacheHits m + (if hit then 1 else 0)
           }
 
@@ -305,17 +305,17 @@ recordPromptGet service promptName tenantId success = do
           Map.insertWith (+) tenantId 1 (mcpTenantRequests s)
       }
   where
-    updatePrompt succ Nothing =
+    updatePrompt wasSuccessful Nothing =
       Just
         emptyPromptMetrics
           { pmGetCount = 1,
-            pmErrorCount = if succ then 0 else 1
+            pmErrorCount = if wasSuccessful then 0 else 1
           }
-    updatePrompt succ (Just m) =
+    updatePrompt wasSuccessful (Just m) =
       Just
         m
           { pmGetCount = pmGetCount m + 1,
-            pmErrorCount = pmErrorCount m + (if succ then 0 else 1)
+            pmErrorCount = pmErrorCount m + (if wasSuccessful then 0 else 1)
           }
 
 -- | Record an MCP method call
@@ -333,19 +333,19 @@ recordMethodCall service method latencyMs success = do
           Map.alter (updateMethod latencyMs success now) method (mcpMethodMetrics s)
       }
   where
-    updateMethod lat succ t Nothing =
+    updateMethod lat wasSuccessful t Nothing =
       Just
         emptyMethodMetrics
           { mmmCallCount = 1,
-            mmmErrorCount = if succ then 0 else 1,
+            mmmErrorCount = if wasSuccessful then 0 else 1,
             mmmTotalLatencyMs = lat,
             mmmLastCall = Just t
           }
-    updateMethod lat succ t (Just m) =
+    updateMethod lat wasSuccessful t (Just m) =
       Just
         m
           { mmmCallCount = mmmCallCount m + 1,
-            mmmErrorCount = mmmErrorCount m + (if succ then 0 else 1),
+            mmmErrorCount = mmmErrorCount m + (if wasSuccessful then 0 else 1),
             mmmTotalLatencyMs = mmmTotalLatencyMs m + lat,
             mmmLastCall = Just t
           }
@@ -356,7 +356,7 @@ recordError ::
   Text ->
   Maybe TenantId ->
   IO ()
-recordError service errorType maybeTenant = do
+recordError service _errorType maybeTenant = do
   atomically $ modifyTVar' (mmsState service) $ \s ->
     s
       { mcpMethodMetrics =

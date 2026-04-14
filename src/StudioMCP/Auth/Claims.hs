@@ -27,21 +27,16 @@ module StudioMCP.Auth.Claims
 where
 
 import Control.Applicative ((<|>))
-import Data.Aeson
-  ( Value (..),
-    object,
-    (.=),
-  )
+import Data.Aeson (Value (..))
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.Aeson.Key as K
-import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Maybe (mapMaybe)
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time (UTCTime, addUTCTime)
 import qualified Data.Vector as V
-import StudioMCP.Auth.Config (KeycloakConfig (..))
 import StudioMCP.Auth.Jwks (JwtPayload (..))
 import StudioMCP.Auth.Types
 
@@ -63,7 +58,7 @@ extractClaims payload = do
   -- Required claims
   iss <- maybe (Left $ MissingClaim "iss") Right (jpIss payload)
   sub <- maybe (Left $ MissingClaim "sub") Right (jpSub payload)
-  exp <- maybe (Left $ MissingClaim "exp") Right (jpExp payload)
+  expiresAtEpoch <- maybe (Left $ MissingClaim "exp") Right (jpExp payload)
   iat <- maybe (Left $ MissingClaim "iat") Right (jpIat payload)
 
   -- Parse audience
@@ -91,7 +86,7 @@ extractClaims payload = do
       { jcIssuer = iss,
         jcSubject = SubjectId sub,
         jcAudience = aud,
-        jcExpiration = posixToUTC exp,
+        jcExpiration = posixToUTC expiresAtEpoch,
         jcIssuedAt = posixToUTC iat,
         jcNotBefore = posixToUTC <$> nbf,
         jcAuthorizedParty = azp,

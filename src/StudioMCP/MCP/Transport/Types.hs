@@ -55,15 +55,6 @@ instance ToJSON TransportConfig
 
 instance FromJSON TransportConfig
 
--- | Default transport configuration
-defaultTransportConfig :: TransportConfig
-defaultTransportConfig =
-  TransportConfig
-    { tcMaxMessageSize = 10 * 1024 * 1024, -- 10MB
-      tcReadTimeout = Just 30000, -- 30 seconds
-      tcWriteTimeout = Just 30000
-    }
-
 -- | Transport errors
 data TransportError
   = ConnectionClosed

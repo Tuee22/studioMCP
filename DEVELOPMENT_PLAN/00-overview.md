@@ -37,7 +37,8 @@
 | 9 | Done | CLI test and validate commands consolidated with unified interface and documentation |
 | 10 | Done | Build artifact isolation baseline and the one-command container contract are implemented: single-stage Dockerfile, `tini`, no Dockerfile `CMD`, no compose `command`, and Kubernetes-owned runtime startup |
 | 11 | Done | Dependency-aware readiness is implemented across workloads, CLI waits, validators, and governed docs, with the post-cleanup full-suite verification closed |
-| 12 | Done | Aggregate `studiomcp test all` now survives the post-prune Harbor publish path and keeps canonical clean runs under `/opt/build/` without recreating workspace `dist-newstyle/` |
+| 12 | Done | Aggregate test artifact isolation and repo-owned warning closure are complete: canonical build and test paths stay under `/opt/build/`, repo-owned compiler warnings are closed, and the workspace remains free of `dist-newstyle/` even when aggregate validation fails elsewhere |
+| 13 | Done | Harbor-backed MCP HTTP validation and aggregate-suite reliability are now closed: the source tree uses persistent filesystem-backed local Harbor storage with relative upload URLs, reconciles Harbor registry storage through the manual-PV path, waits for PostgreSQL/Redis plus Harbor health before managed-registry publication, retries managed publication with extended backoff and remote-digest confirmation, and the April 14, 2026 clean post-prune rerun closed the April 13, 2026 `validate mcp-http` failure |
 
 ## Public Topology Baseline
 
@@ -123,3 +124,4 @@ The supported local and cluster topology is:
 - [phase-10-build-artifact-isolation.md](phase-10-build-artifact-isolation.md)
 - [phase-11-runtime-readiness-and-condition-driven-startup.md](phase-11-runtime-readiness-and-condition-driven-startup.md)
 - [phase-12-aggregate-test-artifact-isolation-and-warning-closure.md](phase-12-aggregate-test-artifact-isolation-and-warning-closure.md)
+- [phase-13-harbor-push-reliability-and-mcp-http-closure.md](phase-13-harbor-push-reliability-and-mcp-http-closure.md)

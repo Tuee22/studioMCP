@@ -29,14 +29,13 @@ module StudioMCP.MCP.Prompts
   )
 where
 
-import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO, readTVarIO)
+import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO)
 import Data.Aeson
   ( FromJSON (parseJSON),
     ToJSON (toJSON),
     Value (..),
     withText,
   )
-import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.Map.Strict as Map

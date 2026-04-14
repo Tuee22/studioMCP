@@ -345,7 +345,6 @@ generateUploadUrl service tenantId artifactId contentType = do
   let config = tssConfig service
       bucket = getTenantBucket service tenantId
       key = getTenantArtifactKey tenantId artifactId 1
-      expiresAt = addUTCTime (fromIntegral (tscUploadUrlTtl config)) now
       headers =
         Map.fromList
           [ ("Content-Type", contentType),

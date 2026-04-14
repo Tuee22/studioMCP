@@ -116,9 +116,13 @@ This ensures:
 The repository intentionally does not set `CABAL_BUILDDIR` or a `cabal.project` `builddir` value because they do not affect nix-style builds. The primary and only supported enforcement is the explicit `--builddir` flag.
 
 For the supported local cluster path, the CLI also compares local and remote image config digests
-before publishing to Harbor and waits for managed-registry upload readiness before the first
-`skopeo copy`, so a clean post-prune deploy does not republish unchanged images or race the first
-large push.
+before publishing to Harbor, uses the kind overlay's persistent filesystem-backed Harbor registry
+storage with relative upload URLs on the manual-PV path, waits for Harbor's PostgreSQL and Redis
+dependencies plus Harbor's `/api/v2.0/health` contract and registry `/v2/` readiness before the
+first `skopeo copy`, and uses extended managed-registry retry/backoff plus a remote-digest
+confirmation check before declaring publication failed, so a clean post-prune deploy does not
+republish unchanged images, race the first large push against an incompletely initialized managed
+registry, or lose the published image when Harbor pods rotate during the subsequent Helm deploy.
 
 Forbidden:
 

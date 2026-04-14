@@ -22,34 +22,26 @@ module StudioMCP.MCP.Transport.Http
   )
 where
 
-import Control.Concurrent (Chan, newChan, readChan, writeChan)
-import Control.Concurrent.Async (async, cancel)
+import Control.Concurrent (Chan, newChan, readChan)
 import Control.Exception (SomeException, try)
 import Data.Aeson (Value, decode, encode, object, (.=))
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
 import Data.CaseInsensitive (CI)
 import qualified Data.CaseInsensitive as CI
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import Network.HTTP.Types
-  ( Header,
-    Status,
+  ( Status,
     hContentType,
     status200,
     status400,
-    status401,
-    status403,
-    status404,
     status405,
     status413,
-    status500,
   )
 import Network.Wai (Request, Response, requestHeaders, requestMethod, responseLBS, strictRequestBody)
 import StudioMCP.MCP.JsonRpc
-import StudioMCP.MCP.Transport.Types
 
 -- | HTTP transport configuration
 data HttpTransportConfig = HttpTransportConfig
@@ -147,7 +139,7 @@ handleGet ::
   HttpTransportConfig ->
   Request ->
   IO McpHttpResponse
-handleGet config req = do
+handleGet _config _req = do
   -- GET is used for SSE streaming
   -- The actual SSE handling happens in handleMcpSse
   chan <- newChan
@@ -158,7 +150,7 @@ handleDelete ::
   HttpTransportConfig ->
   Request ->
   IO McpHttpResponse
-handleDelete config req = do
+handleDelete _config req = do
   let sessionId = getMcpSessionId req
   case sessionId of
     Nothing ->
@@ -174,7 +166,7 @@ handleMcpSse ::
   Chan Value ->
   (Value -> IO ()) ->
   IO ()
-handleMcpSse config ctx chan onMessage = do
+handleMcpSse _config _ctx chan onMessage = do
   -- This runs in a streaming context
   -- The caller is responsible for setting up the SSE response
   let loop = do

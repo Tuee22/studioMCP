@@ -8,7 +8,8 @@ where
 
 import Control.Exception (SomeException, bracket, bracket_, throwIO, try)
 import GHC.IO.Handle.Lock (LockMode (..), hLock, hUnlock)
-import System.IO (IOMode (..), hClose, openFile)
+import System.IO (IOMode (..), hClose, hPutStr, openFile)
+import qualified System.IO as IO
 import Control.Concurrent (forkIO, killThread, threadDelay)
 import Control.Monad (foldM, forM, forM_, unless, void, when)
 import Data.Aeson (FromJSON, Value (..), decode, encode, fromJSON, object, withObject, (.:), (.:?), (.=))
@@ -620,9 +621,9 @@ configureNginxResponseHeaders = do
         , "data:"
         , "  X-Upstream-Addr: $upstream_addr"
         ]
-  (exitCode, _, stderr) <- readProcessWithExitCode "kubectl" ["apply", "-f", "-"] addHeadersConfigMap
+  (exitCode, _, stderrText) <- readProcessWithExitCode "kubectl" ["apply", "-f", "-"] addHeadersConfigMap
   case exitCode of
-    ExitFailure code -> putStrLn $ "Warning: Failed to create add-headers ConfigMap (exit " <> show code <> "): " <> stderr
+    ExitFailure code -> putStrLn $ "Warning: Failed to create add-headers ConfigMap (exit " <> show code <> "): " <> stderrText
     ExitSuccess -> do
       -- Now configure the controller ConfigMap to use the add-headers ConfigMap
       -- Check if the controller ConfigMap already has add-headers configured
@@ -668,112 +669,6 @@ configureNginxResponseHeaders = do
               -- Wait for rollout to complete
               waitForNamespacedWorkloadRollout "deployment/ingress-nginx-controller" "ingress-nginx" "480s"
               putStrLn "nginx-ingress response headers configured."
-
--- | Wait for the nginx ingress admission webhook to be ready.
--- After the controller restarts, the admission webhook needs time to:
--- 1. Have its endpoints become available
--- 2. Load the new ConfigMap settings (especially allow-snippet-annotations)
---
--- We verify readiness by doing a dry-run create of an ingress with a
--- configuration-snippet annotation. This ensures the webhook is both
--- running AND has loaded the allow-snippet-annotations=true setting.
---
--- If the webhook doesn't accept snippets after a reasonable wait, we force
--- a controller restart to reload the ConfigMap settings.
-waitForNginxAdmissionWebhook :: IO ()
-waitForNginxAdmissionWebhook = do
-  putStrLn "Waiting for nginx admission webhook to be ready..."
-  -- First try: wait up to 120 seconds (60 retries * 2s)
-  success <- waitForAdmissionWebhookWithRetryResult 60
-  unless success $ do
-    -- If still failing, force a controller restart to reload ConfigMap
-    putStrLn "Webhook not accepting snippets, forcing controller restart..."
-    callProcess
-      "kubectl"
-      [ "rollout"
-      , "restart"
-      , "deployment/ingress-nginx-controller"
-      , "-n"
-      , "ingress-nginx"
-      ]
-    -- Wait for rollout to complete
-    waitForNamespacedWorkloadRollout "deployment/ingress-nginx-controller" "ingress-nginx" "480s"
-    -- Second try: wait up to 180 seconds (90 retries * 2s)
-    success2 <- waitForAdmissionWebhookWithRetryResult 90
-    unless success2 $
-      die "Timed out waiting for nginx admission webhook to accept snippet annotations"
--- | Helper that returns Bool instead of dying, for use in retry logic.
-waitForAdmissionWebhookWithRetryResult :: Int -> IO Bool
-waitForAdmissionWebhookWithRetryResult maxRetries = go maxRetries
-  where
-    go :: Int -> IO Bool
-    go 0 = pure False  -- Out of retries, return failure
-    go retries = do
-      -- First check if the admission service endpoint has ready addresses
-      (endpointExitCode, endpointStdout, _) <-
-        readProcessWithExitCode
-          "kubectl"
-          [ "get"
-          , "endpoints"
-          , "ingress-nginx-controller-admission"
-          , "-n"
-          , "ingress-nginx"
-          , "-o"
-          , "jsonpath={.subsets[*].addresses[*].ip}"
-          ]
-          ""
-      case endpointExitCode of
-        ExitFailure _ -> do
-          threadDelay 2_000_000
-          go (retries - 1)
-        ExitSuccess ->
-          if null (filter (not . isSpace) endpointStdout)
-            then do
-              threadDelay 2_000_000
-              go (retries - 1)
-            else do
-              -- Webhook endpoint exists, now test if it accepts snippet annotations
-              -- by doing a dry-run create of a test ingress
-              (testExitCode, _, _) <-
-                readProcessWithExitCode
-                  "kubectl"
-                  [ "create"
-                  , "--dry-run=server"
-                  , "-f"
-                  , "-"
-                  ]
-                  testIngressYaml
-              case testExitCode of
-                ExitSuccess -> pure True -- Webhook accepts snippet annotations
-                ExitFailure _ -> do
-                  threadDelay 2_000_000
-                  go (retries - 1)
-
-    -- Test ingress manifest with configuration-snippet annotation
-    testIngressYaml :: String
-    testIngressYaml =
-      unlines
-        [ "apiVersion: networking.k8s.io/v1"
-        , "kind: Ingress"
-        , "metadata:"
-        , "  name: snippet-test"
-        , "  namespace: default"
-        , "  annotations:"
-        , "    nginx.ingress.kubernetes.io/configuration-snippet: |"
-        , "      # test snippet"
-        , "spec:"
-        , "  ingressClassName: nginx"
-        , "  rules:"
-        , "  - http:"
-        , "      paths:"
-        , "      - path: /snippet-test"
-        , "        pathType: Prefix"
-        , "        backend:"
-        , "          service:"
-        , "            name: test-svc"
-        , "            port:"
-        , "              number: 80"
-        ]
 
 -- | Quick test to check if the nginx webhook currently accepts snippet annotations.
 -- Does a single dry-run create attempt without retries.
@@ -1396,9 +1291,7 @@ ensureHelmChartDependencies = do
       putStrLn "Could not verify vendored Helm chart dependencies from chart/Chart.lock; reconciling repositories."
       reconcileHelmChartDependenciesFromRepositories
 
-data HelmLockFile = HelmLockFile
-  { helmLockDependencies :: [HelmLockDependency]
-  }
+newtype HelmLockFile = HelmLockFile [HelmLockDependency]
 
 instance FromJSON HelmLockFile where
   parseJSON = withObject "HelmLockFile" $ \objectValue ->
@@ -1582,6 +1475,8 @@ harborDeploymentsPresent =
 
 waitForHarborReady :: ImageRegistryConfig -> IO ()
 waitForHarborReady registryConfig = do
+  when (imageRegistryManagedHarbor registryConfig) $
+    waitForManagedHarborDependenciesReady
   deployments <- waitForHarborDeployments 60
   forM_ deployments $ \deploymentName ->
     waitForWorkloadRollout deploymentName "480s"
@@ -1595,7 +1490,15 @@ waitForHarborReady registryConfig = do
 waitForManagedHarborPushReady :: ImageRegistryConfig -> IO ()
 waitForManagedHarborPushReady registryConfig = do
   manager <- newManager defaultManagerSettings
+  waitForManagedHarborHealthWithTimeout 180 manager registryConfig
   waitForHttpStatusWithTimeout 180 manager ("http://" <> imageRegistryPushHost registryConfig <> "/v2/") [200, 401]
+
+waitForManagedHarborDependenciesReady :: IO ()
+waitForManagedHarborDependenciesReady = do
+  waitForWorkloadRollout "statefulset/studiomcp-postgresql-ha-postgresql" "480s"
+  waitForServiceEndpointPublication "studiomcp-postgresql-ha-pgpool" "300s"
+  waitForWorkloadRollout "statefulset/studiomcp-redis-node" "480s"
+  waitForServiceEndpointPublication "studiomcp-redis-master" "300s"
 
 waitForHarborDeployments :: Int -> IO [String]
 waitForHarborDeployments retriesRemaining = do
@@ -2758,6 +2661,101 @@ waitForMinioReady manager baseUrl = do
   -- 412 = HA would be lost but writes still work (single-node or degraded scenario)
   waitForHttpStatusWithTimeout 60 manager (baseUrl <> "/minio/health/cluster") [200, 412]
 
+waitForManagedHarborHealthWithTimeout :: Int -> Manager -> ImageRegistryConfig -> IO ()
+waitForManagedHarborHealthWithTimeout timeoutSeconds manager registryConfig =
+  go timeoutSeconds 0 Nothing
+  where
+    url = "http://" <> imageRegistryPushHost registryConfig <> "/api/v2.0/health"
+    requiredHealthySamples = 3
+    requiredComponents =
+      Set.fromList
+        [ "core"
+        , "database"
+        , "jobservice"
+        , "portal"
+        , "redis"
+        , "registry"
+        , "registryctl"
+        ]
+    go :: Int -> Int -> Maybe String -> IO ()
+    go 0 _ lastObservation =
+      die $
+        "Timed out waiting for Harbor health at "
+          <> url
+          <> maybe "" (\detail -> "\nLast observation: " <> detail) lastObservation
+    go remainingAttempts consecutiveHealthySamples _lastObservation = do
+      responseOrException <- tryHttp (httpJsonRequest manager "GET" url Nothing)
+      case responseOrException of
+        Right response
+          | httpResponseStatus response == 200 ->
+              case decode (httpResponseBody response) of
+                Just healthValue ->
+                  let observation = describeHarborHealth healthValue
+                   in if harborHealthReady requiredComponents healthValue
+                        then
+                          if consecutiveHealthySamples + 1 >= requiredHealthySamples
+                            then pure ()
+                            else do
+                              threadDelay 1000000
+                              go (remainingAttempts - 1) (consecutiveHealthySamples + 1) (Just observation)
+                        else retry remainingAttempts (Just observation)
+                Nothing ->
+                  retry
+                    remainingAttempts
+                    ( Just
+                        ( "status=200 body="
+                            <> take 240 (LBS.unpack (httpResponseBody response))
+                        )
+                    )
+          | otherwise ->
+              retry remainingAttempts (Just ("status=" <> show (httpResponseStatus response)))
+        Left httpException ->
+          retry remainingAttempts (Just (show httpException))
+      where
+        retry attemptsRemaining observation = do
+          threadDelay 1000000
+          go (attemptsRemaining - 1) 0 observation
+
+harborHealthReady :: Set.Set String -> Value -> Bool
+harborHealthReady requiredComponents healthValue =
+  normalizeHealthStatus (lookupString ["status"] healthValue) == Just "healthy"
+    && all componentHealthy (Set.toList requiredComponents)
+  where
+    componentStatuses =
+      case lookupPath ["components"] healthValue of
+        Just (Array componentValues) ->
+          Map.fromList (mapMaybe harborHealthComponentStatus (Vector.toList componentValues))
+        _ -> Map.empty
+    componentHealthy componentName =
+      Map.lookup componentName componentStatuses == Just "healthy"
+
+harborHealthComponentStatus :: Value -> Maybe (String, String)
+harborHealthComponentStatus (Object componentObject) = do
+  name <- lookupString ["name"] (Object componentObject)
+  status <- normalizeHealthStatus (lookupString ["status"] (Object componentObject))
+  pure (name, status)
+harborHealthComponentStatus _ = Nothing
+
+describeHarborHealth :: Value -> String
+describeHarborHealth healthValue =
+  let overallStatus = fromMaybe "unknown" (normalizeHealthStatus (lookupString ["status"] healthValue))
+      componentSummary =
+        case lookupPath ["components"] healthValue of
+          Just (Array componentValues) ->
+            intercalate ", " (mapMaybe renderHarborHealthComponent (Vector.toList componentValues))
+          _ -> ""
+   in if null componentSummary
+        then "status=" <> overallStatus
+        else "status=" <> overallStatus <> " [" <> componentSummary <> "]"
+
+renderHarborHealthComponent :: Value -> Maybe String
+renderHarborHealthComponent componentValue = do
+  (name, status) <- harborHealthComponentStatus componentValue
+  pure (name <> "=" <> status)
+
+normalizeHealthStatus :: Maybe String -> Maybe String
+normalizeHealthStatus = fmap (map toLower . trimWhitespace)
+
 kindPulsarBinaryEndpoint :: Text
 kindPulsarBinaryEndpoint = "pulsar://studiomcp-pulsar-proxy:6650"
 
@@ -2866,10 +2864,6 @@ imageRegistryPushRepository :: ImageRegistryConfig -> String
 imageRegistryPushRepository config =
   imageRegistryRepositoryForHost (imageRegistryPushHost config) config
 
-imageRegistryPullReference :: ImageRegistryConfig -> String
-imageRegistryPullReference config =
-  imageRegistryPullRepository config <> ":" <> imageRegistryTag config
-
 imageRegistryPushReference :: ImageRegistryConfig -> String
 imageRegistryPushReference config =
   imageRegistryPushRepository config <> ":" <> imageRegistryTag config
@@ -2921,7 +2915,7 @@ clusterPushImagesWithConfig config = do
         else do
           putStrLn ("Pushing image to registry: " <> pushReference)
           withSavedLocalImageArchive "studiomcp:latest" $
-            pushImageToRegistry config credentials
+            pushImageToRegistry config credentials localDigest
           writeCachedRegistryImageDigest config localDigest
   pure config
 
@@ -2963,13 +2957,13 @@ imageRegistryCredentials config
       password <- lookupRequiredSecretValue "studiomcp-harbor-admin" "{.data.HARBOR_ADMIN_PASSWORD}"
       pure (Just ("admin", password))
   | otherwise = do
-  maybeUsername <- fmap normalizeOptionalPath (lookupEnv "STUDIOMCP_HARBOR_USERNAME")
-  maybePassword <- fmap normalizeOptionalPath (lookupEnv "STUDIOMCP_HARBOR_PASSWORD")
-  case (maybeUsername, maybePassword) of
-    (Nothing, Nothing) -> pure Nothing
-    (Just username, Just password) -> pure (Just (username, password))
-    _ ->
-      die "Set both STUDIOMCP_HARBOR_USERNAME and STUDIOMCP_HARBOR_PASSWORD, or neither."
+      maybeUsername <- fmap normalizeOptionalPath (lookupEnv "STUDIOMCP_HARBOR_USERNAME")
+      maybePassword <- fmap normalizeOptionalPath (lookupEnv "STUDIOMCP_HARBOR_PASSWORD")
+      case (maybeUsername, maybePassword) of
+        (Nothing, Nothing) -> pure Nothing
+        (Just username, Just password) -> pure (Just (username, password))
+        _ ->
+          die "Set both STUDIOMCP_HARBOR_USERNAME and STUDIOMCP_HARBOR_PASSWORD, or neither."
 
 withSavedLocalImageArchive :: String -> (FilePath -> IO a) -> IO a
 withSavedLocalImageArchive imageRef action = do
@@ -3092,8 +3086,8 @@ remoteImageConfigDigest config credentials = do
         Just value -> pure (lookupString ["config", "digest"] value)
         Nothing -> pure Nothing
 
-pushImageToRegistry :: ImageRegistryConfig -> Maybe (String, String) -> FilePath -> IO ()
-pushImageToRegistry config credentials archivePath =
+pushImageToRegistry :: ImageRegistryConfig -> Maybe (String, String) -> String -> FilePath -> IO ()
+pushImageToRegistry config credentials expectedDigest archivePath =
   go (1 :: Int)
   where
     args =
@@ -3105,31 +3099,78 @@ pushImageToRegistry config credentials archivePath =
         <> ["docker://" <> imageRegistryPushReference config]
     maxAttempts =
       if imageRegistryManagedHarbor config
-        then 5
+        then length managedHarborRetryDelays + 1
         else 3
-    retryDelaySeconds =
-      if imageRegistryManagedHarbor config
-        then 15
-        else 5
     go attempt = do
       when (imageRegistryManagedHarbor config) $
         waitForManagedHarborPushReady config
-      (_, _, _, processHandle) <- createProcess (proc "skopeo" args)
-      exitCode <- waitForProcess processHandle
+      (exitCode, stdoutText, stderrText) <- readProcessWithExitCode "skopeo" args ""
+      unless (null stdoutText) $
+        putStr stdoutText
+      unless (null stderrText) $
+        hPutStr IO.stderr stderrText
       case exitCode of
         ExitSuccess -> pure ()
-        ExitFailure _
-          | attempt < maxAttempts -> do
-              putStrLn $
-                "Retrying command after failure (attempt "
-                  <> show attempt
-                  <> "/"
-                  <> show maxAttempts
-                  <> "): skopeo"
-              threadDelay (retryDelaySeconds * 1000000)
-              go (attempt + 1)
-        ExitFailure _ ->
-          die ("Failed to push image to registry: " <> imageRegistryPushReference config)
+        ExitFailure _ -> do
+          remoteDigest <- remoteImageConfigDigest config credentials
+          if remoteDigest == Just expectedDigest
+            then
+              putStrLn
+                ( "Remote registry contains the expected image after a reported push failure: "
+                    <> imageRegistryPushReference config
+                )
+            else
+              if attempt < maxAttempts
+                then do
+                  let retryDelaySeconds = retryDelaySecondsForAttempt config attempt
+                      maybeSummary = skopeoFailureSummary stderrText
+                  putStrLn $
+                    "Retrying command after failure (attempt "
+                      <> show attempt
+                      <> "/"
+                      <> show maxAttempts
+                      <> "): skopeo"
+                  forM_ maybeSummary $ \summaryText ->
+                    putStrLn ("Managed Harbor push still settling: " <> summaryText)
+                  threadDelay (retryDelaySeconds * 1000000)
+                  go (attempt + 1)
+                else do
+                  let detail = trimWhitespace stderrText
+                      suffix =
+                        if null detail
+                          then ""
+                          else "\n" <> detail
+                  die ("Failed to push image to registry: " <> imageRegistryPushReference config <> suffix)
+ 
+managedHarborRetryDelays :: [Int]
+managedHarborRetryDelays = [15, 30, 60, 90, 120, 120]
+
+retryDelaySecondsForAttempt :: ImageRegistryConfig -> Int -> Int
+retryDelaySecondsForAttempt config attempt
+  | imageRegistryManagedHarbor config =
+      managedHarborRetryDelays !! min (attempt - 1) (length managedHarborRetryDelays - 1)
+  | otherwise = 5
+
+skopeoFailureSummary :: String -> Maybe String
+skopeoFailureSummary stderrText =
+  case filter isMeaningfulLine (map trimWhitespace (lines stderrText)) of
+    summaryLine : _ -> Just summaryLine
+    [] ->
+      let trimmed = trimWhitespace stderrText
+       in if null trimmed then Nothing else Just (take 240 trimmed)
+  where
+    isMeaningfulLine lineText =
+      not (null lineText)
+        && any (`isInfixOf` map toLower lineText) meaningfulFragments
+    meaningfulFragments =
+      [ "blob upload invalid"
+      , "internal server error"
+      , "unexpected http status"
+      , "writing blob"
+      , "repository "
+      , "unknown:"
+      , "connection refused"
+      ]
 
 registryCredentialArgs :: String -> Maybe (String, String) -> [String]
 registryCredentialArgs _ Nothing = []
@@ -3300,41 +3341,6 @@ lookupResponseHeader :: BS.ByteString -> HttpResponse -> Maybe BS.ByteString
 lookupResponseHeader headerName httpResponse =
   lookup (CI.mk headerName) (httpResponseHeaders httpResponse)
 
-initializeMcpSession :: Manager -> String -> IO [Header]
-initializeMcpSession manager baseUrl = do
-  let initializeRequest =
-        object
-          [ "jsonrpc" .= ("2.0" :: Text)
-          , "id" .= (1 :: Int)
-          , "method" .= ("initialize" :: Text)
-          , "params" .= object
-              [ "protocolVersion" .= ("2024-11-05" :: Text)
-              , "capabilities" .= object []
-              , "clientInfo" .= object
-                  [ "name" .= ("validate-client" :: Text)
-                  , "version" .= ("1.0.0" :: Text)
-                  ]
-              ]
-          ]
-  initResponse <- httpJsonRequest manager "POST" (baseUrl <> "/mcp") (Just (encode initializeRequest))
-  unless (httpResponseStatus initResponse == 200) $
-    die ("Expected MCP initialize to return HTTP 200, got " <> show (httpResponseStatus initResponse))
-  sessionHeaderValue <-
-    case lookupResponseHeader "Mcp-Session-Id" initResponse of
-      Just headerValue -> pure headerValue
-      Nothing -> die "Initialize response did not include an Mcp-Session-Id header"
-  let sessionHeaders = [("Mcp-Session-Id", sessionHeaderValue)]
-      initializedNotification =
-        object
-          [ "jsonrpc" .= ("2.0" :: Text)
-          , "method" .= ("notifications/initialized" :: Text)
-          ]
-  initializedResponse <-
-    httpJsonRequestWithHeaders manager "POST" (baseUrl <> "/mcp") sessionHeaders (Just (encode initializedNotification))
-  unless (httpResponseStatus initializedResponse == 200) $
-    die ("Expected MCP initialized notification to return HTTP 200, got " <> show (httpResponseStatus initializedResponse))
-  pure sessionHeaders
-
 mcpJsonRpcRequest ::
   Manager ->
   String ->
@@ -3437,7 +3443,7 @@ waitForReadinessReportWithTimeout timeoutSeconds manager url =
         "Timed out waiting for readiness at "
           <> url
           <> maybe "" (\detail -> "\nLast observation: " <> Text.unpack detail) lastObservation
-    go remainingAttempts lastObservation = do
+    go remainingAttempts _lastObservation = do
       responseOrException <- tryHttp (httpJsonRequest manager "GET" url Nothing)
       case responseOrException of
         Right response ->
@@ -3876,11 +3882,47 @@ data PersistentVolumeSpec = PersistentVolumeSpec
 desiredPersistentVolumes :: Value -> [PersistentVolumeSpec]
 desiredPersistentVolumes values =
   concat
-    [ minioPersistentVolumes values
+    [ harborPersistentVolumes values
+    , minioPersistentVolumes values
     , pulsarPersistentVolumes values
     , postgresqlHaPersistentVolumes values
     , redisPersistentVolumes values
     ]
+
+-- | Generate the Harbor registry PV when the local kind overlay uses the
+-- filesystem backend with explicit manual storage.
+harborPersistentVolumes :: Value -> [PersistentVolumeSpec]
+harborPersistentVolumes values =
+  case (enabled, persistenceEnabled, storageType, storageClass, existingClaim) of
+    ( Just True,
+      Just True,
+      Just "filesystem",
+      Just requestedStorageClass,
+      Nothing
+      )
+        | requestedStorageClass == storageClassName -> [registrySpec]
+    ( Just True,
+      Just True,
+      Just "filesystem",
+      Just requestedStorageClass,
+      Just ""
+      )
+        | requestedStorageClass == storageClassName -> [registrySpec]
+    _ -> []
+  where
+    enabled = lookupBool ["harbor", "enabled"] values
+    persistenceEnabled = lookupBool ["harbor", "persistence", "enabled"] values
+    storageType = fmap trimWhitespace (lookupString ["harbor", "persistence", "imageChartStorage", "type"] values)
+    storageClass = fmap trimWhitespace (lookupString ["harbor", "persistence", "persistentVolumeClaim", "registry", "storageClass"] values)
+    existingClaim = fmap trimWhitespace (lookupString ["harbor", "persistence", "persistentVolumeClaim", "registry", "existingClaim"] values)
+    registrySize = fromMaybe "5Gi" (lookupString ["harbor", "persistence", "persistentVolumeClaim", "registry", "size"] values)
+    registrySpec =
+      PersistentVolumeSpec
+        { volumeName = "studiomcp-harbor-registry-pv"
+        , volumeDirectory = "harbor/registry"
+        , claimName = "studiomcp-harbor-registry"
+        , requestedSize = registrySize
+        }
 
 -- | Generate PVs for MinIO StatefulSet (minio/minio chart)
 -- PVC naming: export-studiomcp-minio-{0,1,2,...}

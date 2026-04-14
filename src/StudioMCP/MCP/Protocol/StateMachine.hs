@@ -29,9 +29,8 @@ module StudioMCP.MCP.Protocol.StateMachine
 where
 
 import Control.Concurrent.STM (TVar, atomically, newTVarIO, readTVar, writeTVar)
-import Data.Aeson (FromJSON (..), ToJSON, Value (..), toJSON)
+import Data.Aeson (FromJSON (..), ToJSON, toJSON)
 import Data.Text (Text)
-import qualified Data.Text as T
 import GHC.Generics (Generic)
 
 -- | MCP Protocol lifecycle states

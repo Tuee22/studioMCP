@@ -12,7 +12,7 @@ module StudioMCP.Util.Startup
   )
 where
 
-import Control.Exception (Exception, SomeException, fromException, throwIO, try)
+import Control.Exception (Exception, fromException, throwIO, try)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import GHC.Generics (Generic)

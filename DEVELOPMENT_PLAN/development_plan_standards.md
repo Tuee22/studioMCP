@@ -88,6 +88,7 @@ DEVELOPMENT_PLAN/
 ├── phase-10-build-artifact-isolation.md
 ├── phase-11-runtime-readiness-and-condition-driven-startup.md
 ├── phase-12-aggregate-test-artifact-isolation-and-warning-closure.md
+├── phase-13-harbor-push-reliability-and-mcp-http-closure.md
 └── legacy-tracking-for-deletion.md
 ```
 

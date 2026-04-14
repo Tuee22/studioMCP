@@ -26,25 +26,18 @@ module StudioMCP.MCP.Core
   )
 where
 
-import Control.Concurrent (MVar, newMVar, putMVar, takeMVar)
 import Control.Concurrent.STM (TVar, atomically, newTVarIO, readTVar, readTVarIO, writeTVar)
-import Control.Exception (SomeException, catch, try)
+import Control.Exception (SomeException, catch)
 import Control.Applicative ((<|>))
-import Control.Monad (forever, unless, void, when)
+import Control.Monad (void, when)
 import Data.Aeson
-  ( FromJSON,
-    Result (..),
-    ToJSON,
-    Value (..),
-    decode,
-    encode,
+  ( Result (..),
+    Value,
     fromJSON,
     object,
     toJSON,
     (.=),
   )
-import qualified Data.Aeson.KeyMap as KM
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (listToMaybe)
 import qualified Data.Set as Set
@@ -121,7 +114,7 @@ import StudioMCP.MCP.Tools
     newToolCatalog,
   )
 import qualified StudioMCP.MCP.Tools as McpTools
-import StudioMCP.MCP.Transport.Types
+import StudioMCP.MCP.Transport.Types (Transport (..), transportErrorToText)
 import qualified StudioMCP.MCP.Transport.Types as Transport
 import StudioMCP.Observability.McpMetrics
   ( McpMetricsService,
@@ -255,7 +248,7 @@ runMcpServer server transport = do
                 Nothing -> pure () -- Notification, no response
               loop
 
-  loop `catch` \(e :: SomeException) -> do
+  loop `catch` \(_ :: SomeException) -> do
     atomically $ writeTVar (msIsRunning server) False
 
 -- | Stop the MCP server
@@ -285,10 +278,6 @@ handleMessageWithAuth server maybeAuth msg = do
         MsgResponse _ ->
           -- Server shouldn't receive responses
           pure $ Just $ toJSON $ makeErrorResponse (RequestIdNumber 0) (invalidRequest "Unexpected response message")
-
--- | Handle JSON-RPC request (legacy, without auth)
-handleRequest :: McpServer -> JsonRpcRequest -> IO JsonRpcResponse
-handleRequest server = handleRequestWithAuth server Nothing
 
 -- | Handle JSON-RPC request with authentication context
 handleRequestWithAuth :: McpServer -> Maybe AuthContext -> JsonRpcRequest -> IO JsonRpcResponse
@@ -346,7 +335,6 @@ handleRequestWithAuth server maybeAuth req = do
 handleNotification :: McpServer -> JsonRpcNotification -> IO ()
 handleNotification server notif = do
   let method = notifMethod notif
-      params = notifParams notif
 
   case method of
     "notifications/initialized" -> do
@@ -607,14 +595,14 @@ handlePromptsGet server ctx reqId params = do
 
 -- | Handle completion/complete
 handleCompletionComplete :: McpServer -> RequestContext -> RequestId -> Maybe Value -> IO JsonRpcResponse
-handleCompletionComplete server ctx reqId params = do
+handleCompletionComplete _server _ctx reqId _params = do
   -- Return empty completion for now
   let result = object ["completion" .= object ["values" .= ([] :: [Text])]]
   pure $ makeResponse reqId result
 
 -- | Handle logging/setLevel
 handleLoggingSetLevel :: McpServer -> RequestId -> Maybe Value -> IO JsonRpcResponse
-handleLoggingSetLevel server reqId params = do
+handleLoggingSetLevel _server reqId _params = do
   -- Acknowledge log level change
   pure $ makeResponse reqId (object [])
 

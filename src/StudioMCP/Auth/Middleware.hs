@@ -28,9 +28,7 @@ import Control.Applicative ((<|>))
 import Control.Exception (SomeException, try)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base64.URL as B64
-import Data.CaseInsensitive (CI)
 import qualified Data.CaseInsensitive as CI
-import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -162,7 +160,7 @@ buildAuthContext ::
   JwtClaims ->
   Text -> -- Correlation ID
   IO (Either AuthError AuthContext)
-buildAuthContext config claims correlationId = do
+buildAuthContext _config claims correlationId = do
   -- Extract subject
   let subject = extractSubject claims
 

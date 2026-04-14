@@ -38,24 +38,29 @@ harbor:
   existingSecretAdminPassword: studiomcp-harbor-admin
   existingSecretAdminPasswordKey: HARBOR_ADMIN_PASSWORD
   imagePullPolicy: IfNotPresent
+  registry:
+    # Harbor sits behind the nodePort edge in kind, so registry upload locations
+    # must stay relative to the external host that clients already reached.
+    relativeurls: true
   metrics:
     enabled: false
   trivy:
     enabled: false
   persistence:
-    enabled: false
+    enabled: true
+    persistentVolumeClaim:
+      registry:
+        storageClass: "studiomcp-manual"
+        size: 10Gi
     imageChartStorage:
       disableredirect: true
-      type: s3
-      s3:
-        region: us-east-1
-        bucket: studiomcp-harbor
-        regionendpoint: http://studiomcp-minio:9000
-        accesskey: minioadmin
-        secretkey: minioadmin123
-        secure: false
-        skipverify: true
-        v4auth: true
+      # The local dev Harbor registry uses filesystem-backed image storage on a
+      # manual PV. This avoids the S3 upload-offset races seen against the
+      # MinIO-backed path while keeping published images available across Harbor
+      # pod restarts during helm-driven deploys.
+      type: filesystem
+      filesystem:
+        rootdirectory: /storage
   database:
     type: external
     external:
@@ -72,6 +77,10 @@ harbor:
       password: redis123
   jobservice:
     maxJobWorkers: 2
+    # File-backed job logs would require an extra Harbor PVC. The local kind
+    # path keeps job logs on stdout and persists only the registry image data.
+    jobLoggers:
+      - stdout
 
 auth:
   enabled: true

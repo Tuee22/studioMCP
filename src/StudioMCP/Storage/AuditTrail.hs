@@ -44,7 +44,6 @@ import Data.Aeson
     encode,
     object,
     withObject,
-    withText,
     (.:),
     (.:?),
     (.!=),
@@ -55,7 +54,7 @@ import Data.List (sortOn)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Time (UTCTime, addUTCTime, getCurrentTime)
+import Data.Time (UTCTime, getCurrentTime)
 import System.Directory (createDirectoryIfMissing, doesFileExist)
 import System.FilePath (takeDirectory)
 import StudioMCP.Auth.Types (SubjectId (..), TenantId (..))

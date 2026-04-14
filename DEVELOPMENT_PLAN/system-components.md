@@ -14,7 +14,7 @@
 |-----------|------------|------------|---------|---------------|
 | Outer dev container | Docker Compose | ephemeral via `run --rm`; one command per container | Build/test shell and cluster control entrypoint with `studiomcp` on `PATH` and no persistent daemon workflow | bind-mounted repo plus `./.data/` |
 | Local cluster | Kind | Docker-backed Kubernetes | Hosts the application and supporting services | host-backed volumes under `./.data/` |
-| Container registry | Harbor | In-cluster Helm deployment | Stores application images; all Helm workloads pull from Harbor, and the CLI waits for managed-registry push readiness before first publication | cluster storage |
+| Container registry | Harbor | In-cluster Helm deployment | Stores application images; all Helm workloads pull from Harbor, the local kind overlay uses persistent filesystem-backed registry storage with relative upload URLs on the manual-PV path, and the CLI compares local and remote digests, waits for PostgreSQL and Redis plus Harbor health and registry readiness before publication, and uses extended managed-registry retry/backoff with remote-digest confirmation before declaring publication failed | cluster storage |
 | Edge router | ingress-nginx | Helm release | Unified entrypoint for web services: `/mcp`, `/api`, `/kc`, `/minio`; routes traffic only after published service endpoints and backend application readiness have both closed | none |
 | Identity provider | Keycloak | Helm release | Login/password auth and token issuance | Keycloak PostgreSQL |
 | Keycloak database | PostgreSQL | Helm release | Durable auth data | cluster storage |
@@ -41,7 +41,7 @@
 | Auth middleware | `src/StudioMCP/Auth/*.hs` | JWT validation, claims extraction, scope enforcement, and Keycloak integration |
 | Worker runtime | `src/StudioMCP/Worker/Server.hs` | Runtime worker validation and execution entrypoint |
 | Inference runtime | `src/StudioMCP/Inference/*.hs` | Advisory inference service and related validation path |
-| Cluster CLI | `src/StudioMCP/CLI/Cluster.hs` | Cluster ensure/deploy/bootstrap operations plus rollout, service-endpoint, shared application-readiness gates, and like-for-like local/remote image digest comparison before Harbor pushes |
+| Cluster CLI | `src/StudioMCP/CLI/Cluster.hs` | Cluster ensure/deploy/bootstrap operations plus rollout, service-endpoint, shared application-readiness gates, and like-for-like local/remote image digest comparison with dependency-aware Harbor publication gates, PostgreSQL/Redis-backed Harbor dependency waits, extended managed-registry retry/backoff, and remote-digest confirmation before managed-registry pushes fail |
 | Docs validator | `src/StudioMCP/CLI/Docs.hs` | Documentation validation entrypoint |
 | Test CLI | `src/StudioMCP/CLI/Test.hs` | Test command handlers that build suites under `/opt/build/`, resolve test binaries, and execute them without repopulating the workspace build tree |
 
@@ -95,3 +95,4 @@
 - [phase-10-build-artifact-isolation.md](phase-10-build-artifact-isolation.md)
 - [phase-11-runtime-readiness-and-condition-driven-startup.md](phase-11-runtime-readiness-and-condition-driven-startup.md)
 - [phase-12-aggregate-test-artifact-isolation-and-warning-closure.md](phase-12-aggregate-test-artifact-isolation-and-warning-closure.md)
+- [phase-13-harbor-push-reliability-and-mcp-http-closure.md](phase-13-harbor-push-reliability-and-mcp-http-closure.md)

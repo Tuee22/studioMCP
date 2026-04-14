@@ -64,11 +64,9 @@ import StudioMCP.MCP.Session.Store
     SessionLock (..),
     SessionStore (..),
     SessionStoreError (..),
-    SubscriptionRecord (..),
   )
 import StudioMCP.MCP.Session.Types
-  ( Session,
-    SessionData (..),
+  ( SessionData (..),
     SessionId (..),
     sessionId,
     sessionLastActiveAt,
