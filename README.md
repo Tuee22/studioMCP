@@ -90,7 +90,7 @@ The repo uses one single-stage Dockerfile at [docker/Dockerfile](/Users/matthewn
 ## Kubernetes-Native Development
 The repo is Kubernetes-forward. Helm under [chart/](/Users/matthewnowak/studioMCP/chart) defines service topology, [skaffold.yaml](/Users/matthewnowak/studioMCP/skaffold.yaml) remains part of the image-build and deploy toolchain, and [kind/kind_config.yaml](/Users/matthewnowak/studioMCP/kind/kind_config.yaml) defines the local cluster target. Compose at [docker-compose.yaml](/Users/matthewnowak/studioMCP/docker-compose.yaml) launches one-off outer `studiomcp` containers for individual commands only; all application services (MCP server, BFF, Keycloak, Redis, MinIO, Pulsar, PostgreSQL-HA) run inside the kind cluster via Helm. The control plane is exposed through ingress-nginx at `http://localhost:8081` with `/mcp`, `/api`, `/kc`, and `/minio`; object-storage data-plane URLs remain rooted at `http://localhost:9000`. The canonical policies are [documents/engineering/k8s_native_dev_policy.md](/Users/matthewnowak/studioMCP/documents/engineering/k8s_native_dev_policy.md), [documents/engineering/docker_policy.md](/Users/matthewnowak/studioMCP/documents/engineering/docker_policy.md), and [documents/engineering/k8s_storage.md](/Users/matthewnowak/studioMCP/documents/engineering/k8s_storage.md).
 
-## FOOS Ecosystem Survey
+## FOSS Ecosystem Survey
 The project leans on existing tools instead of rebuilding them:
 
 - FFmpeg and SoX for audio/video transforms
@@ -100,6 +100,157 @@ The project leans on existing tools instead of rebuilding them:
 - Pulsar for in-flight execution state
 - MinIO for immutable object persistence
 - a local LLM host such as Ollama or `llama.cpp` for inference mode
+
+## Future Music Workflow Expansion
+The current repository already proves the boundary-adapter pattern against media tooling, but the
+longer-term plan is to expand `studioMCP` into a broader music and notation workflow platform. The
+items in this section are planned future workflows, not claims about the current runtime surface.
+
+Two platform rules shape this expansion:
+
+- Linux + CUDA is a first-class production stack, deployed through containerized workers with the
+  NVIDIA Container Runtime.
+- Apple Silicon + Metal is a first-class local and workstation stack, deployed natively on macOS
+  without virtualization or containerization.
+
+The intended future workflow families are:
+
+### Speech, Transcript, and Localization Workflows
+- `Speech transcript and subtitle extraction`: ingest audio or video, normalize with `ffmpeg`,
+  transcribe with Whisper-family models, and emit transcript, `srt`, and `vtt` artifacts.
+- `Podcast cleanup and transcript preparation`: separate stems where useful, denoise and master with
+  `sox`/`ffmpeg`, generate transcripts, and package mastered audio plus text artifacts together.
+- `Video localization and caption republishing`: extract speech, transcribe it, align subtitles,
+  and republish captioned or localized video derivatives.
+- `Meeting and rehearsal logs`: ingest rehearsal-room recordings, generate searchable transcripts,
+  and attach run summaries and artifact references for later retrieval.
+
+### Audio DSP and Stem Workflows
+- `Stem separation`: split mixed music into vocals, drums, bass, and accompaniment stems using
+  ANN-backed source-separation models.
+- `Stem cleanup and remix packaging`: branch separated stems into cleanup nodes, then remix and
+  republish alternate vocal/instrumental packages.
+- `Karaoke preparation`: build instrumental, vocal-only, and lyric-timed deliverables from a single
+  source mix.
+- `Tempo-safe practice tracks`: stretch or compress tempo with `rubberband` while preserving pitch,
+  then master the result for rehearsal use.
+- `Pitch-shifted practice tracks`: transpose accompaniment into player-friendly keys without
+  re-recording source material.
+- `Reference mastering and delivery normalization`: normalize loudness, trim silence, inspect media
+  metadata, and package stable output formats for downstream workflows.
+
+### Automatic Music Transcription and MIR Workflows
+- `Baseline audio-to-MIDI transcription`: convert solo or simple polyphonic audio into MIDI for
+  quick symbolic capture.
+- `Multi-instrument transcription`: separate stems first, then transcribe multiple instruments and
+  merge symbolic outputs into a common score-oriented representation.
+- `Vocal melody transcription`: extract note-level or contour-level vocal melody from songs or
+  rehearsal takes.
+- `Drum-event transcription`: produce drum-event timelines suitable for charts, beat-aware editing,
+  or practice loops.
+- `Chord, key, beat, and tempo analysis`: derive harmonic and temporal descriptors that can feed
+  arrangement, search, and cataloging workflows.
+- `Section and similarity analysis`: compute structural fingerprints and descriptors for search,
+  duplicate detection, cover-song analysis, and library indexing.
+- `Lead-sheet extraction from audio`: combine melody transcription with chord analysis to produce a
+  first-pass lead sheet from a recording.
+
+### Symbolic Arrangement and Transformation Workflows
+- `Transcription cleanup`: quantize note starts and durations, split voices, normalize measures, and
+  repair symbolic artifacts before arrangement or engraving.
+- `Automatic transposition`: transpose a score for different keys or transposing instruments while
+  preserving symbolic semantics.
+- `Part extraction`: derive per-instrument parts from a full score and publish them as independent
+  artifacts.
+- `Piano reduction and condensed score generation`: reduce larger ensemble material into a playable
+  piano or condensed conductor score.
+- `Ensemble arrangement generation`: map symbolic material into SATB, string, wind, rhythm-section,
+  or other target ensembles.
+- `Difficulty reduction`: simplify rhythms, ranges, densities, and textures for student or amateur
+  performers.
+- `Harmonic annotation`: produce Roman numeral, chord-symbol, and structural annotations for theory,
+  rehearsal, and pedagogy workflows.
+- `Round-trip audition`: render symbolic outputs back to audio using `fluidsynth` so arrangement
+  changes can be reviewed without leaving the workflow system.
+
+### Notation, Engraving, and Publishing Workflows
+- `Deterministic engraving`: convert `MusicXML` or other symbolic sources into engraved `pdf`, `svg`,
+  and `png` score artifacts through deterministic notation backends.
+- `Browser score preview`: render `MusicXML` directly in the web surface for lightweight review,
+  approval, and artifact inspection.
+- `Score package publishing`: bundle full score, extracted parts, rehearsal audio, click tracks, and
+  metadata into a single publishable artifact set.
+- `Format normalization`: convert between `MIDI`, `MusicXML`, score-editor formats, and preview
+  assets so downstream consumers work against a canonical representation.
+- `Playback proofing`: render engraved or converted scores back to audio and compare them against the
+  symbolic source to catch notation and export regressions.
+
+### OMR, Archive, and Library Workflows
+- `Scan and PDF to editable score`: ingest sheet-music images or PDFs through OMR and convert them
+  into editable symbolic notation.
+- `OMR review loop`: pair machine recognition with browser or desktop score review so operators can
+  repair low-confidence output before publishing.
+- `Archive normalization of mixed catalogs`: ingest legacy combinations of scanned PDFs, notation
+  files, MIDI, and audio, then normalize them into canonical symbolic and preview artifacts.
+- `Music library indexing`: extract descriptors, symbolic summaries, and searchable metadata for
+  large music collections.
+- `Version and cover comparison`: compare recordings or scores for key, tempo, arrangement, and
+  structure drift across versions.
+
+## Future ANN Inference Strategy
+The future music stack includes several ANN-backed tools and models. We want Linux + CUDA and Apple
+Silicon + Metal to be first-class citizens, but they should not be forced into the same deployment
+shape.
+
+- Linux + CUDA should prefer containerized workers with NVIDIA Container Runtime, stable pinned
+  Python environments, and GPU-oriented inference engines such as TensorRT, CUDA-enabled PyTorch,
+  CUDA-enabled TensorFlow, and JAX/XLA on NVIDIA GPUs.
+- Apple Silicon should prefer native macOS workers, Homebrew or system dependencies, Python virtual
+  environments, and Apple-native acceleration layers such as Metal, Core ML, JAX Metal, and PyTorch
+  MPS. Docker and VM-only support is not sufficient for the Apple path.
+
+The planned default engine choices are:
+
+| ANN-backed model/tool | Primary workflow role | Linux + CUDA stack | Apple Silicon + Metal stack | Planned default |
+| --- | --- | --- | --- | --- |
+| `Whisper` / `whisper.cpp` | speech transcription, subtitle generation, transcript indexing | `CTranslate2`-backed Whisper serving for batch/server throughput; keep `whisper.cpp` available as a compact CLI path | `whisper.cpp` with Metal, optionally enabling the Core ML encoder path on Apple Silicon | split by platform |
+| `Demucs HTDemucs` | music source separation, podcast stem cleanup, karaoke preparation | native `PyTorch` on CUDA | native `PyTorch` on MPS | `PyTorch` on both stacks |
+| `Basic Pitch` | baseline audio-to-MIDI transcription | native `TensorFlow` with CUDA | native `Core ML` runtime from the shipped Core ML serialization | split by platform |
+| `MT3` | higher-accuracy multi-instrument transcription | native `JAX` / `XLA` on NVIDIA GPUs | native `JAX` with the Apple `jax-metal` plug-in | `JAX` on both stacks |
+| `Omnizart` family | music, vocal, drum, chord, and beat transcription | native `TensorFlow` with CUDA | repo-owned exported `Core ML` models; upstream package compatibility is not enough for first-class Apple support | split by platform |
+| `Open-Unmix` | alternate or research-oriented source separation | native `PyTorch` on CUDA | native `PyTorch` on MPS | `PyTorch` on both stacks |
+
+Operational notes for these ANN-backed paths:
+
+- `Whisper`: the Linux path should optimize for throughput and queueable server inference, while the
+  Apple path should optimize for offline local execution and low-friction native installs.
+- `Demucs` and `Open-Unmix`: keep them in isolated GPU worker classes because source separation has
+  materially different memory and batching behavior from speech transcription.
+- `Basic Pitch`: keep both TensorFlow and non-TensorFlow serializations available, but treat
+  TensorFlow-on-CUDA and Core ML-on-Apple as the default production lanes.
+- `MT3`: treat JAX as the canonical execution model and keep the Apple Metal path under active
+  conformance testing because JAX Metal support is younger than CUDA.
+- `Omnizart`: do not treat the current upstream ARM-macOS incompatibility as acceptable. First-class
+  Apple support means we own the model export and execution path needed to run it natively.
+- `Audiveris`: although Audiveris uses a neural network internally for some symbol classes, it
+  should be treated as an integrated JVM OMR application rather than as a separately managed ANN
+  model runtime.
+
+The non-ANN tools in the future stack, such as `ffmpeg`, `sox`, `rubberband`, `fluidsynth`,
+`music21`, `lilypond`, `OpenSheetMusicDisplay`, `MuseScore`, `Essentia`, and `Sonic Annotator`,
+remain important, but they do not need the same inference-engine matrix.
+
+## Future FOSS Tooling Targets
+The future workflow expansion is expected to add or deepen integration with:
+
+- [`whisper.cpp`](https://github.com/ggml-org/whisper.cpp) for native speech transcription
+- [`faster-whisper`](https://github.com/SYSTRAN/faster-whisper) and [`CTranslate2`](https://opennmt.net/CTranslate2/) for high-throughput Whisper inference on NVIDIA GPUs
+- [`Demucs`](https://github.com/facebookresearch/demucs) and [`Open-Unmix`](https://github.com/sigsep/open-unmix-pytorch) for source separation
+- [`Basic Pitch`](https://github.com/spotify/basic-pitch), [`MT3`](https://github.com/magenta/mt3), and [`Omnizart`](https://github.com/Music-and-Culture-Technology-Lab/omnizart) for automatic music transcription
+- [`music21`](https://github.com/cuthbertLab/music21) for symbolic transformation and arrangement
+- [`LilyPond`](https://github.com/lilypond/lilypond), [`MuseScore`](https://github.com/musescore/MuseScore), and [`OpenSheetMusicDisplay`](https://github.com/opensheetmusicdisplay/opensheetmusicdisplay) for notation, conversion, rendering, and browser preview
+- [`Audiveris`](https://github.com/Audiveris/audiveris) for optical music recognition
+- [`Essentia`](https://essentia.upf.edu/) and [`Sonic Annotator`](https://github.com/sonic-visualiser/sonic-annotator) for MIR extraction and analysis
 
 ## Development Roadmap
 The authoritative implementation plan lives in [DEVELOPMENT_PLAN/README.md](/Users/matthewnowak/studioMCP/DEVELOPMENT_PLAN/README.md). The roadmap is split into an overview, system-component inventory, per-phase documents, and a cleanup ledger. Phases 1-24 are now closed against the current repository scope, including the compose-only workflow, expanded boundary-tool inventory, the repaired outer-container Whisper runtime, model and fixture infrastructure, adapter validators, example DAG chains, synthetic chaos coverage, SES email surface, and governed tool documentation. Redirect-based OAuth/PKCE remains intentionally deferred.
