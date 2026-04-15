@@ -18,7 +18,9 @@ Validation resolves a SoundFont in this order:
 
 1. `STUDIOMCP_FLUIDSYNTH_SOUNDFONT`
 2. cached model `generaluser-gs`
-3. system SoundFonts installed in the container image
+
+The supported repository contract keeps SoundFonts in MinIO-backed model storage rather than baking
+them into the outer image.
 
 ## Validation Contract
 

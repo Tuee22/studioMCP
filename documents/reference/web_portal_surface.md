@@ -39,6 +39,7 @@ The published control plane is always the shared edge:
 - `/api` routes to the BFF
 - `/mcp` routes to the MCP server
 - `/kc` routes to Keycloak
+- `/minio` routes to the MinIO console/admin surface when that edge route is exposed
 
 Artifact bytes are a separate data plane:
 
@@ -53,6 +54,9 @@ Current local baselines:
 
 Chart-driven environments define the same contract through `global.publicBaseUrl` and `global.objectStorage.publicEndpoint`.
 
+Published browser login and session traffic uses TLS. The local kind validation baseline preserves
+the same route contract on plain HTTP at `localhost`.
+
 ## Top-Level Browser Workflows
 
 - sign in with login/password through the BFF
@@ -65,7 +69,7 @@ Chart-driven environments define the same contract through `global.publicBaseUrl
 
 ## BFF Responsibilities
 
-- accept login/password over TLS and exchange it with Keycloak
+- accept login/password on the published edge and exchange it with Keycloak
 - maintain browser session state
 - authorize upload and download intents
 - call MCP on behalf of the authenticated user
@@ -330,18 +334,47 @@ Cookie: studiomcp_session={session_id}
 Content-Type: application/json
 
 {
-  "dag": {
+  "dagSpec": {
+    "name": "transcode-basic",
+    "description": "Simple ingest to FFmpeg transcode flow.",
     "nodes": [
       {
+        "id": "input",
+        "kind": "pure",
+        "inputs": [],
+        "outputType": "media/input",
+        "timeout": { "seconds": 5 },
+        "memoization": "memoize"
+      },
+      {
         "id": "transcode",
-        "kind": "ffmpeg.transcode",
-        "inputs": { "source": "artifact:abc123" },
-        "params": { "resolution": "1920x1080" }
+        "kind": "boundary",
+        "tool": "ffmpeg",
+        "inputs": ["input"],
+        "outputType": "media/mp4",
+        "timeout": { "seconds": 120 },
+        "memoization": "memoize"
+      },
+      {
+        "id": "summary",
+        "kind": "summary",
+        "inputs": ["transcode"],
+        "outputType": "summary/run",
+        "timeout": { "seconds": 5 },
+        "memoization": "no-memoize"
       }
     ]
-  }
+  },
+  "inputArtifacts": [
+    ["input", "artifact-abc123"]
+  ]
 }
 ```
+
+The submitted `dagSpec` uses the same canonical node contract documented in
+[../domain/dag_specification.md](../domain/dag_specification.md#dag-specification): boundary nodes
+declare `kind: "boundary"` plus a `tool` name from the workflow registry, rather than ad hoc
+operation-specific `kind` values.
 
 **Stream run progress:**
 

@@ -1,5 +1,5 @@
 # File: DEVELOPMENT_PLAN/phase-8-final-closure-regression-gate.md
-# Phase 8: Final Closure and Regression Gate
+# Phase 8: Aggregate Regression Gate and Coverage Integrity
 
 **Status**: Authoritative source
 **Supersedes**: N/A
@@ -55,10 +55,18 @@ docker compose run --rm studiomcp studiomcp cluster ensure
 
 ### Current Validation State
 
-- `docker compose run --rm studiomcp studiomcp validate docs` passes on the current worktree.
-- `docker compose run --rm studiomcp whisper --help` passes on April 14, 2026 without shared-library loader errors.
-- `docker compose run --rm studiomcp studiomcp test` passes on April 14, 2026 with `897 examples, 0 failures` in the unit suite, `26 examples, 0 failures` in the integration suite, and `All tests passed.`
-- `docker compose run --rm studiomcp studiomcp validate all` passes on April 14, 2026 with `Passed: 36/36`; the current source tree still enumerates 36 validators in `src/StudioMCP/CLI/Cluster.hs`.
+- `docker compose run --rm studiomcp studiomcp validate docs` passes on April 15, 2026 after this
+  plan review landed.
+- `docker compose run --rm studiomcp whisper --help` passes on April 15, 2026 without
+  shared-library loader errors.
+- `docker compose run --rm studiomcp studiomcp validate whisper-adapter` passes on April 15, 2026.
+- The requested cold-state rerun on April 15, 2026 deleted the `studiomcp` kind cluster, pruned
+  Docker including volumes, removed `./.data/`, rebuilt the outer image with
+  `docker compose build`, and completed `docker compose run --rm studiomcp studiomcp test` with
+  `904 examples, 0 failures` for unit coverage, `26 examples, 0 failures` for integration
+  coverage, and the CLI summary `Unit tests: PASSED`, `Integration tests: PASSED`,
+  `All tests passed.`
+- The latest recorded `docker compose run --rm studiomcp studiomcp validate all` pass on April 14, 2026 completed with `Passed: 36/36`; the current source tree still enumerates 36 validators in `src/StudioMCP/CLI/Cluster.hs`.
 - [phase-24-whisper-runtime-closure.md](phase-24-whisper-runtime-closure.md) now records the closed Whisper runtime repair that restored the aggregate regression gate.
 - The cross-cutting readiness contract introduced later in
   [phase-11-runtime-readiness-and-condition-driven-startup.md](phase-11-runtime-readiness-and-condition-driven-startup.md)

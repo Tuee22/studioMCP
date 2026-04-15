@@ -28,7 +28,7 @@ Primary trust boundaries:
 - browser to BFF
 - external MCP client to MCP server
 - MCP server to Keycloak
-- MCP server to tenant object storage
+- MCP server to object storage
 - BFF to MCP server
 
 Every boundary must validate identity explicitly. No boundary may rely on hidden trusted-network assumptions alone.
@@ -38,7 +38,7 @@ Every boundary must validate identity explicitly. No boundary may rely on hidden
 - Keycloak is the trusted issuer for public authn
 - external identity providers are brokered through Keycloak, not trusted directly
 - external MCP clients present Keycloak-issued bearer tokens
-- browser login for the current delivery path uses username/password submitted to the BFF over TLS
+- browser login for the current delivery path uses username/password submitted to the BFF on the published edge; published deployments use TLS, while the local kind validation baseline keeps the same route shape on plain HTTP at `localhost`
 - service accounts use confidential client flows with narrow scopes
 - redirect-based OAuth/PKCE is explicitly deferred from the current delivery plan
 
@@ -142,7 +142,7 @@ Token exchange is used when the MCP server needs to call downstream services tha
 ### Token Exchange Flow (RFC 8693)
 
 ```http
-POST /realms/studiomcp/protocol/openid-connect/token
+POST /kc/realms/studiomcp/protocol/openid-connect/token
 Content-Type: application/x-www-form-urlencoded
 
 grant_type=urn:ietf:params:oauth:grant-type:token-exchange
@@ -218,7 +218,9 @@ logInfo msg = do
 
 ## Browser And BFF Rules
 
-- in the current simplified delivery path, the BFF may accept username/password over TLS
+- in the current simplified delivery path, the BFF accepts username/password only on the published
+  browser login route; published deployments use TLS, while the local kind validation baseline
+  preserves the same route shape on plain HTTP at `localhost`
 - the BFF relays credentials only to the Keycloak token endpoint
 - the BFF never persists raw passwords and never writes them to logs, errors, metrics, or audit records
 - browser uploads and downloads prefer short-lived presigned URLs

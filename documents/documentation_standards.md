@@ -14,9 +14,14 @@
 - Canonical documents use `**Status**: Authoritative source`.
 - Supporting docs use `**Status**: Reference only` and link back to the canonical source.
 - When architecture or policy changes, update the authoritative document first and then update dependent links.
+- `../DEVELOPMENT_PLAN/` is authoritative for repository implementation status, phase closure, and
+  execution order. Documents under `documents/` must align with that plan and must not contradict
+  its current-state claims.
 
 ### Current-State Declarative Docs Only
-- `documents/` describes the architecture, rules, and public contracts that are currently authoritative for the repo.
+- `documents/` describes the architecture, rules, and public contracts that are currently
+  authoritative for the repo, while `../DEVELOPMENT_PLAN/` remains authoritative for
+  implementation-status tracking.
 - Do not add ADRs, decision logs, or other history-oriented design records to `documents/`.
 - If a rule is active, state it directly in the owning authoritative document.
 - If a rule changes, update or replace the owning document instead of preserving parallel historical decision files.
@@ -125,6 +130,8 @@ Validation checklist for each Mermaid diagram:
 ## 8. Documentation Maintenance Checklist
 
 - [ ] Update the authoritative source first.
+- [ ] Reconcile current-state notes in `documents/` with `../DEVELOPMENT_PLAN/` when implementation
+  status changes.
 - [ ] Update dependent links and overlays.
 - [ ] Retire replaced historical or duplicate docs instead of creating decision-record side files.
 - [ ] Validate Mermaid diagrams after edits.

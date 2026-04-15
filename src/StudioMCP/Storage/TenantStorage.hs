@@ -46,12 +46,12 @@ import Data.Aeson
     (.=),
   )
 import Data.Char (isAlphaNum, ord)
-import qualified Data.Map.Strict as Map
+import qualified Data.ByteString as ByteString
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
+import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
-import qualified Data.ByteString as ByteString
 import Data.Time (UTCTime, addUTCTime, getCurrentTime)
 import Data.Time.Format (defaultTimeLocale, formatTime)
 import qualified Data.UUID as UUID
@@ -64,37 +64,16 @@ import StudioMCP.Storage.Keys (BucketName (..), ObjectKey (..))
 data TenantStorageBackend
   = -- | Platform-managed MinIO storage
     PlatformMinIO
-  | -- | Tenant-owned S3-compatible storage
-    TenantOwnedS3
-      { tosEndpoint :: Text,
-        tosRegion :: Text,
-        tosAccessKeyId :: Text,
-        tosSecretAccessKey :: Text
-      }
   deriving (Eq, Show)
 
 instance ToJSON TenantStorageBackend where
   toJSON PlatformMinIO = object ["type" .= ("platform-minio" :: Text)]
-  toJSON TenantOwnedS3 {..} =
-    object
-      [ "type" .= ("tenant-s3" :: Text),
-        "endpoint" .= tosEndpoint,
-        "region" .= tosRegion,
-        "accessKeyId" .= tosAccessKeyId,
-        "secretAccessKey" .= ("[REDACTED]" :: Text)
-      ]
 
 instance FromJSON TenantStorageBackend where
   parseJSON = withObject "TenantStorageBackend" $ \obj -> do
     backendType <- obj .: "type"
     case (backendType :: Text) of
       "platform-minio" -> pure PlatformMinIO
-      "tenant-s3" ->
-        TenantOwnedS3
-          <$> obj .: "endpoint"
-          <*> obj .: "region"
-          <*> obj .: "accessKeyId"
-          <*> obj .: "secretAccessKey"
       other -> fail $ "Unknown backend type: " <> T.unpack other
 
 -- | Configuration for tenant storage
@@ -231,7 +210,6 @@ tenantStorageErrorCode (StorageQuotaExceeded _) = "storage-quota-exceeded"
 -- | Internal state for tenant storage service
 data TenantStorageState = TenantStorageState
   { tssArtifacts :: Map.Map Text TenantArtifact,
-    tssTenantBackends :: Map.Map TenantId TenantStorageBackend,
     tssPresignedUrls :: Map.Map Text PresignedUrl
   }
 
@@ -248,7 +226,6 @@ newTenantStorageService config = do
     newTVarIO
       TenantStorageState
         { tssArtifacts = Map.empty,
-          tssTenantBackends = Map.empty,
           tssPresignedUrls = Map.empty
         }
   pure
@@ -341,7 +318,6 @@ generateUploadUrl ::
   IO (Either TenantStorageError PresignedUrl)
 generateUploadUrl service tenantId artifactId contentType = do
   now <- getCurrentTime
-  backend <- resolveTenantBackend service tenantId
   let config = tssConfig service
       bucket = getTenantBucket service tenantId
       key = getTenantArtifactKey tenantId artifactId 1
@@ -351,7 +327,7 @@ generateUploadUrl service tenantId artifactId contentType = do
             ("x-amz-meta-artifact-id", artifactId),
             ("x-amz-meta-tenant-id", let TenantId t = tenantId in t)
           ]
-  case buildPresignedUrl config backend now (tscUploadUrlTtl config) "PUT" bucket key headers of
+  case buildPresignedUrl config now (tscUploadUrlTtl config) "PUT" bucket key headers of
     Left err -> pure (Left err)
     Right presignedUrl -> do
       atomically $ do
@@ -375,7 +351,6 @@ generateDownloadUrl service tenantId artifactId maybeVersion = do
     Left err -> pure $ Left err
     Right artifact -> do
       now <- getCurrentTime
-      backend <- resolveTenantBackend service tenantId
       let config = tssConfig service
           version = maybe (taVersion artifact) id maybeVersion
           bucket = getTenantBucket service tenantId
@@ -383,7 +358,6 @@ generateDownloadUrl service tenantId artifactId maybeVersion = do
       pure $
         buildPresignedUrl
           config
-          backend
           now
           (tscDownloadUrlTtl config)
           "GET"
@@ -397,18 +371,8 @@ generateArtifactId = do
   uuid <- UUID.nextRandom
   pure $ "artifact-" <> UUID.toText uuid
 
-resolveTenantBackend :: TenantStorageService -> TenantId -> IO TenantStorageBackend
-resolveTenantBackend service tenantId = do
-  state <- readTVarIO (tssState service)
-  pure $
-    Map.findWithDefault
-      (tscDefaultBackend (tssConfig service))
-      tenantId
-      (tssTenantBackends state)
-
 buildPresignedUrl ::
   TenantStorageConfig ->
-  TenantStorageBackend ->
   UTCTime ->
   Int ->
   Text ->
@@ -416,8 +380,8 @@ buildPresignedUrl ::
   ObjectKey ->
   Map.Map Text Text ->
   Either TenantStorageError PresignedUrl
-buildPresignedUrl config backend signedAt ttlSeconds method bucket key headers = do
-  credentials <- presignCredentials config backend
+buildPresignedUrl config signedAt ttlSeconds method bucket key headers = do
+  credentials <- presignCredentials config
   let canonicalUri = objectCanonicalUri bucket key
       signedHeadersMap = Map.insert "host" (pecHost credentials) (canonicalizeHeaders headers)
       signedHeaders = T.intercalate ";" (Map.keys signedHeadersMap)
@@ -488,21 +452,13 @@ data PresignCredentials = PresignCredentials
     pecSecretAccessKey :: Text
   }
 
-presignCredentials :: TenantStorageConfig -> TenantStorageBackend -> Either TenantStorageError PresignCredentials
-presignCredentials config backend =
-  case backend of
-    PlatformMinIO ->
-      buildCredentials
-        (fromMaybe (tscPlatformEndpoint config) (tscPlatformPublicEndpoint config))
-        (tscPlatformRegion config)
-        (tscPlatformAccessKeyId config)
-        (tscPlatformSecretAccessKey config)
-    TenantOwnedS3 {..} ->
-      buildCredentials
-        tosEndpoint
-        tosRegion
-        tosAccessKeyId
-        tosSecretAccessKey
+presignCredentials :: TenantStorageConfig -> Either TenantStorageError PresignCredentials
+presignCredentials config =
+  buildCredentials
+    (fromMaybe (tscPlatformEndpoint config) (tscPlatformPublicEndpoint config))
+    (tscPlatformRegion config)
+    (tscPlatformAccessKeyId config)
+    (tscPlatformSecretAccessKey config)
   where
     buildCredentials endpoint region accessKeyId secretAccessKey
       | T.null endpoint = Left (PresignedUrlGenerationFailed "Storage endpoint is empty")

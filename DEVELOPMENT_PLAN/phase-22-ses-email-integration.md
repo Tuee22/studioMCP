@@ -55,7 +55,14 @@ implemented and documented.
 - `documents/engineering/email_templates.md`
 
 **Product docs to create/update:**
-- None
+- None.
+
+**Cross-references to add:**
+- Keep [phase-9-cli-test-validate-consolidation.md](phase-9-cli-test-validate-consolidation.md)
+  aligned when the `email send-test` CLI surface changes.
+- Keep [../documents/README.md](../documents/README.md) and
+  [../documents/operations/keycloak_realm_bootstrap_runbook.md](../documents/operations/keycloak_realm_bootstrap_runbook.md)
+  aligned if repository-owned email flows change what the default bootstrap path exposes.
 
 ## Cross-References
 

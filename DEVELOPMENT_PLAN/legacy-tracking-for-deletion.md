@@ -3,20 +3,23 @@
 
 **Status**: Authoritative source
 **Supersedes**: N/A
-**Referenced by**: [README.md](README.md), [phase-3-keycloak-auth-shared-sessions.md](phase-3-keycloak-auth-shared-sessions.md), [phase-5-browser-session-contract.md](phase-5-browser-session-contract.md), [phase-7-keycloak-realm-bootstrap.md](phase-7-keycloak-realm-bootstrap.md), [phase-8-final-closure-regression-gate.md](phase-8-final-closure-regression-gate.md), [phase-14-makefile-removal.md](phase-14-makefile-removal.md)
+**Referenced by**: [README.md](README.md), [phase-3-keycloak-auth-shared-sessions.md](phase-3-keycloak-auth-shared-sessions.md), [phase-5-browser-session-contract.md](phase-5-browser-session-contract.md), [phase-7-keycloak-realm-bootstrap.md](phase-7-keycloak-realm-bootstrap.md), [phase-8-final-closure-regression-gate.md](phase-8-final-closure-regression-gate.md), [phase-14-makefile-removal.md](phase-14-makefile-removal.md), [phase-25-auth-storage-and-runtime-contract-realignment.md](phase-25-auth-storage-and-runtime-contract-realignment.md)
 
 > **Purpose**: Provide the explicit ledger of deprecated compatibility surfaces, stale configuration
 > retained only for future work, and completed cleanup/removal work in `studioMCP`.
 
 ## Pending Removal
 
-None. The current supported repository path does not retain any repo-local compatibility surfaces
-that are still waiting on a future cleanup phase.
+None.
 
 ## Completed
 
 | Item | Former location | Verification |
 |------|-----------------|--------------|
+| Tenant-owned S3 compatibility backend | `src/StudioMCP/Storage/TenantStorage.hs`, `src/StudioMCP/MCP/Resources.hs` | Removed; the runtime now exposes only the MinIO-backed supported contract and rejects `tenant-s3` |
+| System SoundFont fallback for FluidSynth | `src/StudioMCP/Tools/FluidSynth.hs` | Removed; FluidSynth now requires `STUDIOMCP_FLUIDSYNTH_SOUNDFONT` or the MinIO-backed `generaluser-gs` model path |
+| Stale Keycloak helper bootstrap contract | `src/StudioMCP/Auth/Admin.hs` | Removed; helper-created clients and scopes now match the checked-in `studiomcp-mcp`, `studiomcp-bff`, and `studiomcp-service` realm contract |
+| Stale direct-process auth defaults and synthetic scope fixtures | `src/StudioMCP/Auth/Config.hs`, `src/StudioMCP/Web/BFF.hs`, `src/StudioMCP/Auth/Middleware.hs`, `src/StudioMCP/CLI/Cluster.hs` | Removed; standalone BFF, dev-bypass, and validator paths now use the current client and scope contract including `resource:read` and `tenant:read` |
 | `builddir: /opt/build/studiomcp` compatibility hint | `cabal.project` | Removed; explicit `--builddir` flags in the Dockerfile and CLI remain authoritative |
 | `CABAL_BUILDDIR=/opt/build/studiomcp` compatibility hint | `docker/Dockerfile` | Removed; nix-style builds rely only on explicit `--builddir` flags |
 | Makefile workflow wrapper | `/Makefile` | Removed; the supported repo entrypoint is `docker compose run --rm studiomcp studiomcp ...` |
@@ -45,6 +48,7 @@ that are still waiting on a future cleanup phase.
 | Obsolete manual Keycloak bootstrap appendix | `documents/operations/keycloak_realm_bootstrap_runbook.md` | Removed; the runbook now documents the CLI-driven bootstrap path only |
 | Duplicate authoritative local-development doc | `documents/engineering/local_dev.md` | Resolved; the document is now a reference-only companion and `documents/development/local_dev.md` remains canonical |
 | Duplicate authoritative testing-policy doc | `documents/engineering/testing.md` | Resolved; the document is now a reference-only companion and `documents/development/testing_strategy.md` remains canonical |
+| Skaffold configuration | `/skaffold.yaml` | Removed; redundant with `studiomcp cluster deploy` which handles Helm deployment with readiness gates, PV creation, and image publication; file sync only watched non-code files providing no value for a compiled Haskell project |
 
 ## Intentionally Retained Active Surfaces
 
@@ -58,6 +62,8 @@ These items are not pending removal because the current implementation still dep
 | `RefreshParams` | `src/StudioMCP/Auth/PKCE.hs` | BFF refresh flow | Required by the current browser auth contract | Phase 5 |
 | `refreshAccessToken` | `src/StudioMCP/Auth/PKCE.hs` | BFF refresh flow | Required by the current browser auth contract | Phase 5 |
 | `PKCEError` and `pkceErrorToText` | `src/StudioMCP/Auth/PKCE.hs` | auth error handling | Shared error surface for the active auth path | Phase 3 |
+| Legacy `STUDIOMCP_REDIS_*`, `STUDIOMCP_SESSION_TTL`, and `STUDIOMCP_LOCK_TTL` environment names | `src/StudioMCP/MCP/Session/RedisConfig.hs`, `src/StudioMCP/CLI/Cluster.hs`, `test/Session/RedisConfigSpec.hs` | Redis/session config loading, cluster env export, and compatibility coverage | The repo still accepts and emits these names alongside the `STUDIO_MCP_*` forms so existing environments and test coverage do not break | Phase 3 |
+| Bearer session identifiers on browser-adjacent BFF requests | `src/StudioMCP/Web/Handlers.hs` | Non-browser callers and compatibility/debug handling for browser-session flows | The supported browser contract remains cookie-first, but the secondary Bearer session path is still intentionally available and the cookie wins when both are present | Phase 5 |
 | `standardFlowEnabled: false` on `studiomcp-bff` | `docker/keycloak/realm/studiomcp-realm.json` | Keycloak realm bootstrap | Explicitly keeps redirect-based browser auth disabled on the supported path | Phase 7 |
 
 ## Cross-References
@@ -68,3 +74,4 @@ These items are not pending removal because the current implementation still dep
 - [phase-7-keycloak-realm-bootstrap.md](phase-7-keycloak-realm-bootstrap.md)
 - [phase-8-final-closure-regression-gate.md](phase-8-final-closure-regression-gate.md)
 - [phase-14-makefile-removal.md](phase-14-makefile-removal.md)
+- [phase-25-auth-storage-and-runtime-contract-realignment.md](phase-25-auth-storage-and-runtime-contract-realignment.md)

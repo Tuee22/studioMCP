@@ -452,7 +452,8 @@ This design allows the same protocol logic to be tested via in-memory transports
 ## Compatibility Rules
 
 - the public MCP endpoint must be a single coherent MCP surface
-- admin routes such as `/healthz`, `/version`, and `/metrics` are operational endpoints, not substitutes for MCP
+- admin routes such as `/healthz`, `/health/live`, `/health/ready`, `/version`, and `/metrics`
+  are operational endpoints, not substitutes for MCP
 - legacy migration-era automation surfaces must not be reintroduced as the public contract
 - new feature work should target the MCP surface first unless a migration note explicitly says otherwise
 

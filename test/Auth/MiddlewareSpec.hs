@@ -71,6 +71,12 @@ spec = do
       scopes `shouldSatisfy` (Set.member (Scope "artifact:read"))
       scopes `shouldSatisfy` (Set.member (Scope "artifact:write"))
 
+    it "includes resource and tenant scopes in bypass context" $ do
+      let ctx = devBypassAuth "admin" "test"
+          scopes = subjectScopes (acSubject ctx)
+      scopes `shouldSatisfy` (Set.member (Scope "resource:read"))
+      scopes `shouldSatisfy` (Set.member (Scope "tenant:read"))
+
     it "sets dev email" $ do
       let ctx = devBypassAuth "admin" "test"
           email = subjectEmail (acSubject ctx)
@@ -85,6 +91,9 @@ spec = do
           claims = acClaims ctx
       jcIssuer claims `shouldBe` "http://localhost:8080/kc/realms/studiomcp"
       jcSubject claims `shouldBe` SubjectId "admin"
+      jcAuthorizedParty claims `shouldBe` Just "studiomcp-bff"
+      jcScopes claims `shouldSatisfy` Set.member (Scope "resource:read")
+      jcScopes claims `shouldSatisfy` Set.member (Scope "tenant:read")
 
   describe "AuthContext" $ do
     it "can access subject from context" $ do

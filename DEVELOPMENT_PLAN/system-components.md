@@ -16,12 +16,13 @@
 | Local cluster | Kind | Docker-backed Kubernetes | Hosts the application and supporting services | host-backed volumes under `./.data/` |
 | Container registry | Harbor | In-cluster Helm deployment | Stores application images; all Helm workloads pull from Harbor, the local kind overlay uses persistent filesystem-backed registry storage with relative upload URLs on the manual-PV path, and the CLI compares local and remote digests, waits for PostgreSQL and Redis plus Harbor health and registry readiness before publication, and uses extended managed-registry retry/backoff with remote-digest confirmation before declaring publication failed | cluster storage |
 | Edge router | ingress-nginx | Helm release | Unified entrypoint for web services: `/mcp`, `/api`, `/kc`, `/minio`; routes traffic only after published service endpoints and backend application readiness have both closed | none |
-| Identity provider | Keycloak | Helm release | Login/password auth and token issuance | Keycloak PostgreSQL |
+| Identity provider | Keycloak | Helm release | Login/password auth and token issuance; the checked-in realm import path and bootstrap helper share the same governed client and scope contract | Keycloak PostgreSQL |
 | Keycloak database | PostgreSQL | Helm release | Durable auth data | cluster storage |
-| Session store | Redis | Helm release | Shared MCP and browser-adjacent session coordination | in-cluster runtime state |
+| Session store | Redis | Helm release | Shared MCP and browser-adjacent session coordination; deployed without PVCs or PVs | none (ephemeral) |
 | Local storage policy | `studiomcp-manual` StorageClass plus CLI-managed PVs | Kind cluster plus `studiomcp cluster storage reconcile` | Enforces explicit persistence for local stateful workloads | host-backed volumes under `./.data/` |
 | Object storage | MinIO | Helm release | Immutable artifact and memo storage | cluster storage |
 | Event transport | Pulsar | Helm release | Runtime eventing and validation lifecycle transport | cluster storage |
+| Reference model service | Helm-managed HTTP service | Helm release | Internal advisory model endpoint for the BFF and inference runtime; its `/healthz` surface participates in the shared deploy-time readiness gate | none |
 | Metrics collection | MCP `/metrics` endpoint and optional Prometheus-compatible tooling | Runtime service or cluster add-on | Time-series metrics for cluster and application | cluster storage when enabled |
 | Metrics dashboards | Optional Grafana-compatible tooling | Cluster add-on | Visualization of Prometheus metrics | cluster storage when enabled |
 | Application database | PostgreSQL where applicable | repo/runtime services | Durable application state for implemented flows | repo-specific runtime storage |
@@ -37,10 +38,11 @@
 | MCP core | `src/StudioMCP/MCP/*.hs` | JSON-RPC, catalogs, and MCP transport surfaces |
 | MCP listener/server | `src/StudioMCP/MCP/Server.hs` | Expose MCP over supported transports |
 | Artifact governance | `src/StudioMCP/Storage/Governance.hs` | Quotas, audit, and tenant storage contract |
-| BFF | `src/StudioMCP/Web/BFF.hs`, `Handlers.hs` | Browser-facing auth and session surface |
+| BFF | `src/StudioMCP/Web/BFF.hs`, `Handlers.hs` | Browser-facing auth and session surface with standalone defaults aligned to the documented confidential `studiomcp-bff` client contract |
 | Auth middleware | `src/StudioMCP/Auth/*.hs` | JWT validation, claims extraction, scope enforcement, and Keycloak integration |
 | Worker runtime | `src/StudioMCP/Worker/Server.hs` | Runtime worker validation and execution entrypoint |
 | Inference runtime | `src/StudioMCP/Inference/*.hs` | Advisory inference service and related validation path |
+| Reference model client | `src/StudioMCP/Inference/ReferenceModel.hs` | HTTP client for advisory model requests with typed unavailable, HTTP, and decode failure handling |
 | Cluster CLI | `src/StudioMCP/CLI/Cluster.hs` | Cluster ensure/deploy/bootstrap operations plus rollout, service-endpoint, shared application-readiness gates, and like-for-like local/remote image digest comparison with dependency-aware Harbor publication gates, PostgreSQL/Redis-backed Harbor dependency waits, extended managed-registry retry/backoff, and remote-digest confirmation before managed-registry pushes fail |
 | Docs validator | `src/StudioMCP/CLI/Docs.hs` | Documentation validation entrypoint |
 | Test CLI | `src/StudioMCP/CLI/Test.hs` | Test command handlers that build suites under `/opt/build/`, resolve test binaries, and execute them without repopulating the workspace build tree |
@@ -50,7 +52,7 @@
 | Demucs adapter | `src/StudioMCP/Tools/Demucs.hs` | Stem separation boundary with MinIO model loading |
 | Whisper adapter | `src/StudioMCP/Tools/Whisper.hs` | Transcription boundary with MinIO model loading and a repaired outer-container runtime path for the installed `whisper` executable |
 | BasicPitch adapter | `src/StudioMCP/Tools/BasicPitch.hs` | Audio-to-MIDI boundary |
-| FluidSynth adapter | `src/StudioMCP/Tools/FluidSynth.hs` | MIDI synthesis boundary with MinIO SoundFont loading |
+| FluidSynth adapter | `src/StudioMCP/Tools/FluidSynth.hs` | MIDI synthesis boundary with MinIO SoundFont loading and explicit override support; no image-baked system SoundFont fallback remains on the supported path |
 | Rubberband adapter | `src/StudioMCP/Tools/Rubberband.hs` | Time/pitch manipulation boundary |
 | ImageMagick adapter | `src/StudioMCP/Tools/ImageMagick.hs` | Image processing boundary |
 | MediaInfo adapter | `src/StudioMCP/Tools/MediaInfo.hs` | Media inspection boundary |
@@ -71,6 +73,8 @@
   used by the MCP server, BFF, worker, inference surface, and cluster CLI.
 - `src/StudioMCP/CLI/Cluster.hs` waits for shared-service readiness during `cluster ensure` and
   for ingress-routable application readiness during `cluster deploy server`.
+- `chart/templates/llm_reference.yaml` publishes the internal advisory reference-model service whose
+  `/healthz` endpoint is part of the shared deploy-time readiness contract.
 - `src/StudioMCP/MCP/Server.hs`, `src/StudioMCP/Web/Handlers.hs`,
   `src/StudioMCP/Worker/Server.hs`, and `src/StudioMCP/Inference/Host.hs` now expose
   dependency-aware readiness handlers tied to real downstream requirements.
@@ -82,6 +86,7 @@
 | Browser <-> BFF | External | HTTPS JSON plus HTTP-only session cookie | BFF | Cookie auth wins over bearer auth for browser flows |
 | External client <-> MCP | External | stdio or HTTP JSON-RPC | MCP server | Standards-compliant MCP surface |
 | BFF <-> Keycloak | Internal service-to-service | OIDC / token exchange | BFF and auth modules | Password grant and refresh-token flows remain active |
+| BFF / inference <-> reference model | Internal service-to-service | HTTP JSON | BFF and inference modules | Internal advisory dependency checked by readiness handlers and deploy-time waits |
 | MCP listener <-> Redis | Internal | Redis-backed session state | MCP session layer | Shared state for resumable sessions and scale-out |
 | Runtime <-> Pulsar | Internal | message bus payloads | runtime adapters | Validation and lifecycle eventing |
 | Runtime <-> MinIO | Internal | object storage API | storage adapters | Immutable object and artifact storage |
@@ -101,7 +106,7 @@
 | Outer container workflow | Compose and Dockerfile | `docker-compose.yaml`, `docker/` | Ephemeral one-command containers via `docker compose run --rm`; the repository Dockerfile is single-stage, uses `tini`, and has no `CMD`; compose has no `command`; Kubernetes workloads declare explicit startup commands |
 | Image registry | Harbor | cluster deployment and Harbor registry storage | Application images; the CLI populates Harbor with required images before Helm chart deployment |
 | Validation assets | repo fixtures | `examples/`, `test/` | Deterministic inputs for runtime validation |
-| ML models | Model sync | MinIO `studiomcp-models/` | HuggingFace, GGUF, SoundFonts - NOT in containers |
+| ML models | Model sync | MinIO `studiomcp-models/` | HuggingFace, GGUF, and SoundFonts. The supported contract keeps them out of containers, and FluidSynth resolves SoundFonts from MinIO or the explicit override path |
 | Local model cache | model loader | `./.data/studiomcp/model-cache/` by default | Override with `STUDIOMCP_MODEL_CACHE_DIR` when needed |
 | Test fixtures | Fixture seeding | MinIO `studiomcp-test-fixtures/` | Deterministic media for tool tests |
 
@@ -125,3 +130,4 @@
 - [phase-21-chaos-engineering.md](phase-21-chaos-engineering.md)
 - [phase-22-ses-email-integration.md](phase-22-ses-email-integration.md)
 - [phase-24-whisper-runtime-closure.md](phase-24-whisper-runtime-closure.md)
+- [phase-25-auth-storage-and-runtime-contract-realignment.md](phase-25-auth-storage-and-runtime-contract-realignment.md)

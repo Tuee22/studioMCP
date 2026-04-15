@@ -58,10 +58,12 @@ docker compose run --rm studiomcp studiomcp cluster ensure  # Required for integ
 
 - `docker compose run --rm studiomcp studiomcp --help` exits successfully and prints the supported
   CLI surface, including `test`, the `test all` alias, `validate whisper-adapter`, `email`, and
-  `models`.
-- `docker compose run --rm studiomcp studiomcp test unit` passes on April 14, 2026 with `897 examples, 0 failures`.
-- `docker compose run --rm studiomcp studiomcp test` passes on April 14, 2026 with `897 examples, 0 failures` in the unit suite, `26 examples, 0 failures` in the integration suite, and `All tests passed.`
-- `docker compose run --rm studiomcp studiomcp validate all` passes on April 14, 2026 with `Passed: 36/36`; the aggregate validator runner still invokes 36 validators sequentially and emits an aggregate summary.
+  `models`, on April 15, 2026.
+- The requested cold-state `docker compose run --rm studiomcp studiomcp test` rerun on
+  April 15, 2026 completed through the CLI with `904 examples, 0 failures` for unit coverage,
+  `26 examples, 0 failures` for integration coverage, and the summary
+  `Unit tests: PASSED`, `Integration tests: PASSED`, `All tests passed.`
+- The latest recorded `docker compose run --rm studiomcp studiomcp validate all` pass on April 14, 2026 completed with `Passed: 36/36`; the aggregate validator runner still invokes 36 validators sequentially and emits an aggregate summary.
 - The canonical `studiomcp` binary exposes `test`, the `test all` alias, `test unit`,
   `test integration`, and `validate all` as first-class commands.
 - [phase-24-whisper-runtime-closure.md](phase-24-whisper-runtime-closure.md) now records the closed

@@ -5,6 +5,7 @@ module StudioMCP.Auth.Config
   ( -- * Keycloak Configuration
     KeycloakConfig (..),
     defaultKeycloakConfig,
+    defaultBFFKeycloakConfig,
 
     -- * Auth Configuration
     AuthConfig (..),
@@ -12,6 +13,7 @@ module StudioMCP.Auth.Config
 
     -- * Environment Loading
     loadAuthConfigFromEnv,
+    loadAuthConfigFromEnvWithDefaultKeycloak,
 
     -- * URL Helpers
     jwksEndpoint,
@@ -100,6 +102,14 @@ defaultKeycloakConfig =
       kcJwksFetchTimeoutSeconds = 5
     }
 
+-- | Default Keycloak client configuration for direct-process BFF login and refresh flows.
+defaultBFFKeycloakConfig :: KeycloakConfig
+defaultBFFKeycloakConfig =
+  defaultKeycloakConfig
+    { kcClientId = "studiomcp-bff",
+      kcClientSecret = Just "studiomcp-bff-dev-secret"
+    }
+
 -- | Full authentication configuration
 data AuthConfig = AuthConfig
   { -- | Keycloak settings
@@ -147,16 +157,19 @@ defaultAuthConfig =
 
 -- | Load auth configuration from environment variables
 loadAuthConfigFromEnv :: IO AuthConfig
-loadAuthConfigFromEnv = do
+loadAuthConfigFromEnv = loadAuthConfigFromEnvWithDefaultKeycloak defaultKeycloakConfig
+
+loadAuthConfigFromEnvWithDefaultKeycloak :: KeycloakConfig -> IO AuthConfig
+loadAuthConfigFromEnvWithDefaultKeycloak defaultKeycloak = do
   -- Keycloak settings
-  issuer <- lookupEnvText "STUDIOMCP_KEYCLOAK_ISSUER" "http://localhost:8080/kc/realms/studiomcp"
-  additionalIssuers <- lookupEnvList "STUDIOMCP_KEYCLOAK_ADDITIONAL_ISSUERS"
-  audience <- lookupEnvText "STUDIOMCP_KEYCLOAK_AUDIENCE" "studiomcp-mcp"
-  realm <- lookupEnvText "STUDIOMCP_KEYCLOAK_REALM" "studiomcp"
-  clientId <- lookupEnvText "STUDIOMCP_KEYCLOAK_CLIENT_ID" "studiomcp-mcp"
-  clientSecret <- lookupEnvMaybe "STUDIOMCP_KEYCLOAK_CLIENT_SECRET"
-  jwksCacheTtl <- lookupEnvInt "STUDIOMCP_JWKS_CACHE_TTL" 300
-  jwksFetchTimeout <- lookupEnvInt "STUDIOMCP_JWKS_FETCH_TIMEOUT" 5
+  issuer <- lookupEnvText "STUDIOMCP_KEYCLOAK_ISSUER" (kcIssuer defaultKeycloak)
+  additionalIssuers <- lookupEnvList "STUDIOMCP_KEYCLOAK_ADDITIONAL_ISSUERS" (kcAdditionalIssuers defaultKeycloak)
+  audience <- lookupEnvText "STUDIOMCP_KEYCLOAK_AUDIENCE" (kcAudience defaultKeycloak)
+  realm <- lookupEnvText "STUDIOMCP_KEYCLOAK_REALM" (kcRealm defaultKeycloak)
+  clientId <- lookupEnvText "STUDIOMCP_KEYCLOAK_CLIENT_ID" (kcClientId defaultKeycloak)
+  clientSecret <- lookupEnvMaybe "STUDIOMCP_KEYCLOAK_CLIENT_SECRET" (kcClientSecret defaultKeycloak)
+  jwksCacheTtl <- lookupEnvInt "STUDIOMCP_JWKS_CACHE_TTL" (kcJwksCacheTtlSeconds defaultKeycloak)
+  jwksFetchTimeout <- lookupEnvInt "STUDIOMCP_JWKS_FETCH_TIMEOUT" (kcJwksFetchTimeoutSeconds defaultKeycloak)
 
   -- Auth settings
   enabled <- lookupEnvBool "STUDIOMCP_AUTH_ENABLED" False
@@ -189,15 +202,20 @@ lookupEnvText :: String -> Text -> IO Text
 lookupEnvText name def = maybe def T.pack <$> lookupEnv name
 
 -- | Helper to lookup optional text env var
-lookupEnvMaybe :: String -> IO (Maybe Text)
-lookupEnvMaybe name = fmap T.pack <$> lookupEnv name
-
--- | Helper to lookup comma-separated list env var
-lookupEnvList :: String -> IO [Text]
-lookupEnvList name = do
+lookupEnvMaybe :: String -> Maybe Text -> IO (Maybe Text)
+lookupEnvMaybe name def = do
   mVal <- lookupEnv name
   pure $ case mVal of
-    Nothing -> []
+    Nothing -> def
+    Just "" -> Nothing
+    Just s -> Just (T.pack s)
+
+-- | Helper to lookup comma-separated list env var
+lookupEnvList :: String -> [Text] -> IO [Text]
+lookupEnvList name def = do
+  mVal <- lookupEnv name
+  pure $ case mVal of
+    Nothing -> def
     Just "" -> []
     Just s -> filter (not . T.null) $ map T.strip $ T.splitOn "," (T.pack s)
 

@@ -12,6 +12,10 @@
 Transactional email rendering lives in `src/StudioMCP/Email/Templates.hs` and reads paired
 template files from `templates/email/`.
 
+These templates define the repository-owned SES mail surface closed by the development plan. They
+do not imply that the default Keycloak bootstrap currently enables self-service verify-email or
+reset-password flows.
+
 ## Supported Templates
 
 | Template Name | Files | Purpose |

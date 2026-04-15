@@ -17,22 +17,22 @@ The repository now exposes this catalog through the MCP surface using the stable
 
 The public `tools/list` catalog remains focused on tenant-facing orchestration and artifact
 operations. Raw media-process adapters are registered separately as DAG boundary tool names that
-`workflow.submit` can reference.
+`workflow.submit` can reference and are not returned as direct tenant-facing MCP tools.
 
 ## Tools
 
 | Name | Purpose | Auth Scope | Mutation Class |
 | --- | --- | --- | --- |
-| `workflow.submit` | Submit a typed DAG workflow for execution. | tenant workflow submit | creates run records |
-| `workflow.list` | List runs visible to the subject in a tenant. | tenant workflow read | read only |
-| `workflow.status` | Fetch run status for a specific run. | tenant workflow read | read only |
-| `workflow.cancel` | Request cancellation of a run where the runtime supports it. | tenant workflow cancel | mutates run control state |
-| `artifact.upload_url` | Create a tenant-scoped upload artifact and return a short-lived upload authorization. | tenant artifact write | creates upload intent only |
-| `artifact.download_url` | Create a short-lived download authorization for an artifact version. | tenant artifact read | read only |
-| `artifact.get` | Return artifact metadata and current governance state. | tenant artifact read | read only |
-| `artifact.hide` | Mark an artifact hidden without hard deleting the backing media. | tenant artifact govern | metadata only |
-| `artifact.archive` | Mark an artifact archived without hard deleting the backing media. | tenant artifact govern | metadata only |
-| `tenant.info` | Return tenant-facing metadata visible to the caller. | tenant read | read only |
+| `workflow.submit` | Submit a typed DAG workflow for execution. | `workflow:write` | creates run records |
+| `workflow.list` | List runs visible to the subject in a tenant. | `workflow:read` | read only |
+| `workflow.status` | Fetch run status for a specific run. | `workflow:read` | read only |
+| `workflow.cancel` | Request cancellation of a run where the runtime supports it. | `workflow:write` | mutates run control state |
+| `artifact.upload_url` | Create a tenant-scoped upload artifact and return a short-lived upload authorization. | `artifact:write` | creates upload intent only |
+| `artifact.download_url` | Create a short-lived download authorization for an artifact version. | `artifact:read` | read only |
+| `artifact.get` | Return artifact metadata and current governance state. | `artifact:read` | read only |
+| `artifact.hide` | Mark an artifact hidden without hard deleting the backing media. | `artifact:manage` | metadata only |
+| `artifact.archive` | Mark an artifact archived without hard deleting the backing media. | `artifact:manage` | metadata only |
+| `tenant.info` | Return tenant-facing metadata visible to the caller. | `tenant:read` | read only |
 
 ## Tool Rules
 
@@ -415,7 +415,7 @@ Get tenant profile and current storage usage.
 }
 ```
 
-**Required Scope:** (authenticated user in tenant)
+**Required Scope:** `tenant:read`
 
 ## Resources
 

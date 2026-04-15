@@ -68,8 +68,9 @@ HA deployment is required in all environments including local kind development. 
 The studioMCP realm must be configured with:
 
 - `studiomcp` realm
-- `studiomcp-app` client for browser applications
+- `studiomcp-bff` confidential client for browser login/password and session refresh
 - `studiomcp-mcp` client for MCP server
+- `studiomcp-service` client for service-account automation
 - appropriate scopes for tool, resource, and prompt access
 - tenant claim mapping
 
@@ -83,7 +84,7 @@ The repo includes Keycloak in the deployment topology for authentication. Curren
 
 Keycloak relies on PostgreSQL for persistence. The PostgreSQL instance must follow:
 
-- the null storage class rule
+- the `studiomcp-manual` / `kubernetes.io/no-provisioner` storage-class rule
 - the rehydratable PV system
 - CLI-owned PV lifecycle
 

@@ -43,11 +43,10 @@ It does **not** claim exhaustive algorithmic correctness for the third-party too
 
 - The fixture-backed adapter contract tests and registry coverage remain implemented in
   `test/Tools/AdaptersSpec.hs`, `test/Tools/RegistrySpec.hs`, and `test/FixturesSpec.hs`.
-- `docker compose run --rm studiomcp studiomcp test unit` passes on April 14, 2026 with
-  `897 examples, 0 failures`.
-- `docker compose run --rm studiomcp studiomcp test` passes on April 14, 2026 with
-  `897 examples, 0 failures` in the unit suite, `26 examples, 0 failures` in the integration
-  suite, and `All tests passed.`
+- The requested cold-state `docker compose run --rm studiomcp studiomcp test` rerun on
+  April 15, 2026 completed with `904 examples, 0 failures` for unit coverage,
+  `26 examples, 0 failures` for integration coverage, and the CLI summary
+  `Unit tests: PASSED`, `Integration tests: PASSED`, `All tests passed.`
 - [phase-24-whisper-runtime-closure.md](phase-24-whisper-runtime-closure.md) records the closed
   follow-on that restored the Whisper adapter path inside the aggregate test gate.
 
@@ -60,10 +59,18 @@ completed Whisper adapter runtime follow-on.
 ## Documentation Requirements
 
 **Engineering docs to create/update:**
-- None
+- None.
 
 **Product docs to create/update:**
-- None
+- None.
+
+**Cross-references to add:**
+- Keep [phase-18-minio-fixture-seeding.md](phase-18-minio-fixture-seeding.md) aligned when
+  fixture manifests or seeding expectations change.
+- Keep [phase-17-haskell-tool-adapters.md](phase-17-haskell-tool-adapters.md) aligned when adapter
+  coverage changes.
+- Keep [phase-24-whisper-runtime-closure.md](phase-24-whisper-runtime-closure.md) aligned as the
+  follow-on record for the repaired Whisper runtime.
 
 ## Cross-References
 

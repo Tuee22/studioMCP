@@ -70,6 +70,9 @@
 ## Working Rules
 
 - [Documentation Standards](documentation_standards.md#studiomcp-documentation-standards) is the SSoT for documentation rules.
+- [`../DEVELOPMENT_PLAN/`](../DEVELOPMENT_PLAN/README.md#studiomcp-development-plan) is
+  authoritative for current implementation status and phase closure; documents in this suite must
+  align with it.
 - This index is the navigation layer for the suite and must be updated whenever new canonical docs are added.
 - Each concept has one canonical document. Other docs link back to it.
 - The governed suite contains current-state declarative documentation only. Historical decision records do not belong under `documents/`.

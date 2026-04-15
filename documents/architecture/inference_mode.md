@@ -11,7 +11,14 @@
 
 Inference mode is an assistive layer for planning and operator support. It may help draft DAGs, suggest repairs, answer documentation questions, and explain summaries, but it does not own execution semantics.
 
-Current repo note: the inference runtime is implemented. `studiomcp inference` and `studiomcp-inference` expose an advisory HTTP service with `POST /advice`, `GET /healthz`, and `GET /version`, apply prompt rendering plus guardrails, and surface unavailable model-host behavior as a typed HTTP failure. Current implementation status lives in [../../DEVELOPMENT_PLAN/README.md](../../DEVELOPMENT_PLAN/00-overview.md#current-repo-assessment-against-this-plan).
+Current repo note: the inference runtime is implemented. The supported outer-container entrypoint
+is `docker compose run --rm studiomcp studiomcp inference`. The repo also ships the
+`studiomcp-inference` executable for focused process debugging, but `studiomcp` remains the
+canonical supported CLI surface. The service exposes `POST /advice`, `GET /healthz`,
+`GET /health/live`, `GET /health/ready`, and `GET /version`, applies prompt rendering plus
+guardrails, and reports dependency-aware readiness blocking reasons when the advisory
+reference-model path is unavailable. Current implementation status lives in
+[../../DEVELOPMENT_PLAN/README.md](../../DEVELOPMENT_PLAN/00-overview.md#current-repo-assessment-against-this-plan).
 
 ## Allowed Uses
 

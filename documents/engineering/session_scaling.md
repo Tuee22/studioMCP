@@ -145,7 +145,7 @@ Value: JSON-serialized subscription state
 
 ```json
 {
-  "resourceUri": "studiomcp://tenants/acme/runs/123/events",
+  "resourceUri": "studiomcp://history/runs",
   "subscribedAt": "2024-01-15T11:00:00Z",
   "lastEventId": "evt-456"
 }

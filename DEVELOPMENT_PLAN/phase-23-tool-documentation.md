@@ -55,6 +55,13 @@ public `tools/list` catalog and the workflow boundary registry used inside DAGs.
 **Product docs to create/update:**
 - `documents/reference/mcp_tool_catalog.md`
 
+**Cross-references to add:**
+- Keep [phase-17-haskell-tool-adapters.md](phase-17-haskell-tool-adapters.md) and
+  [phase-20-dag-chain-integration-tests.md](phase-20-dag-chain-integration-tests.md) aligned when
+  the workflow boundary registry changes.
+- Keep [../documents/README.md](../documents/README.md) aligned when the governed tool-doc
+  inventory changes.
+
 ## Cross-References
 
 - [README.md](README.md)

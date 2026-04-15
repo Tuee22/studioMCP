@@ -431,7 +431,9 @@ devBypassAuth subjectIdText tenantIdText =
                   Scope "artifact:read",
                   Scope "artifact:write",
                   Scope "artifact:manage",
-                  Scope "prompt:read"
+                  Scope "prompt:read",
+                  Scope "resource:read",
+                  Scope "tenant:read"
                 ]
           },
       acTenant =
@@ -451,7 +453,7 @@ devBypassAuth subjectIdText tenantIdText =
           jcExpiration = read "2099-12-31 23:59:59 UTC",
           jcIssuedAt = read "2024-01-01 00:00:00 UTC",
           jcNotBefore = Nothing,
-          jcAuthorizedParty = Just "studiomcp-cli",
+          jcAuthorizedParty = Just "studiomcp-bff",
           jcTenantId = Just (TenantId tenId),
           jcScopes =
             Set.fromList
@@ -460,7 +462,11 @@ devBypassAuth subjectIdText tenantIdText =
                 Scope "workflow:read",
                 Scope "workflow:write",
                 Scope "artifact:read",
-                Scope "artifact:write"
+                Scope "artifact:write",
+                Scope "artifact:manage",
+                Scope "prompt:read",
+                Scope "resource:read",
+                Scope "tenant:read"
               ],
           jcRealmRoles = Set.fromList [Role "user", Role "admin"],
           jcResourceRoles = Set.empty,

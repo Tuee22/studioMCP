@@ -47,7 +47,8 @@ docker compose build
 
 ### Remaining Work
 
-None. This phase is complete on the current supported path.
+None within the original bootstrap-automation scope. [Phase 25](phase-25-auth-storage-and-runtime-contract-realignment.md)
+records the later realm-export and helper-created client or scope realignment.
 
 ## Documentation Requirements
 
@@ -66,5 +67,6 @@ None. This phase is complete on the current supported path.
 
 - [README.md](README.md)
 - [phase-3-keycloak-auth-shared-sessions.md](phase-3-keycloak-auth-shared-sessions.md)
+- [phase-25-auth-storage-and-runtime-contract-realignment.md](phase-25-auth-storage-and-runtime-contract-realignment.md)
 - [legacy-tracking-for-deletion.md](legacy-tracking-for-deletion.md)
 - [../documents/operations/keycloak_realm_bootstrap_runbook.md](../documents/operations/keycloak_realm_bootstrap_runbook.md)

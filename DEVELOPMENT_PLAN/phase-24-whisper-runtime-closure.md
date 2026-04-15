@@ -46,21 +46,22 @@ Restore the supported outer-container Whisper runtime so:
 
 ### Current Validation State
 
-- `docker compose run --rm studiomcp studiomcp --help` passes on April 14, 2026, and still exposes
-  `validate whisper-adapter`, `test`, and the `test all` alias.
-- `docker compose build` completed on April 14, 2026 and rebuilt the outer image with loader-visible
-  `libwhisper.so.1` plus companion `libggml*.so` files under `/usr/local/lib`.
-- `docker compose run --rm studiomcp whisper --help` passes on April 14, 2026 without shared-library
-  loader errors.
-- `docker compose run --rm studiomcp studiomcp validate whisper-adapter` passes on April 14, 2026.
-- `docker compose run --rm studiomcp studiomcp validate docs` passes on April 14, 2026.
-- `docker compose run --rm studiomcp studiomcp test unit` passes on April 14, 2026 with
-  `897 examples, 0 failures`.
-- `docker compose run --rm studiomcp studiomcp test` passes on April 14, 2026 with
-  `897 examples, 0 failures` in the unit suite, `26 examples, 0 failures` in the integration
-  suite, and `All tests passed.`
-- `docker compose run --rm studiomcp studiomcp validate all` passes on April 14, 2026 with
-  `Passed: 36/36`.
+- `docker compose run --rm studiomcp studiomcp --help` passes on April 15, 2026, and still
+  exposes `validate whisper-adapter`, `test`, and the `test all` alias.
+- `docker compose run --rm studiomcp whisper --help` passes on April 15, 2026 without
+  shared-library loader errors.
+- `docker compose run --rm studiomcp studiomcp validate whisper-adapter` passes on
+  April 15, 2026.
+- The requested cold-state rerun on April 15, 2026 deleted the `studiomcp` kind cluster, pruned
+  Docker including volumes, removed `./.data/`, rebuilt the outer image with
+  `docker compose build`, and completed `docker compose run --rm studiomcp studiomcp test` with
+  `904 examples, 0 failures` for unit coverage, `26 examples, 0 failures` for integration
+  coverage, and the CLI summary `Unit tests: PASSED`, `Integration tests: PASSED`,
+  `All tests passed.`
+- `docker compose run --rm studiomcp studiomcp validate docs` passes on April 15, 2026 after this
+  plan review landed.
+- The latest recorded `docker compose run --rm studiomcp studiomcp validate all` pass on April 14,
+  2026 completed with `Passed: 36/36`.
 
 ### Remaining Work
 

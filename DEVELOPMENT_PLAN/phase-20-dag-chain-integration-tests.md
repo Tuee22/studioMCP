@@ -52,10 +52,17 @@ integration suite.
 ## Documentation Requirements
 
 **Engineering docs to create/update:**
-- None
+- None.
 
 **Product docs to create/update:**
 - `documents/reference/mcp_tool_catalog.md` - keep the workflow boundary registry aligned
+
+**Cross-references to add:**
+- Keep [phase-17-haskell-tool-adapters.md](phase-17-haskell-tool-adapters.md) aligned when example
+  DAGs depend on new or removed workflow-boundary tools.
+- Keep [phase-23-tool-documentation.md](phase-23-tool-documentation.md) and
+  [../documents/reference/mcp_tool_catalog.md](../documents/reference/mcp_tool_catalog.md) aligned
+  when the workflow registry surface changes.
 
 ## Cross-References
 

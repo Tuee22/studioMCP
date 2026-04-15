@@ -647,7 +647,6 @@ emptyTenantUsage =
 
 showBackend :: TenantStorageBackend -> Text
 showBackend PlatformMinIO = "platform-minio"
-showBackend TenantOwnedS3 {} = "tenant-s3"
 
 renderArtifactState :: ArtifactState -> Text
 renderArtifactState Active = "active"

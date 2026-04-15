@@ -17,7 +17,8 @@
 ### Goal
 
 Implement JWT validation, Keycloak integration, and Redis-backed session sharing for horizontal
-scale and browser/MCP auth flows.
+scale and browser/MCP auth flows. Redis session storage is ephemeral; no PVCs or PVs are deployed
+for Redis because session state is regenerable runtime data, not durable business data.
 
 ### Deliverables
 
@@ -71,7 +72,8 @@ docker compose run --rm studiomcp studiomcp cluster ensure  # For cluster-based 
 
 ### Remaining Work
 
-None. This phase is complete on the current supported path.
+None within the original auth-and-session foundation scope. [Phase 25](phase-25-auth-storage-and-runtime-contract-realignment.md)
+records the later BFF-default, bootstrap-helper, and dev or synthetic auth contract realignment.
 
 ## Documentation Requirements
 
@@ -95,4 +97,5 @@ None. This phase is complete on the current supported path.
 - [system-components.md](system-components.md)
 - [phase-2-mcp-surface-catalog-artifact-governance.md](phase-2-mcp-surface-catalog-artifact-governance.md)
 - [phase-5-browser-session-contract.md](phase-5-browser-session-contract.md)
+- [phase-25-auth-storage-and-runtime-contract-realignment.md](phase-25-auth-storage-and-runtime-contract-realignment.md)
 - [../documents/engineering/security_model.md](../documents/engineering/security_model.md)

@@ -49,7 +49,14 @@ the repository.
 - `documents/development/test_fixtures.md`
 
 **Product docs to create/update:**
-- None
+- None.
+
+**Cross-references to add:**
+- Keep [phase-19-individual-tool-tests.md](phase-19-individual-tool-tests.md) aligned when
+  fixture manifests or seeding expectations change.
+- Keep [phase-16-minio-model-storage.md](phase-16-minio-model-storage.md) and
+  [system-components.md](system-components.md) aligned when fixture bucket ownership or MinIO
+  state locations change.
 
 ## Cross-References
 

@@ -104,23 +104,9 @@ The browser does not call `/mcp` directly for product workflows. The BFF resolve
 browser session and then invokes the stable MCP tool catalog with explicit tenant and subject
 context.
 
-The current submit path uses the stable Phase 2 tool identifiers:
-
-```haskell
-callTool
-  toolCatalog
-  (TenantId (wsTenantId session))
-  (SubjectId (wsSubjectId session))
-  CallToolParams
-    { ctpName = "workflow.submit",
-      ctpArguments =
-        Just $
-          object
-            [ "dag_spec" .= rsrDagSpec req,
-              "input_artifacts" .= rsrInputArtifacts req
-            ]
-    }
-```
+The browser-facing `/api/v1/runs` route accepts a `RunSubmitRequest` whose `dagSpec` field uses the
+canonical DAG schema and whose `inputArtifacts` field maps browser-uploaded artifacts onto workflow
+inputs. The BFF then invokes the stable `workflow.submit` MCP tool using the submitted DAG spec.
 
 Companion browser flows use:
 
@@ -146,12 +132,17 @@ Key rules:
 
 ## Configuration And Runtime
 
-### CLI Entry Point
+### Direct Process Entry Point
 
 ```bash
-studiomcp bff
-studiomcp validate web-bff
+docker compose run --rm studiomcp studiomcp bff
+docker compose run --rm studiomcp studiomcp validate web-bff
 ```
+
+The direct `studiomcp bff` invocation is useful for focused process-level debugging, but it is not
+the supported long-lived deployment model. The shared ingress-backed BFF runtime remains
+Helm-managed through `cluster deploy server`. A dedicated `studiomcp-bff` executable may still be
+present for focused process entry, but `studiomcp` remains the canonical supported CLI surface.
 
 ### Current Configuration Surface
 

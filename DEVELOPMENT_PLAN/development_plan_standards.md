@@ -100,6 +100,7 @@ DEVELOPMENT_PLAN/
 ├── phase-22-ses-email-integration.md
 ├── phase-23-tool-documentation.md
 ├── phase-24-whisper-runtime-closure.md
+├── phase-25-auth-storage-and-runtime-contract-realignment.md
 └── legacy-tracking-for-deletion.md
 ```
 

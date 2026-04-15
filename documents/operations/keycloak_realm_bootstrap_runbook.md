@@ -83,16 +83,23 @@ This file is version-controlled and used for all environment bootstrapping.
 
 ### Realm Settings
 
+The current checked-in realm intentionally keeps Keycloak self-service verification and password
+reset disabled. This is compatible with the repository-owned SES/email work: the renderer and test
+templates for verification and password-reset style mail flows exist, but the default bootstrap
+path does not yet expose those Keycloak self-service flows.
+
 ```json
 {
   "realm": "studiomcp",
   "enabled": true,
   "displayName": "studioMCP",
-  "sslRequired": "external",
+  "sslRequired": "none",
   "registrationAllowed": false,
   "loginWithEmailAllowed": true,
   "duplicateEmailsAllowed": false,
-  "resetPasswordAllowed": true,
+  "resetPasswordAllowed": false,
+  "rememberMe": true,
+  "verifyEmail": false,
   "editUsernameAllowed": false,
   "bruteForceProtected": true,
   "accessTokenLifespan": 300,
@@ -115,6 +122,13 @@ This file is version-controlled and used for all environment bootstrapping.
 | SSO Session Idle | 30 minutes | Browser session timeout |
 | SSO Session Max | 10 hours | Daily re-authentication |
 
+Current bootstrap note:
+
+- `verifyEmail: false` keeps Keycloak from forcing email-verification at login time
+- `resetPasswordAllowed: false` keeps Keycloak self-service password reset disabled
+- the SES template and fake-endpoint validation surface documented elsewhere remains repository
+  scope, but it is not wired into the default realm bootstrap as an active end-user flow
+
 ## Client Configurations
 
 ### MCP Resource Server Client
@@ -136,7 +150,10 @@ This is a bearer-only client that validates tokens but does not issue them.
     "workflow:write",
     "artifact:read",
     "artifact:write",
-    "artifact:manage"
+    "artifact:manage",
+    "resource:read",
+    "prompt:read",
+    "tenant:read"
   ]
 }
 ```
@@ -166,7 +183,8 @@ For the web portal backend-for-frontend.
   "defaultClientScopes": [
     "profile", "email", "roles", "web-origins",
     "workflow:read", "workflow:write",
-    "artifact:read", "artifact:write", "prompt:read"
+    "artifact:read", "artifact:write",
+    "prompt:read", "resource:read", "tenant:read"
   ],
   "optionalClientScopes": ["artifact:manage"]
 }
@@ -245,6 +263,36 @@ For platform automation and internal services.
         "include.in.token.scope": "true",
         "display.on.consent.screen": "true",
         "consent.screen.text": "Manage artifact lifecycle (hide, archive)"
+      }
+    },
+    {
+      "name": "prompt:read",
+      "description": "Access MCP prompt templates",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "true",
+        "consent.screen.text": "Use prompt-based planning and repair helpers"
+      }
+    },
+    {
+      "name": "resource:read",
+      "description": "Read MCP resources",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "true",
+        "consent.screen.text": "Read summaries, manifests, and other MCP resources"
+      }
+    },
+    {
+      "name": "tenant:read",
+      "description": "Read tenant metadata",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "true",
+        "consent.screen.text": "Read tenant metadata and storage usage"
       }
     }
   ]

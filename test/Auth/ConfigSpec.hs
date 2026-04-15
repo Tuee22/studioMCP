@@ -27,6 +27,16 @@ spec = do
     it "has 5 second JWKS fetch timeout" $ do
       kcJwksFetchTimeoutSeconds defaultKeycloakConfig `shouldBe` 5
 
+  describe "defaultBFFKeycloakConfig" $ do
+    it "uses the BFF client id" $ do
+      kcClientId defaultBFFKeycloakConfig `shouldBe` "studiomcp-bff"
+
+    it "uses the BFF development secret" $ do
+      kcClientSecret defaultBFFKeycloakConfig `shouldBe` Just "studiomcp-bff-dev-secret"
+
+    it "keeps the MCP audience for exchanged access tokens" $ do
+      kcAudience defaultBFFKeycloakConfig `shouldBe` "studiomcp-mcp"
+
   describe "defaultAuthConfig" $ do
     it "has auth disabled by default" $ do
       acEnabled defaultAuthConfig `shouldBe` False

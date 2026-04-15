@@ -1,5 +1,8 @@
 module Tools.AdaptersSpec (spec) where
 
+import Control.Exception (bracket)
+import System.Directory (doesFileExist)
+import System.Environment (lookupEnv, setEnv, unsetEnv)
 import StudioMCP.Tools.BasicPitch (seedBasicPitchDeterministicFixtures, validateBasicPitchAdapter)
 import StudioMCP.Tools.Demucs (seedDemucsDeterministicFixtures, validateDemucsAdapter)
 import StudioMCP.Tools.FluidSynth (seedFluidSynthDeterministicFixtures, validateFluidSynthAdapter)
@@ -39,7 +42,8 @@ spec = do
       validateBasicPitchAdapter >>= (`shouldSatisfy` isRight)
 
     it "validates the FluidSynth adapter" $
-      validateFluidSynthAdapter >>= (`shouldSatisfy` isRight)
+      withFluidSynthSoundFontOverride $
+        validateFluidSynthAdapter >>= (`shouldSatisfy` isRight)
 
     it "validates the Rubberband adapter" $
       validateRubberbandAdapter >>= (`shouldSatisfy` isRight)
@@ -53,3 +57,31 @@ spec = do
 isRight :: Either a b -> Bool
 isRight (Right _) = True
 isRight (Left _) = False
+
+withFluidSynthSoundFontOverride :: IO a -> IO a
+withFluidSynthSoundFontOverride action = do
+  soundFontPath <- locateFluidSynthSoundFont
+  originalValue <- lookupEnv "STUDIOMCP_FLUIDSYNTH_SOUNDFONT"
+  bracket
+    (setEnv "STUDIOMCP_FLUIDSYNTH_SOUNDFONT" soundFontPath)
+    (\_ ->
+        case originalValue of
+          Just value -> setEnv "STUDIOMCP_FLUIDSYNTH_SOUNDFONT" value
+          Nothing -> unsetEnv "STUDIOMCP_FLUIDSYNTH_SOUNDFONT"
+    )
+    (\_ -> action)
+
+locateFluidSynthSoundFont :: IO FilePath
+locateFluidSynthSoundFont = go soundFontCandidates
+  where
+    soundFontCandidates =
+      [ "/usr/share/sounds/sf2/TimGM6mb.sf2",
+        "/usr/share/sounds/sf2/FluidR3_GM.sf2"
+      ]
+
+    go [] = expectationFailure "Expected a test SoundFont for the explicit FluidSynth override" >> pure ""
+    go (candidate : remainingCandidates) = do
+      exists <- doesFileExist candidate
+      if exists
+        then pure candidate
+        else go remainingCandidates

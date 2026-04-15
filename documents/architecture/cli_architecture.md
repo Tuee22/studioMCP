@@ -18,6 +18,9 @@ That binary is responsible for:
 - explicit PV management for local Kubernetes storage
 - deploying Helm charts for the MCP server and required sidecars
 - validation workflows that would otherwise become repo helper scripts
+- consolidated test execution, including deterministic fixture and chaos entrypoints
+- model-registry and verification operations
+- repository-owned operator helpers such as SES test-email dispatch
 
 ## Architectural Role
 
@@ -36,10 +39,15 @@ The CLI is expected to run inside one-off outer development containers, not dire
 Canonical invocation shape:
 
 ```bash
-docker compose -f docker-compose.yaml run --rm studiomcp studiomcp <subcommand...>
+docker compose run --rm studiomcp studiomcp <subcommand...>
 ```
 
 The CLI may internally call external tools such as `kind`, `kubectl`, and `helm`, but those calls must be orchestrated from Haskell rather than delegated to checked-in shell scripts.
+
+Focused debugging may still invoke lower-level tools such as
+`cabal --builddir=/opt/build/studiomcp`, `helm`, `skaffold`, or `docker compose config` inside the
+outer container, but those are supporting diagnostics rather than the supported repository command
+surface. Repo-owned workflows remain expressed as `studiomcp` subcommands.
 
 ## Command Families
 
@@ -51,12 +59,18 @@ The CLI command surface should be organized into clear families:
 - `dag ...`
 - `cluster ...`
 - `validate ...`
+- `test ...`
+- `models ...`
+- `email ...`
 
 The exact spellings live in the CLI reference document, but the architectural split matters:
 
 - `cluster` owns kind lifecycle, registry image population, CLI-managed secrets, Helm-backed deployment, and kubeconfig-oriented flows
 - `cluster storage ...` owns manual PV reconciliation and `.data/`-backed storage setup
 - `validate` owns repo and runtime verification paths
+- `test` owns canonical suite execution plus deterministic fixture and chaos helpers
+- `models` owns MinIO-backed model sync, listing, verification, and cache-oriented operator flows
+- `email` owns repository-supported SES operator validation helpers
 
 ## Responsibilities
 
@@ -77,7 +91,13 @@ The exact spellings live in the CLI reference document, but the architectural sp
 
 ## Current Repo Note
 
-The implemented CLI surface already covers DAG validation, cluster lifecycle, cluster reset, registry image push, CLI-managed secrets, storage reconciliation and deletion, sidecar deployment, server deployment, stdio and HTTP MCP runtime entrypoints, auth validation, session scaling validation, inference validation, observability validation, and conformance validation.
+The implemented CLI surface already covers DAG validation, cluster lifecycle, cluster reset,
+registry image push, CLI-managed secrets, storage reconciliation and deletion, sidecar deployment,
+server deployment, stdio and HTTP MCP runtime entrypoints, auth validation, session scaling
+validation, inference validation, observability validation, conformance validation, consolidated
+test execution, fixture seeding and verification, chaos coverage, model sync/list/verify commands,
+and SES test-email dispatch. Current implementation status is tracked in
+[../../DEVELOPMENT_PLAN/README.md](../../DEVELOPMENT_PLAN/README.md#phase-overview).
 
 ## Cross-References
 

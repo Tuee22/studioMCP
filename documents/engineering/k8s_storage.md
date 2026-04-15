@@ -11,17 +11,19 @@
 
 Local Kubernetes storage in `studioMCP` is explicit and CLI-managed with a focus on data durability and high availability.
 
-- only the `studiomcp-manual` StorageClass may be used (no dynamic provisioning)
+- only the `studiomcp-manual` StorageClass, backed by `kubernetes.io/no-provisioner`, may be used (no dynamic provisioning)
 - persistent volumes are created explicitly by the Haskell CLI
 - the CLI creates PVs; Helm charts create PVCs
 - the backing data lives under host `./.data/` (project directory) and survives cluster destruction
-- all stateful services (MinIO, Pulsar, PostgreSQL-HA, Redis) are deployed via HA Helm charts
+- repo-managed stateful services and storage-backed sidecars, including Harbor registry storage,
+  MinIO, Pulsar, PostgreSQL-HA, and Redis, are bound to the manual-PV policy
 
 This policy exists to prevent accidental deletion of host data, ensure storage behavior is obvious, and provide production-like HA deployment patterns.
 
 ## Explicit Storage Class Policy
 
-The `studiomcp-manual` StorageClass enforces explicit-only PV binding:
+The `studiomcp-manual` StorageClass is the only supported local class. It uses
+`kubernetes.io/no-provisioner` to enforce explicit-only PV binding:
 
 ```yaml
 apiVersion: storage.k8s.io/v1
@@ -83,7 +85,7 @@ All third-party stateful services must be deployed using official or Bitnami HA 
 The studioMCP Helm chart is responsible for:
 
 1. Declaring chart dependencies in `Chart.yaml`
-2. Configuring subchart values for HA and null storage class
+2. Configuring subchart values for HA and explicit `studiomcp-manual` storage-class settings
 3. Running `helm dependency build` before deployment so `Chart.lock` and `chart/charts/` are reconciled from `Chart.yaml`
 
 The CLI is responsible for:
@@ -94,11 +96,16 @@ The CLI is responsible for:
 
 The Helm subcharts are responsible for:
 
-- Creating their own PVCs (with null storage class)
+- Creating their own PVCs requesting `studiomcp-manual`
 - Managing StatefulSet naming and pod scheduling
 - Defining service endpoints and configuration
 
-Our chart templates must not duplicate PVC definitions for third-party services. The CLI creates PVs that match the PVC names the subcharts will create. Custom templates are only allowed for studioMCP-specific workloads (mcp-server, worker, bff).
+Our chart templates must not duplicate PVC definitions for third-party services. The CLI creates PVs that match the PVC names the subcharts will create. Custom templates are only allowed for studioMCP-specific workloads such as the MCP server, BFF, worker, and the internal reference-model service.
+
+The current repo also carries Harbor as a Helm dependency. Its higher-level registry behavior is
+governed by [Docker Policy](docker_policy.md#harbor-compatible-registry-policy), while the local
+registry PVC remains part of the same explicit `studiomcp-manual` persistence contract documented
+here.
 
 ## Storage Class Usage
 
@@ -192,6 +199,7 @@ PVs created by the CLI must follow this naming pattern:
 
 | Service | PV Name | PVC Name | Host Path |
 |---------|---------|----------|-----------|
+| Harbor registry | `studiomcp-harbor-registry-pv` | `studiomcp-harbor-registry` | `./.data/harbor/registry/` |
 | MinIO | `studiomcp-minio-pv-{0,1,2,3}` | `export-studiomcp-minio-{0,1,2,3}` | `./.data/minio/minio-{0,1,2,3}/` |
 | Pulsar ZK | `studiomcp-pulsar-zookeeper-pv-{0,1,2}` | `studiomcp-pulsar-zookeeper-data-studiomcp-pulsar-zookeeper-{0,1,2}` | `./.data/pulsar/zookeeper-{0,1,2}/` |
 | Pulsar Journal | `studiomcp-pulsar-bookie-journal-pv-{0,1,2}` | `studiomcp-pulsar-bookie-journal-studiomcp-pulsar-bookie-{0,1,2}` | `./.data/pulsar/bookie-journal-{0,1,2}/` |

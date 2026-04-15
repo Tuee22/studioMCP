@@ -77,7 +77,8 @@ docker compose build
 
 ### Remaining Work
 
-None. This phase is complete on the current supported path.
+None within the original MCP-surface closure scope. [Phase 25](phase-25-auth-storage-and-runtime-contract-realignment.md)
+records the later MinIO-only tenant metadata and synthetic-auth scope realignment.
 
 ## Documentation Requirements
 
@@ -98,4 +99,5 @@ None. This phase is complete on the current supported path.
 - [README.md](README.md)
 - [system-components.md](system-components.md)
 - [phase-4-control-plane-data-plane-contract.md](phase-4-control-plane-data-plane-contract.md)
+- [phase-25-auth-storage-and-runtime-contract-realignment.md](phase-25-auth-storage-and-runtime-contract-realignment.md)
 - [../documents/reference/mcp_surface.md](../documents/reference/mcp_surface.md)

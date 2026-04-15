@@ -87,7 +87,7 @@ The codebase currently implements this subset:
 Current note:
 
 - The retired `studiomcp validate mcp` alias has been removed. Use `validate mcp-stdio`, `validate mcp-http`, or `validate mcp-conformance`.
-- `studiomcp bff` is implemented in the main CLI, and `studiomcp-bff` remains available as a dedicated executable.
+- `studiomcp bff` is implemented in the main CLI. The repo also ships `studiomcp-bff` as a focused process entrypoint, but `studiomcp` remains the canonical supported CLI surface.
 
 ## Required Target Surface
 
@@ -211,14 +211,6 @@ validator stdout and stderr when a readiness timeout fails.
 | `studiomcp validate minio` | Validate MinIO connectivity | ✅ Implemented |
 | `studiomcp validate boundary` | Validate boundary runtime | ✅ Implemented |
 | `studiomcp validate ffmpeg-adapter` | Validate FFmpeg adapter | ✅ Implemented |
-| `studiomcp validate sox-adapter` | Validate SoX adapter | ✅ Implemented |
-| `studiomcp validate demucs-adapter` | Validate Demucs adapter | ✅ Implemented |
-| `studiomcp validate whisper-adapter` | Validate Whisper adapter | ✅ Implemented |
-| `studiomcp validate basic-pitch-adapter` | Validate Basic Pitch adapter | ✅ Implemented |
-| `studiomcp validate fluidsynth-adapter` | Validate FluidSynth adapter | ✅ Implemented |
-| `studiomcp validate rubberband-adapter` | Validate Rubberband adapter | ✅ Implemented |
-| `studiomcp validate imagemagick-adapter` | Validate ImageMagick adapter | ✅ Implemented |
-| `studiomcp validate mediainfo-adapter` | Validate MediaInfo adapter | ✅ Implemented |
 | `studiomcp validate executor` | Validate DAG executor | ✅ Implemented |
 | `studiomcp validate e2e` | End-to-end validation | ✅ Implemented |
 | `studiomcp validate worker` | Validate worker mode | ✅ Implemented |
@@ -308,6 +300,19 @@ validator stdout and stderr when a readiness timeout fails.
 - Live logout invalidates the session and post-logout refresh is rejected
 - Runtime-backed BFF to MCP/service integration remains covered in both live and fallback modes
 
+### Validation Commands - Phase 17 Tool Adapters
+
+| Command | Description | Status |
+|---------|-------------|--------|
+| `studiomcp validate sox-adapter` | Validate SoX adapter | ✅ Implemented |
+| `studiomcp validate demucs-adapter` | Validate Demucs adapter | ✅ Implemented |
+| `studiomcp validate whisper-adapter` | Validate Whisper adapter | ✅ Implemented |
+| `studiomcp validate basic-pitch-adapter` | Validate Basic Pitch adapter | ✅ Implemented |
+| `studiomcp validate fluidsynth-adapter` | Validate FluidSynth adapter | ✅ Implemented |
+| `studiomcp validate rubberband-adapter` | Validate Rubberband adapter | ✅ Implemented |
+| `studiomcp validate imagemagick-adapter` | Validate ImageMagick adapter | ✅ Implemented |
+| `studiomcp validate mediainfo-adapter` | Validate MediaInfo adapter | ✅ Implemented |
+
 ### Validation Commands - Phase 2 Artifact Governance
 
 | Command | Description | Status |
@@ -324,9 +329,13 @@ validator stdout and stderr when a readiness timeout fails.
 **`validate artifact-governance`** tests:
 - Artifact hide operation succeeds
 - Artifact archive operation succeeds
-- Artifact supersede operation succeeds
+- Internal artifact supersede governance transition succeeds
 - Hard delete is rejected/not exposed
 - Audit trail recorded
+
+This validator covers storage-governance semantics, not just public MCP `tools/list` entries. The
+public tenant-facing MCP catalog still exposes `artifact.hide` and `artifact.archive`; supersede
+remains a governed internal artifact-state transition rather than a separate public MCP tool.
 
 ### Validation Commands - Phase 2 MCP Catalog
 
@@ -337,7 +346,7 @@ validator stdout and stderr when a readiness timeout fails.
 | `studiomcp validate mcp-prompts` | Validate MCP prompt catalog | ✅ Implemented |
 
 **`validate mcp-tools`** tests:
-- tools/list returns all registered tools
+- tools/list returns the expected tenant-facing MCP tools from the public catalog, not raw DAG boundary executables
 - Each tool has valid inputSchema
 - `workflow.submit`, `workflow.status`, `workflow.list`, and `workflow.cancel` persist run state
 - `artifact.upload_url`, `artifact.get`, `artifact.download_url`, `artifact.hide`, and `artifact.archive` operate on tenant-scoped artifacts
@@ -392,8 +401,13 @@ validator stdout and stderr when a readiness timeout fails.
 | 3 | `validate keycloak`, `validate mcp-auth`, `validate session-store`, `validate mcp-session-store`, `validate horizontal-scale`, `validate mcp-horizontal-scale` |
 | 4 | Validation uses `cluster ensure` and kind-edge curl checks |
 | 5 | `validate web-bff` |
-| 6 | No dedicated deployment-alignment command yet; the development plan currently uses Helm, ingress, and runbook validation |
+| 6 | `cluster up`, `cluster down`, `cluster reset`, `cluster status`, `cluster ensure`, `cluster push-images`, `cluster ensure-secrets`, `cluster deploy sidecars`, `cluster deploy server`, `cluster storage reconcile`, `cluster storage delete <name>` |
 | 9 | `test`, `test all`, `test unit`, `test integration`, `validate all` |
+| 16 | `models sync`, `models list`, `models verify` |
+| 17 | `validate sox-adapter`, `validate demucs-adapter`, `validate whisper-adapter`, `validate basic-pitch-adapter`, `validate fluidsynth-adapter`, `validate rubberband-adapter`, `validate imagemagick-adapter`, `validate mediainfo-adapter` |
+| 18 | `test seed-fixtures`, `test verify-fixtures` |
+| 21 | `test chaos` |
+| 22 | `email send-test` |
 
 ## Legacy Alias Retirement
 
@@ -426,7 +440,16 @@ Kind-edge validation uses the same outer-container entrypoint. Set `STUDIOMCP_VA
 
 ## Current Repo Note
 
-This reference now matches the implemented command surface. The Haskell CLI covers cluster lifecycle, registry image population, CLI-managed secrets, ingress-backed kind deployment, Keycloak realm bootstrap, storage reconciliation and deletion, DAG validation, documentation validation, executor and end-to-end validation, worker-runtime validation, Pulsar, MinIO, boundary, FFmpeg-adapter, MCP transport validation, auth validation, session scaling validation, BFF validation, artifact validation, MCP catalog validation, inference, observability, quotas, rate limiting, MCP conformance validation, and consolidated test/validate-all entrypoints.
+This reference now matches the implemented command surface recorded in
+[../../DEVELOPMENT_PLAN/README.md](../../DEVELOPMENT_PLAN/README.md#phase-overview). The Haskell CLI
+covers cluster lifecycle, registry image population, CLI-managed secrets, ingress-backed kind
+deployment, Keycloak realm bootstrap, storage reconciliation and deletion, DAG validation,
+documentation validation, executor and end-to-end validation, worker-runtime validation, Pulsar,
+MinIO, boundary, FFmpeg-adapter, the later tool-adapter validators, MCP transport validation, auth
+validation, session scaling validation, BFF validation, artifact validation, MCP catalog
+validation, inference, observability, quotas, rate limiting, MCP conformance validation,
+consolidated test and aggregate validation entrypoints, deterministic fixture helpers, model
+operations, chaos coverage, and SES test-email dispatch.
 
 ## Cross-References
 

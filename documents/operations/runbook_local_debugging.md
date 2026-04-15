@@ -24,60 +24,73 @@ It assumes that cluster-management actions flow through one-off outer developmen
 
 Run these in roughly this order when debugging repo state:
 
-1. `docker compose -f docker-compose.yaml build studiomcp`
-2. `docker compose -f docker-compose.yaml run --rm studiomcp cabal --builddir=/opt/build/studiomcp build all`
-3. `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp test unit`
-4. `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate-dag examples/dags/transcode-basic.yaml`
-5. `docker compose -f docker-compose.yaml config`
-6. `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp cluster ensure`
-7. `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate cluster`
-8. `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate worker`
-9. `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate mcp-http`
-10. `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate mcp-conformance`
-11. `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate inference`
-12. `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate observability`
-13. `docker compose -f docker-compose.yaml run --rm studiomcp helm lint chart -f chart/values.yaml -f chart/values-kind.yaml`
-14. `docker compose -f docker-compose.yaml run --rm studiomcp skaffold diagnose --yaml-only --profile kind`
-15. `docker compose -f docker-compose.yaml run --rm studiomcp skaffold render --offline --profile kind --digest-source=tag`
+1. `docker compose build`
+2. `docker compose run --rm studiomcp studiomcp test unit`
+3. `docker compose run --rm studiomcp studiomcp validate-dag examples/dags/transcode-basic.yaml`
+4. `docker compose run --rm studiomcp studiomcp cluster ensure`
+5. `docker compose run --rm studiomcp studiomcp cluster deploy server`
+6. `docker compose run --rm studiomcp studiomcp validate cluster`
+7. `docker compose run --rm studiomcp studiomcp validate worker`
+8. `docker compose run --rm studiomcp studiomcp validate mcp-http`
+9. `docker compose run --rm studiomcp studiomcp validate mcp-conformance`
+10. `docker compose run --rm studiomcp studiomcp validate inference`
+11. `docker compose run --rm studiomcp studiomcp validate observability`
+12. `docker compose run --rm studiomcp studiomcp validate docs`
 
 ## Current Outer-Container Workflow
 
-The repo now includes the intended outer-container entrypoint and the validated native cluster, server, and observability commands:
+The recommended outer-container workflow follows the plan-owned readiness gates:
 
-1. `docker compose -f docker-compose.yaml build studiomcp`
-2. `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp cluster up`
-3. `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp cluster status`
-4. `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate cluster`
-5. `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate executor`
-6. `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate e2e`
-7. `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate worker`
-8. `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate boundary`
-9. `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate pulsar`
-10. `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate minio`
-11. `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate ffmpeg-adapter`
-12. `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate mcp-http`
-13. `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate mcp-conformance`
-14. `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate inference`
-15. `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate observability`
-16. `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate docs`
+1. `docker compose build`
+2. `docker compose run --rm studiomcp studiomcp cluster ensure`
+3. `docker compose run --rm studiomcp studiomcp cluster deploy server`
+4. `docker compose run --rm studiomcp studiomcp validate cluster`
+5. `docker compose run --rm studiomcp studiomcp validate executor`
+6. `docker compose run --rm studiomcp studiomcp validate e2e`
+7. `docker compose run --rm studiomcp studiomcp validate worker`
+8. `docker compose run --rm studiomcp studiomcp validate boundary`
+9. `docker compose run --rm studiomcp studiomcp validate pulsar`
+10. `docker compose run --rm studiomcp studiomcp validate minio`
+11. `docker compose run --rm studiomcp studiomcp validate ffmpeg-adapter`
+12. `docker compose run --rm studiomcp studiomcp validate mcp-http`
+13. `docker compose run --rm studiomcp studiomcp validate mcp-conformance`
+14. `docker compose run --rm studiomcp studiomcp validate inference`
+15. `docker compose run --rm studiomcp studiomcp validate observability`
+16. `docker compose run --rm studiomcp studiomcp validate docs`
 
 Each supported command creates its own outer container and removes it on exit.
 Do not use `docker compose up` or `docker compose exec` as the debugging workflow.
 The outer container should talk to the mounted daemon socket at `/var/run/docker.sock`.
 The CLI derives the host-visible `./.data/` path for kind from the outer container bind mount by default. Set `STUDIOMCP_KIND_HOST_DATA_PATH` only to override that discovery for a non-standard Docker context.
 
+`cluster up`, `cluster status`, and `cluster deploy sidecars` remain available as lower-level
+commands, but `cluster ensure` is the canonical shared-service gate and `cluster deploy server` is
+the canonical application gate before live validators.
+
+## Lower-Level Diagnostics
+
+For focused debugging, the outer container also exposes lower-level tools that are useful for
+build, renderer, and manifest inspection. They remain diagnostics rather than the canonical
+repository command surface:
+
+- `docker compose run --rm studiomcp cabal --builddir=/opt/build/studiomcp build all`
+- `docker compose config`
+- `docker compose run --rm studiomcp helm lint chart -f chart/values.yaml -f chart/values-kind.yaml`
+- `docker compose run --rm studiomcp skaffold diagnose --yaml-only --profile kind`
+- `docker compose run --rm studiomcp skaffold render --offline --profile kind --digest-source=tag`
+
 ## Common Failure Modes
 
 ### Haskell Build or Unit Test Failure
 
-- rerun `docker compose -f docker-compose.yaml run --rm studiomcp cabal --builddir=/opt/build/studiomcp build all`
-- rerun `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp test unit`
+- rerun `docker compose run --rm studiomcp studiomcp test unit`
+- if you need a compiler-only diagnostic, rerun `docker compose run --rm studiomcp cabal --builddir=/opt/build/studiomcp build all`
 - inspect the touched Haskell modules and matching test modules together
 - do not advance the implementation phase until the build and phase-relevant tests pass
 
 ### DAG Validation Failure
 
-- rerun `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp validate-dag <path>`
+- rerun `docker compose run --rm studiomcp studiomcp validate-dag <path>`
 - compare the fixture with [../domain/dag_specification.md](../domain/dag_specification.md#dag-specification)
 - inspect the validator rules in the Haskell source before editing the fixture docs
 
@@ -90,7 +103,7 @@ The CLI derives the host-visible `./.data/` path for kind from the outer contain
 
 ### Readiness Timeout Or Blocked Startup
 
-- rerun `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp cluster deploy server`
+- rerun `docker compose run --rm studiomcp studiomcp cluster deploy server`
 - inspect the structured readiness payloads instead of guessing from rollout alone:
   `curl -fsS http://localhost:8081/mcp/health/ready`
   `curl -fsS http://localhost:8081/api/health/ready`
@@ -110,16 +123,16 @@ The CLI derives the host-visible `./.data/` path for kind from the outer contain
 
 ### Helm or Skaffold Validation Failure
 
-- rerun `docker compose -f docker-compose.yaml run --rm studiomcp helm lint chart -f chart/values.yaml -f chart/values-kind.yaml`
-- rerun `docker compose -f docker-compose.yaml run --rm studiomcp skaffold diagnose --yaml-only --profile kind`
-- rerun `docker compose -f docker-compose.yaml run --rm studiomcp skaffold render --offline --profile kind --digest-source=tag`
+- rerun `docker compose run --rm studiomcp helm lint chart -f chart/values.yaml -f chart/values-kind.yaml`
+- rerun `docker compose run --rm studiomcp skaffold diagnose --yaml-only --profile kind`
+- rerun `docker compose run --rm studiomcp skaffold render --offline --profile kind --digest-source=tag`
 
 ## Cleanup
 
 Use these commands to leave the repo in a clean local validation state:
 
 - stop any ad hoc local processes you started for debugging
-- `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp cluster down` if you want to remove the kind cluster
+- `docker compose run --rm studiomcp studiomcp cluster down` if you want to remove the kind cluster
 - there is no long-running outer development container to stop; one-off `docker compose run --rm` containers exit automatically
 
 ## Cross-References

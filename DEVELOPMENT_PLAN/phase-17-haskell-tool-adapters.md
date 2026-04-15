@@ -56,7 +56,7 @@ through the installed `whisper` executable.
 
 - The adapter modules, runtime registry entries, and validator command surface remain implemented in
   the current source tree.
-- `docker compose run --rm studiomcp studiomcp validate whisper-adapter` passes on April 14, 2026,
+- `docker compose run --rm studiomcp studiomcp validate whisper-adapter` passes on April 15, 2026,
   and the repaired outer-container runtime now executes the installed `whisper` binary without
   loader failures.
 - [phase-24-whisper-runtime-closure.md](phase-24-whisper-runtime-closure.md) records the closed

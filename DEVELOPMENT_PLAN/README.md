@@ -27,7 +27,7 @@ govern this plan.
 | [phase-5-browser-session-contract.md](phase-5-browser-session-contract.md) | Browser session contract hardening |
 | [phase-6-cluster-control-plane-parity.md](phase-6-cluster-control-plane-parity.md) | Kind and Helm control-plane parity |
 | [phase-7-keycloak-realm-bootstrap.md](phase-7-keycloak-realm-bootstrap.md) | Keycloak realm bootstrap automation |
-| [phase-8-final-closure-regression-gate.md](phase-8-final-closure-regression-gate.md) | Final regression closure and clean validation gate |
+| [phase-8-final-closure-regression-gate.md](phase-8-final-closure-regression-gate.md) | Aggregate regression gate and validated coverage record |
 | [phase-9-cli-test-validate-consolidation.md](phase-9-cli-test-validate-consolidation.md) | CLI test and validate command consolidation |
 | [phase-10-build-artifact-isolation.md](phase-10-build-artifact-isolation.md) | Build artifact isolation and one-command container configuration closure |
 | [phase-11-runtime-readiness-and-condition-driven-startup.md](phase-11-runtime-readiness-and-condition-driven-startup.md) | Runtime readiness, condition-driven startup, and shared wait-gate closure |
@@ -44,6 +44,7 @@ govern this plan.
 | [phase-22-ses-email-integration.md](phase-22-ses-email-integration.md) | AWS SES email integration |
 | [phase-23-tool-documentation.md](phase-23-tool-documentation.md) | Tool documentation and MCP catalog update |
 | [phase-24-whisper-runtime-closure.md](phase-24-whisper-runtime-closure.md) | Whisper runtime shared-library closure |
+| [phase-25-auth-storage-and-runtime-contract-realignment.md](phase-25-auth-storage-and-runtime-contract-realignment.md) | Auth, storage, and runtime contract realignment |
 | [legacy-tracking-for-deletion.md](legacy-tracking-for-deletion.md) | Cleanup and compatibility removal ledger |
 
 ## Status Vocabulary
@@ -77,7 +78,7 @@ A phase can move to `Done` only when all of the following are true:
 | 5 | Browser Session Contract Hardening | Done | [phase-5-browser-session-contract.md](phase-5-browser-session-contract.md) |
 | 6 | Cluster Control-Plane Parity | Done | [phase-6-cluster-control-plane-parity.md](phase-6-cluster-control-plane-parity.md) |
 | 7 | Keycloak Realm Bootstrap Automation | Done | [phase-7-keycloak-realm-bootstrap.md](phase-7-keycloak-realm-bootstrap.md) |
-| 8 | Final Closure and Regression Gate | Done | [phase-8-final-closure-regression-gate.md](phase-8-final-closure-regression-gate.md) |
+| 8 | Aggregate Regression Gate and Coverage Integrity | Done | [phase-8-final-closure-regression-gate.md](phase-8-final-closure-regression-gate.md) |
 | 9 | CLI Test and Validate Consolidation | Done | [phase-9-cli-test-validate-consolidation.md](phase-9-cli-test-validate-consolidation.md) |
 | 10 | Build Artifact Isolation and Container Configuration | Done | [phase-10-build-artifact-isolation.md](phase-10-build-artifact-isolation.md) |
 | 11 | Runtime Readiness and Condition-Driven Startup | Done | [phase-11-runtime-readiness-and-condition-driven-startup.md](phase-11-runtime-readiness-and-condition-driven-startup.md) |
@@ -94,17 +95,40 @@ A phase can move to `Done` only when all of the following are true:
 | 22 | AWS SES Email Integration | Done | [phase-22-ses-email-integration.md](phase-22-ses-email-integration.md) |
 | 23 | Tool Documentation and MCP Catalog Update | Done | [phase-23-tool-documentation.md](phase-23-tool-documentation.md) |
 | 24 | Whisper Runtime Shared-Library Closure | Done | [phase-24-whisper-runtime-closure.md](phase-24-whisper-runtime-closure.md) |
+| 25 | Auth, Storage, and Runtime Contract Realignment | Done | [phase-25-auth-storage-and-runtime-contract-realignment.md](phase-25-auth-storage-and-runtime-contract-realignment.md) |
 
 ## Current Validation State
 
-**Validated in this review:**
-- `docker compose run --rm studiomcp studiomcp --help` exits successfully and prints the current CLI surface, including `email`, `models`, `validate whisper-adapter`, `test`, the `test all` alias, and `test chaos`.
-- `docker compose run --rm studiomcp whisper --help` passes on April 14, 2026 without shared-library loader errors.
-- `docker compose run --rm studiomcp studiomcp validate whisper-adapter` passes on April 14, 2026.
-- `docker compose run --rm studiomcp studiomcp validate docs` passes on April 14, 2026.
-- `docker compose run --rm studiomcp studiomcp test unit` passes on April 14, 2026 with `897 examples, 0 failures`.
-- `docker compose run --rm studiomcp studiomcp test` passes on April 14, 2026 with `897 examples, 0 failures` in the unit suite, `26 examples, 0 failures` in the integration suite, and `All tests passed.`
-- `docker compose run --rm studiomcp studiomcp validate all` passes on April 14, 2026 with `Passed: 36/36`; the current source tree enumerates 36 validators in `src/StudioMCP/CLI/Cluster.hs`.
+**Validated in this review on April 15, 2026:**
+- `docker compose run --rm studiomcp studiomcp --help` exits successfully and prints the current
+  CLI surface, including `email`, `models`, `validate whisper-adapter`, `test`, the `test all`
+  alias, and `test chaos`.
+- `docker compose run --rm studiomcp whisper --help` passes without shared-library loader errors.
+- `docker compose run --rm studiomcp studiomcp validate whisper-adapter` passes.
+- The requested cold-state rerun on April 15, 2026 deleted the `studiomcp` kind cluster, pruned
+  Docker including volumes, removed `./.data/`, and rebuilt the outer image with
+  `docker compose build`.
+- The requested cold-state `docker compose run --rm studiomcp studiomcp test` rerun on
+  April 15, 2026 completed with `904 examples, 0 failures` for unit coverage,
+  `26 examples, 0 failures` for integration coverage, and the CLI summary
+  `Unit tests: PASSED`, `Integration tests: PASSED`, `All tests passed.`
+- `docker compose run --rm studiomcp studiomcp validate docs` passes after the plan updates in
+  this review landed.
+
+**Previously recorded closure evidence:**
+- The cold-state Phase 25 validator reruns on April 14, 2026 passed:
+  `validate keycloak`, `validate mcp-auth`, `validate web-bff`, `validate mcp-tools`,
+  `validate mcp-resources`, and `validate fluidsynth-adapter`
+  with `STUDIOMCP_FLUIDSYNTH_SOUNDFONT=/usr/share/sounds/sf2/TimGM6mb.sf2`.
+
+**Latest recorded aggregate state:**
+- The latest recorded `docker compose run --rm studiomcp studiomcp validate all` pass on April 14, 2026 completed with `Passed: 36/36`; the current source tree still enumerates 36 validators in `src/StudioMCP/CLI/Cluster.hs`.
+
+**Phase 25 Closure:**
+- Phase 25 remains closed on April 15, 2026. The implementation changes, removal-ledger updates,
+  requested cold-state reset, rebuild, full aggregate `studiomcp test` rerun, and final docs
+  validation all completed successfully on the supported path, and the dedicated Phase 25
+  validator reruns remain recorded above.
 
 **Closed Follow-On:**
 - Phase 24 is now closed: `docker compose build` rebuilds the outer image with loader-visible `libwhisper.so.1` and companion `libggml*.so` files under `/usr/local/lib`, `whisper --help` runs without manual fixes, and the repaired adapter, aggregate test, and live-validator paths are recorded in [phase-24-whisper-runtime-closure.md](phase-24-whisper-runtime-closure.md).
@@ -132,7 +156,7 @@ A phase can move to `Done` only when all of the following are true:
 | 8 | Done | None | `README.md`, `documents/README.md`, `documents/documentation_standards.md`, `documents/development/testing_strategy.md`, `documents/engineering/testing.md`, `documents/development/local_dev.md`, `documents/engineering/local_dev.md`, plan index files as needed |
 | 9 | Done | None | `documents/reference/cli_reference.md`, `documents/reference/cli_surface.md`, `DEVELOPMENT_PLAN/development_plan_standards.md` |
 | 10 | Done | None | `README.md`, `documents/engineering/docker_policy.md`, `documents/engineering/k8s_native_dev_policy.md`, `documents/reference/cli_reference.md`, `documents/reference/cli_surface.md`, `documents/development/local_dev.md`, `documents/operations/runbook_local_debugging.md` |
-| 11 | Done | None | `documents/architecture/overview.md`, `documents/architecture/server_mode.md`, `documents/architecture/bff_architecture.md`, `documents/architecture/mcp_protocol_architecture.md`, `documents/engineering/k8s_native_dev_policy.md`, `documents/engineering/session_scaling.md`, `documents/development/testing_strategy.md`, `documents/reference/cli_reference.md`, `documents/reference/cli_surface.md`, `documents/operations/runbook_local_debugging.md` |
+| 11 | Done | None | `DEVELOPMENT_PLAN/system-components.md`, `documents/architecture/overview.md`, `documents/architecture/server_mode.md`, `documents/architecture/bff_architecture.md`, `documents/architecture/mcp_protocol_architecture.md`, `documents/engineering/k8s_native_dev_policy.md`, `documents/engineering/session_scaling.md`, `documents/development/testing_strategy.md`, `documents/reference/cli_reference.md`, `documents/reference/cli_surface.md`, `documents/operations/runbook_local_debugging.md` |
 | 12 | Done | None | `documents/engineering/docker_policy.md`, `DEVELOPMENT_PLAN/development_plan_standards.md`, `DEVELOPMENT_PLAN/README.md`, `DEVELOPMENT_PLAN/00-overview.md`, `DEVELOPMENT_PLAN/system-components.md`, `DEVELOPMENT_PLAN/phase-10-build-artifact-isolation.md` |
 | 13 | Done | None | `documents/engineering/docker_policy.md`, `DEVELOPMENT_PLAN/README.md`, `DEVELOPMENT_PLAN/00-overview.md`, `DEVELOPMENT_PLAN/system-components.md`, `DEVELOPMENT_PLAN/phase-12-aggregate-test-artifact-isolation-and-warning-closure.md` |
 | 14 | Done | None | `CLAUDE.md`, `documents/engineering/docker_policy.md`, `DEVELOPMENT_PLAN/legacy-tracking-for-deletion.md` |
@@ -146,6 +170,7 @@ A phase can move to `Done` only when all of the following are true:
 | 22 | Done | None | `documents/operations/ses_email.md`, `documents/engineering/email_templates.md` |
 | 23 | Done | None | `documents/tools/*.md`, `documents/reference/mcp_tool_catalog.md`, `documents/README.md` |
 | 24 | Done | None | `DEVELOPMENT_PLAN/README.md`, `DEVELOPMENT_PLAN/00-overview.md`, `DEVELOPMENT_PLAN/system-components.md`, `DEVELOPMENT_PLAN/phase-8-final-closure-regression-gate.md`, `DEVELOPMENT_PLAN/phase-15-monocontainer-tool-expansion.md`, `DEVELOPMENT_PLAN/phase-17-haskell-tool-adapters.md`, `DEVELOPMENT_PLAN/phase-19-individual-tool-tests.md`, `documents/engineering/docker_policy.md`, `documents/tools/whisper.md` |
+| 25 | Done | None | `documents/architecture/multi_tenant_saas_mcp_auth_architecture.md`, `documents/operations/keycloak_realm_bootstrap_runbook.md`, `documents/architecture/artifact_storage_architecture.md`, `documents/reference/web_portal_surface.md`, `documents/architecture/bff_architecture.md`, `documents/reference/mcp_tool_catalog.md`, `documents/tools/fluidsynth.md`, `documents/tools/keycloak.md` |
 
 ## Cross-References
 
@@ -153,4 +178,5 @@ A phase can move to `Done` only when all of the following are true:
 - [00-overview.md](00-overview.md)
 - [system-components.md](system-components.md)
 - [phase-24-whisper-runtime-closure.md](phase-24-whisper-runtime-closure.md)
+- [phase-25-auth-storage-and-runtime-contract-realignment.md](phase-25-auth-storage-and-runtime-contract-realignment.md)
 - [legacy-tracking-for-deletion.md](legacy-tracking-for-deletion.md)

@@ -37,6 +37,7 @@ where
 import Data.Aeson
   ( FromJSON (parseJSON),
     ToJSON (toJSON),
+    Value,
     eitherDecode,
     encode,
     object,
@@ -46,6 +47,7 @@ import Data.Aeson
     (.=),
   )
 import qualified Data.ByteString.Lazy as LBS
+import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
@@ -274,12 +276,17 @@ data ClientRepresentation = ClientRepresentation
     crName :: Maybe Text,
     crEnabled :: Bool,
     crPublicClient :: Bool,
+    crBearerOnly :: Bool,
     crRedirectUris :: [Text],
     crWebOrigins :: [Text],
     crProtocol :: Maybe Text,
     crStandardFlowEnabled :: Bool,
     crDirectAccessGrantsEnabled :: Bool,
     crServiceAccountsEnabled :: Bool,
+    crFullScopeAllowed :: Bool,
+    crDefaultClientScopes :: [Text],
+    crOptionalClientScopes :: [Text],
+    crProtocolMappers :: [Value],
     crSecret :: Maybe Text
   }
   deriving (Eq, Show, Generic)
@@ -291,12 +298,17 @@ instance ToJSON ClientRepresentation where
         "name" .= crName cr,
         "enabled" .= crEnabled cr,
         "publicClient" .= crPublicClient cr,
+        "bearerOnly" .= crBearerOnly cr,
         "redirectUris" .= crRedirectUris cr,
         "webOrigins" .= crWebOrigins cr,
         "protocol" .= crProtocol cr,
         "standardFlowEnabled" .= crStandardFlowEnabled cr,
         "directAccessGrantsEnabled" .= crDirectAccessGrantsEnabled cr,
         "serviceAccountsEnabled" .= crServiceAccountsEnabled cr,
+        "fullScopeAllowed" .= crFullScopeAllowed cr,
+        "defaultClientScopes" .= crDefaultClientScopes cr,
+        "optionalClientScopes" .= crOptionalClientScopes cr,
+        "protocolMappers" .= crProtocolMappers cr,
         "secret" .= crSecret cr
       ]
 
@@ -307,12 +319,17 @@ instance FromJSON ClientRepresentation where
       <*> obj .:? "name"
       <*> obj .: "enabled"
       <*> obj .: "publicClient"
+      <*> (obj .:? "bearerOnly" >>= pure . maybe False id)
       <*> (obj .:? "redirectUris" >>= pure . maybe [] id)
       <*> (obj .:? "webOrigins" >>= pure . maybe [] id)
       <*> obj .:? "protocol"
       <*> (obj .:? "standardFlowEnabled" >>= pure . maybe False id)
       <*> (obj .:? "directAccessGrantsEnabled" >>= pure . maybe False id)
       <*> (obj .:? "serviceAccountsEnabled" >>= pure . maybe False id)
+      <*> (obj .:? "fullScopeAllowed" >>= pure . maybe False id)
+      <*> (obj .:? "defaultClientScopes" >>= pure . maybe [] id)
+      <*> (obj .:? "optionalClientScopes" >>= pure . maybe [] id)
+      <*> (obj .:? "protocolMappers" >>= pure . maybe [] id)
       <*> obj .:? "secret"
 
 -- | Create a new client
@@ -418,7 +435,8 @@ instance FromJSON ClientSecretResponse where
 data ClientScopeRepresentation = ClientScopeRepresentation
   { csrName :: Text,
     csrProtocol :: Text,
-    csrDescription :: Maybe Text
+    csrDescription :: Maybe Text,
+    csrAttributes :: Map.Map Text Text
   }
   deriving (Eq, Show, Generic)
 
@@ -427,7 +445,8 @@ instance ToJSON ClientScopeRepresentation where
     object
       [ "name" .= csrName csr,
         "protocol" .= csrProtocol csr,
-        "description" .= csrDescription csr
+        "description" .= csrDescription csr,
+        "attributes" .= csrAttributes csr
       ]
 
 instance FromJSON ClientScopeRepresentation where
@@ -436,6 +455,7 @@ instance FromJSON ClientScopeRepresentation where
       <$> obj .: "name"
       <*> obj .: "protocol"
       <*> obj .:? "description"
+      <*> (obj .:? "attributes" >>= pure . maybe Map.empty id)
 
 -- | Create a client scope
 createClientScope ::
@@ -491,6 +511,7 @@ data BootstrapResult = BootstrapResult
   { brRealmCreated :: Bool,
     brMcpClientCreated :: Bool,
     brBffClientCreated :: Bool,
+    brServiceClientCreated :: Bool,
     brScopesCreated :: [Text],
     brWarnings :: [Text]
   }
@@ -502,6 +523,7 @@ instance ToJSON BootstrapResult where
       [ "realmCreated" .= brRealmCreated br,
         "mcpClientCreated" .= brMcpClientCreated br,
         "bffClientCreated" .= brBffClientCreated br,
+        "serviceClientCreated" .= brServiceClientCreated br,
         "scopesCreated" .= brScopesCreated br,
         "warnings" .= brWarnings br
       ]
@@ -512,9 +534,9 @@ bootstrapStudioMCPRealm ::
   Text -> -- Realm name
   Text -> -- MCP client ID
   Text -> -- BFF client ID
-  Text -> -- BFF redirect URI
+  Text -> -- Service client ID
   IO (Either AdminError BootstrapResult)
-bootstrapStudioMCPRealm client realmName mcpClientId bffClientId bffRedirectUri = do
+bootstrapStudioMCPRealm client realmName mcpClientId bffClientId serviceClientId = do
   -- Create realm if it doesn't exist
   realmExistsResult <- realmExists client realmName
   realmCreated <- case realmExistsResult of
@@ -527,8 +549,8 @@ bootstrapStudioMCPRealm client realmName mcpClientId bffClientId bffRedirectUri 
           RealmRepresentation
             { rrRealm = realmName,
               rrEnabled = True,
-              rrDisplayName = Just "StudioMCP",
-              rrSslRequired = Just "external"
+              rrDisplayName = Just "studioMCP",
+              rrSslRequired = Just "none"
             }
       case createResult of
         Left err -> pure $ Left err
@@ -537,85 +559,186 @@ bootstrapStudioMCPRealm client realmName mcpClientId bffClientId bffRedirectUri 
   case realmCreated of
     Left err -> pure $ Left err
     Right realmWasCreated -> do
-      -- Create MCP client (confidential, service accounts enabled)
-      mcpClientExistsResult <- clientExists client realmName mcpClientId
-      mcpClientCreated <- case mcpClientExistsResult of
-        Left err -> pure $ Left err
-        Right True -> pure $ Right False
-        Right False -> do
-          createResult <-
-            createClient
-              client
-              realmName
-              ClientRepresentation
-                { crClientId = mcpClientId,
-                  crName = Just "StudioMCP Server",
-                  crEnabled = True,
-                  crPublicClient = False,
-                  crRedirectUris = [],
-                  crWebOrigins = [],
-                  crProtocol = Just "openid-connect",
-                  crStandardFlowEnabled = False,
-                  crDirectAccessGrantsEnabled = False,
-                  crServiceAccountsEnabled = True,
-                  crSecret = Nothing
-                }
-          case createResult of
-            Left err -> pure $ Left err
-            Right () -> pure $ Right True
-
+      mcpClientCreated <- ensureClientCreated client realmName (mcpClientRepresentation mcpClientId)
       case mcpClientCreated of
         Left err -> pure $ Left err
         Right mcpWasCreated -> do
-          -- Create BFF client (public, PKCE)
-          bffClientExistsResult <- clientExists client realmName bffClientId
-          bffClientCreated <- case bffClientExistsResult of
-            Left err -> pure $ Left err
-            Right True -> pure $ Right False
-            Right False -> do
-              createResult <-
-                createClient
-                  client
-                  realmName
-                  ClientRepresentation
-                    { crClientId = bffClientId,
-                      crName = Just "StudioMCP BFF",
-                      crEnabled = True,
-                      crPublicClient = True,
-                      crRedirectUris = [bffRedirectUri, bffRedirectUri <> "/*"],
-                      crWebOrigins = ["*"],
-                      crProtocol = Just "openid-connect",
-                      crStandardFlowEnabled = True,
-                      crDirectAccessGrantsEnabled = False,
-                      crServiceAccountsEnabled = False,
-                      crSecret = Nothing
-                    }
-              case createResult of
-                Left err -> pure $ Left err
-                Right () -> pure $ Right True
-
+          bffClientCreated <- ensureClientCreated client realmName (bffClientRepresentation bffClientId)
           case bffClientCreated of
             Left err -> pure $ Left err
             Right bffWasCreated -> do
-              -- Create custom scopes
-              let customScopes =
-                    [ ("workflow:read", "Read workflow status"),
-                      ("workflow:write", "Submit and manage workflows"),
-                      ("artifact:read", "Read artifacts"),
-                      ("artifact:write", "Upload and modify artifacts")
-                    ]
+              serviceClientCreated <- ensureClientCreated client realmName (serviceClientRepresentation serviceClientId)
+              case serviceClientCreated of
+                Left err -> pure $ Left err
+                Right serviceWasCreated -> do
+                  scopesCreated <- createScopes client realmName bootstrapClientScopes []
 
-              scopesCreated <- createScopes client realmName customScopes []
+                  pure $
+                    Right
+                      BootstrapResult
+                        { brRealmCreated = realmWasCreated,
+                          brMcpClientCreated = mcpWasCreated,
+                          brBffClientCreated = bffWasCreated,
+                          brServiceClientCreated = serviceWasCreated,
+                          brScopesCreated = scopesCreated,
+                          brWarnings = []
+                        }
 
-              pure $
-                Right
-                  BootstrapResult
-                    { brRealmCreated = realmWasCreated,
-                      brMcpClientCreated = mcpWasCreated,
-                      brBffClientCreated = bffWasCreated,
-                      brScopesCreated = scopesCreated,
-                      brWarnings = []
-                    }
+bootstrapClientScopes :: [(Text, Text)]
+bootstrapClientScopes =
+  [ ("workflow:read", "Read workflow runs"),
+    ("workflow:write", "Submit and manage workflow runs"),
+    ("artifact:read", "Read artifacts"),
+    ("artifact:write", "Write artifacts"),
+    ("artifact:manage", "Manage artifact lifecycle"),
+    ("prompt:read", "Read MCP prompts"),
+    ("resource:read", "Read MCP resources"),
+    ("tenant:read", "Read tenant metadata and quotas")
+  ]
+
+bootstrapScopeAttributes :: Map.Map Text Text
+bootstrapScopeAttributes =
+  Map.fromList
+    [ ("include.in.token.scope", "true"),
+      ("display.on.consent.screen", "false")
+    ]
+
+bootstrapBffClientSecret :: Text
+bootstrapBffClientSecret = "studiomcp-bff-dev-secret"
+
+bootstrapServiceClientSecret :: Text
+bootstrapServiceClientSecret = "studiomcp-service-dev-secret"
+
+mcpClientRepresentation :: Text -> ClientRepresentation
+mcpClientRepresentation clientId =
+  ClientRepresentation
+    { crClientId = clientId,
+      crName = Just "studioMCP MCP Server",
+      crEnabled = True,
+      crPublicClient = False,
+      crBearerOnly = True,
+      crRedirectUris = [],
+      crWebOrigins = [],
+      crProtocol = Just "openid-connect",
+      crStandardFlowEnabled = False,
+      crDirectAccessGrantsEnabled = False,
+      crServiceAccountsEnabled = False,
+      crFullScopeAllowed = False,
+      crDefaultClientScopes = ["openid", "profile"],
+      crOptionalClientScopes =
+        [ "workflow:read",
+          "workflow:write",
+          "artifact:read",
+          "artifact:write",
+          "artifact:manage",
+          "prompt:read",
+          "resource:read",
+          "tenant:read"
+        ],
+      crProtocolMappers = [],
+      crSecret = Nothing
+    }
+
+bffClientRepresentation :: Text -> ClientRepresentation
+bffClientRepresentation clientId =
+  ClientRepresentation
+    { crClientId = clientId,
+      crName = Just "studioMCP BFF",
+      crEnabled = True,
+      crPublicClient = False,
+      crBearerOnly = False,
+      crRedirectUris = [],
+      crWebOrigins = [],
+      crProtocol = Just "openid-connect",
+      crStandardFlowEnabled = False,
+      crDirectAccessGrantsEnabled = True,
+      crServiceAccountsEnabled = False,
+      crFullScopeAllowed = False,
+      crDefaultClientScopes =
+        [ "profile",
+          "email",
+          "roles",
+          "web-origins",
+          "workflow:read",
+          "workflow:write",
+          "artifact:read",
+          "artifact:write",
+          "prompt:read",
+          "resource:read",
+          "tenant:read"
+        ],
+      crOptionalClientScopes = ["artifact:manage"],
+      crProtocolMappers = bffProtocolMappers,
+      crSecret = Just bootstrapBffClientSecret
+    }
+
+serviceClientRepresentation :: Text -> ClientRepresentation
+serviceClientRepresentation clientId =
+  ClientRepresentation
+    { crClientId = clientId,
+      crName = Just "studioMCP Service Account",
+      crEnabled = True,
+      crPublicClient = False,
+      crBearerOnly = False,
+      crRedirectUris = [],
+      crWebOrigins = [],
+      crProtocol = Just "openid-connect",
+      crStandardFlowEnabled = False,
+      crDirectAccessGrantsEnabled = False,
+      crServiceAccountsEnabled = True,
+      crFullScopeAllowed = False,
+      crDefaultClientScopes = ["openid", "workflow:read", "workflow:write"],
+      crOptionalClientScopes = [],
+      crProtocolMappers = [],
+      crSecret = Just bootstrapServiceClientSecret
+    }
+
+bffProtocolMappers :: [Value]
+bffProtocolMappers =
+  [ object
+      [ "name" .= ("tenant-id" :: Text),
+        "protocol" .= ("openid-connect" :: Text),
+        "protocolMapper" .= ("oidc-usermodel-attribute-mapper" :: Text),
+        "consentRequired" .= False,
+        "config"
+          .= object
+            [ "user.attribute" .= ("tenant_id" :: Text),
+              "claim.name" .= ("tenant_id" :: Text),
+              "jsonType.label" .= ("String" :: Text),
+              "id.token.claim" .= ("true" :: Text),
+              "access.token.claim" .= ("true" :: Text),
+              "userinfo.token.claim" .= ("true" :: Text)
+            ]
+      ],
+    object
+      [ "name" .= ("mcp-audience" :: Text),
+        "protocol" .= ("openid-connect" :: Text),
+        "protocolMapper" .= ("oidc-audience-mapper" :: Text),
+        "consentRequired" .= False,
+        "config"
+          .= object
+            [ "included.client.audience" .= ("studiomcp-mcp" :: Text),
+              "id.token.claim" .= ("false" :: Text),
+              "access.token.claim" .= ("true" :: Text)
+            ]
+      ]
+  ]
+
+ensureClientCreated ::
+  KeycloakAdminClient ->
+  Text ->
+  ClientRepresentation ->
+  IO (Either AdminError Bool)
+ensureClientCreated client realmName clientRep = do
+  clientExistsResult <- clientExists client realmName (crClientId clientRep)
+  case clientExistsResult of
+    Left err -> pure $ Left err
+    Right True -> pure $ Right False
+    Right False -> do
+      createResult <- createClient client realmName clientRep
+      case createResult of
+        Left err -> pure $ Left err
+        Right () -> pure $ Right True
 
 importRealmDefinition ::
   KeycloakAdminClient ->
@@ -646,7 +769,8 @@ createScopes client realmName ((name, desc) : rest) acc = do
       ClientScopeRepresentation
         { csrName = name,
           csrProtocol = "openid-connect",
-          csrDescription = Just desc
+          csrDescription = Just desc,
+          csrAttributes = bootstrapScopeAttributes
         }
   case result of
     Left (ResourceAlreadyExists _) ->

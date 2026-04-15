@@ -21,7 +21,7 @@ Forbidden practices:
 Acceptable practices:
 
 - tests that fail with clear error messages when infrastructure is unavailable
-- tests that fail with actionable remediation steps such as `run studiomcp cluster up first`
+- tests that fail with actionable remediation steps such as `run studiomcp cluster ensure first` or `run studiomcp cluster deploy server first`
 - CI configurations that run different suites in different jobs with explicit job names
 
 Rationale: a test suite that reports `0 failures` must mean all registered tests actually executed and passed.
@@ -197,16 +197,19 @@ Security validation must cover:
 The BFF and browser-facing validation surface must cover:
 
 - login
-- profile lookup
-- upload
+- session bootstrap / profile lookup
+- session refresh
+- upload intent and confirmation
 - run submission
-- run listing and status observation
-- run cancellation
-- artifact governance actions
+- run status observation
 - progress observation
 - artifact download
 - chat-assisted workflow operations
 - logout and session invalidation
+
+This browser-facing validation contract follows the documented `/api` surface. MCP-native
+capabilities such as run listing, run cancellation, tenant metadata, and artifact governance remain
+covered through the MCP catalog validators unless the BFF grows first-class browser routes for them.
 
 ## Idempotent Test Infrastructure
 

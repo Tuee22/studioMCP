@@ -2534,7 +2534,11 @@ buildKeycloakTestPayload authConfig overrides = do
           , "aud" .= [kcAudience (acKeycloak authConfig)]
           , "exp" .= (epochNow + 3600)
           , "iat" .= epochNow
-          , "scope" .= ("workflow:read workflow:write artifact:manage prompt:read" :: Text)
+          , "azp" .= ("studiomcp-bff" :: Text)
+          , "scope"
+              .= ( "openid profile workflow:read workflow:write artifact:read artifact:write"
+                    <> " artifact:manage prompt:read resource:read tenant:read" :: Text
+                 )
           , "tenant_id" .= ("tenant-456" :: Text)
           , "realm_access" .= object ["roles" .= ["user" :: Text, "tenant:tenant-456"]]
           , "resource_access" .= object ["studiomcp-mcp" .= object ["roles" .= ["workflow.submit" :: Text]]]
@@ -4862,6 +4866,10 @@ validateHarnessMcpAuth =
       Right claims -> do
         unless (Scope "workflow:write" `Set.member` jcScopes claims) $
           die "Validated token did not include the expected workflow:write scope"
+        unless (Scope "resource:read" `Set.member` jcScopes claims) $
+          die "Validated token did not include the expected resource:read scope"
+        unless (Scope "tenant:read" `Set.member` jcScopes claims) $
+          die "Validated token did not include the expected tenant:read scope"
         putStrLn "  ✓ Valid signed token is accepted"
       Left err ->
         die ("Valid signed token was rejected: " <> show err)
@@ -5915,6 +5923,9 @@ validateMcpTools = do
   let submitScopes = toolRequiredScopes WorkflowSubmit
   unless ("workflow:write" `elem` submitScopes) $
     die "workflow.submit should require workflow:write scope"
+  let tenantInfoScopes = toolRequiredScopes TenantInfo
+  unless ("tenant:read" `elem` tenantInfoScopes) $
+    die "tenant.info should require tenant:read scope"
   putStrLn "  ✓ Tool authorization scopes correct"
 
   -- Test unknown tool
@@ -5979,6 +5990,12 @@ validateMcpResources = do
   let summaryScopes = resourceRequiredScopes SummaryResource
   unless ("workflow:read" `elem` summaryScopes) $
     die "Summary resource should require workflow:read scope"
+  let tenantMetadataScopes = resourceRequiredScopes TenantMetadataResource
+  unless ("tenant:read" `elem` tenantMetadataScopes) $
+    die "Tenant metadata resource should require tenant:read scope"
+  let quotaScopes = resourceRequiredScopes QuotaResource
+  unless ("tenant:read" `elem` quotaScopes) $
+    die "Quota resource should require tenant:read scope"
   putStrLn "  ✓ Resource authorization scopes correct"
 
   putStrLn "validate mcp-resources: PASS"

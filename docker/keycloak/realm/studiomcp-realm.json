@@ -82,6 +82,24 @@
         "include.in.token.scope": "true",
         "display.on.consent.screen": "false"
       }
+    },
+    {
+      "name": "resource:read",
+      "description": "Read MCP resources",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      }
+    },
+    {
+      "name": "tenant:read",
+      "description": "Read tenant metadata and quotas",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      }
     }
   ],
   "clients": [
@@ -102,7 +120,10 @@
         "workflow:write",
         "artifact:read",
         "artifact:write",
-        "artifact:manage"
+        "artifact:manage",
+        "prompt:read",
+        "resource:read",
+        "tenant:read"
       ]
     },
     {
@@ -126,7 +147,9 @@
         "workflow:write",
         "artifact:read",
         "artifact:write",
-        "prompt:read"
+        "prompt:read",
+        "resource:read",
+        "tenant:read"
       ],
       "optionalClientScopes": [
         "artifact:manage"

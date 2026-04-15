@@ -199,13 +199,10 @@ docker compose run --rm studiomcp studiomcp validate mcp-http
 ### Development Workflow
 
 ```bash
-# Start the cluster
-docker compose run --rm studiomcp studiomcp cluster up
+# Converge shared services and bootstrap prerequisites
+docker compose run --rm studiomcp studiomcp cluster ensure
 
-# Deploy sidecars
-docker compose run --rm studiomcp studiomcp cluster deploy sidecars
-
-# Deploy server
+# Close the application readiness gate
 docker compose run --rm studiomcp studiomcp cluster deploy server
 
 # Run tests

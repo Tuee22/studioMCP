@@ -13,8 +13,8 @@
 ## Phase Summary
 
 **Status**: Done
-**Implementation**: `src/StudioMCP/API/Readiness.hs`, `src/StudioMCP/API/Health.hs`, `src/StudioMCP/CLI/Cluster.hs`, `src/StudioMCP/MCP/Handlers.hs`, `src/StudioMCP/MCP/Server.hs`, `src/StudioMCP/Web/Handlers.hs`, `src/StudioMCP/Worker/Server.hs`, `src/StudioMCP/Inference/Host.hs`, `chart/templates/studiomcp_deployment.yaml`, `chart/templates/bff.yaml`, `chart/templates/worker.yaml`, `chart/values.yaml`, `test/API/ReadinessSpec.hs`, `test/Integration/HarnessSpec.hs`
-**Docs to update**: `documents/architecture/overview.md`, `documents/architecture/server_mode.md`, `documents/architecture/bff_architecture.md`, `documents/architecture/mcp_protocol_architecture.md`, `documents/engineering/k8s_native_dev_policy.md`, `documents/engineering/session_scaling.md`, `documents/development/testing_strategy.md`, `documents/reference/cli_reference.md`, `documents/reference/cli_surface.md`, `documents/operations/runbook_local_debugging.md`
+**Implementation**: `src/StudioMCP/API/Readiness.hs`, `src/StudioMCP/API/Health.hs`, `src/StudioMCP/CLI/Cluster.hs`, `src/StudioMCP/MCP/Handlers.hs`, `src/StudioMCP/MCP/Server.hs`, `src/StudioMCP/Web/Handlers.hs`, `src/StudioMCP/Worker/Server.hs`, `src/StudioMCP/Inference/Host.hs`, `src/StudioMCP/Inference/ReferenceModel.hs`, `chart/templates/studiomcp_deployment.yaml`, `chart/templates/bff.yaml`, `chart/templates/worker.yaml`, `chart/templates/llm_reference.yaml`, `chart/values.yaml`, `test/API/ReadinessSpec.hs`, `test/Integration/HarnessSpec.hs`
+**Docs to update**: `DEVELOPMENT_PLAN/system-components.md`, `documents/architecture/overview.md`, `documents/architecture/server_mode.md`, `documents/architecture/bff_architecture.md`, `documents/architecture/mcp_protocol_architecture.md`, `documents/engineering/k8s_native_dev_policy.md`, `documents/engineering/session_scaling.md`, `documents/development/testing_strategy.md`, `documents/reference/cli_reference.md`, `documents/reference/cli_surface.md`, `documents/operations/runbook_local_debugging.md`
 
 ### Goal
 
@@ -35,7 +35,7 @@ Make readiness a first-class runtime contract throughout `studioMCP` by:
 | Shared readiness condition model and reason vocabulary | `src/StudioMCP/API/Readiness.hs`, `src/StudioMCP/API/Health.hs`, `src/StudioMCP/CLI/Cluster.hs` | Done |
 | Dependency-aware MCP server readiness | `src/StudioMCP/MCP/Server.hs`, `src/StudioMCP/Auth/*.hs`, `src/StudioMCP/MCP/Session/*.hs` | Done |
 | Dependency-aware BFF readiness | `src/StudioMCP/Web/Handlers.hs`, `src/StudioMCP/Web/BFF.hs` | Done |
-| Worker and inference startup/readiness contract | `src/StudioMCP/Worker/Server.hs`, `src/StudioMCP/Inference/*.hs` | Done |
+| Worker, inference, and advisory reference-model startup/readiness contract | `src/StudioMCP/Worker/Server.hs`, `src/StudioMCP/Inference/*.hs`, `chart/templates/llm_reference.yaml` | Done |
 | Kubernetes probes aligned to application conditions | `chart/templates/studiomcp_deployment.yaml`, `chart/templates/bff.yaml`, `chart/templates/worker.yaml`, `chart/values.yaml` | Done |
 | Watch- and condition-driven cluster waiters across rollout, routing, and application readiness | `src/StudioMCP/CLI/Cluster.hs` | Done |
 | Explicit bootstrap-complete gates for shared services and one-time setup | `src/StudioMCP/CLI/Cluster.hs` | Done |
@@ -50,6 +50,8 @@ The supported path now closes the cross-cutting readiness gap in code:
   model reused by runtimes and the cluster CLI
 - the MCP server, BFF, worker, and inference surfaces now expose dependency-aware readiness
   payloads with structured blocking reasons instead of generic `ready` responses
+- the Helm-managed advisory reference-model service publishes `/healthz`, and the cluster path now
+  treats that internal service as a peer readiness gate for BFF and inference consumers
 - `cluster deploy server` now waits for workload rollout, Kubernetes `EndpointSlice`
   publication, ingress-routable readiness for `/mcp` and `/api`, worker readiness, and
   reference-model health before live validators proceed
@@ -165,6 +167,7 @@ None.
 ## Documentation Requirements
 
 **Engineering docs to create/update:**
+- `DEVELOPMENT_PLAN/system-components.md` - component inventory must name the internal reference-model service and boundary
 - `documents/architecture/overview.md` - system-wide readiness ownership and route-level versus application-level readiness
 - `documents/architecture/server_mode.md` - MCP server readiness conditions and startup contract
 - `documents/architecture/bff_architecture.md` - BFF dependency-aware readiness and session bootstrap requirements

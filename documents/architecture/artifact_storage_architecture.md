@@ -5,7 +5,7 @@
 **Supersedes**: N/A
 **Referenced by**: [overview.md](overview.md#canonical-follow-on-documents), [server_mode.md](server_mode.md#cross-references), [../engineering/security_model.md](../engineering/security_model.md#cross-references), [../reference/mcp_tool_catalog.md](../reference/mcp_tool_catalog.md#cross-references), [../../DEVELOPMENT_PLAN/README.md](../../DEVELOPMENT_PLAN/README.md#standards)
 
-> **Purpose**: Canonical architecture for durable media artifacts, manifests, summaries, tenant-controlled object storage, and the hard no-permanent-delete rule.
+> **Purpose**: Canonical architecture for durable media artifacts, manifests, summaries, the MinIO-backed object-storage plane, and the hard no-permanent-delete rule.
 
 ## Summary
 
@@ -16,12 +16,12 @@ The artifact model is:
 - immutable-by-default
 - version-oriented
 - tenant-scoped
-- compatible with tenant-owned S3-compatible storage
+- backed by MinIO on the current supported path
 - explicitly non-destructive from the MCP server’s point of view
 
 ## Current Repo Note
 
-The current repo already uses MinIO for summaries and manifests in development flows. This document extends that storage model into the multi-tenant SaaS target where users may keep durable artifacts in their own cloud object storage.
+The current repo uses MinIO for immutable artifacts, memo objects, manifests, and summaries. Bulk browser upload and download bytes stay on the data plane through presigned URLs rooted at the configured public object-storage endpoint. Tenant-owned external object storage is not part of the current supported repository contract.
 
 ## Artifact Classes
 
@@ -38,16 +38,15 @@ The current repo already uses MinIO for summaries and manifests in development f
 ```mermaid
 flowchart TB
   Browser[Browser] --> Presign[Presigned Upload Or Download]
-  Presign --> TenantStore[Tenant S3 Or MinIO]
-  MCP[MCP Runtime] --> TenantStore
+  Presign --> ObjectStore[MinIO]
+  MCP[MCP Runtime] --> ObjectStore
   MCP --> Metadata[Manifest And Summary Layer]
 ```
 
-Supported storage patterns:
+Supported storage pattern:
 
-- local development via MinIO
-- shared platform-managed S3-compatible storage for non-production environments
-- tenant-owned S3-compatible storage for durable production artifacts
+- local and cluster deployments use MinIO as the immutable object store
+- public upload and download flows use presigned URLs rooted at the configured object-storage public endpoint
 
 ## Ownership Model
 
@@ -56,66 +55,23 @@ Supported storage patterns:
 - object keys should be immutable and version-oriented rather than path-overwrite oriented
 - replacing an artifact means writing a new version and updating metadata, not destructive overwrite
 
-## Tenant Storage Configuration
+## Object Storage Configuration
 
-### Configuration Schema
+The supported repository contract uses MinIO for artifact storage and defines the public data-plane
+endpoint explicitly:
 
-```haskell
-data TenantStorageConfig = TenantStorageConfig
-  { tscEndpoint :: Text           -- S3-compatible endpoint
-  , tscRegion :: Text             -- AWS region or "us-east-1" for MinIO
-  , tscBucket :: Text             -- Bucket name
-  , tscPrefix :: Text             -- Key prefix for tenant isolation
-  , tscCredentials :: StorageCredentials
-  }
+| Setting | Authority | Purpose |
+|---------|-----------|---------|
+| `global.objectStorage.publicEndpoint` | Helm values | Public root for presigned upload/download URLs |
+| MinIO service endpoint | cluster runtime config | Internal S3-compatible endpoint used by runtime services |
+| `http://localhost:9000` | supported local kind baseline | Public object-storage endpoint for local presigned URL flows |
 
-data StorageCredentials
-  = StaticCredentials
-      { scAccessKey :: Text
-      , scSecretKey :: Text
-      }
-  | AssumeRole
-      { arRoleArn :: Text
-      , arExternalId :: Maybe Text
-      }
-  | InstanceProfile
-```
+Key rules:
 
-### Configuration Sources
-
-| Environment | Source |
-|-------------|--------|
-| Development | Environment variables or config file |
-| Kubernetes | Kubernetes Secret mounted as env vars |
-| Production | External secrets manager (Vault, AWS Secrets Manager) |
-
-### Example Configuration
-
-```yaml
-# Per-tenant storage configuration
-tenants:
-  tenant-acme:
-    storage:
-      endpoint: "https://s3.us-west-2.amazonaws.com"
-      region: "us-west-2"
-      bucket: "acme-media-prod"
-      prefix: "studiomcp/"
-      credentials:
-        type: "assume_role"
-        roleArn: "arn:aws:iam::123456789:role/studiomcp-access"
-        externalId: "acme-external-id"
-
-  tenant-globex:
-    storage:
-      endpoint: "https://minio.globex.internal:9000"
-      region: "us-east-1"
-      bucket: "media"
-      prefix: "studiomcp/globex/"
-      credentials:
-        type: "static"
-        accessKey: "${GLOBEX_ACCESS_KEY}"
-        secretKey: "${GLOBEX_SECRET_KEY}"
-```
+- the browser never receives raw storage credentials
+- the BFF authorizes access and returns short-lived presigned URLs
+- runtime services talk to MinIO over the internal object-storage API
+- the public endpoint exists for browser data-plane traffic, not as a substitute control-plane route
 
 ## Artifact Versioning
 

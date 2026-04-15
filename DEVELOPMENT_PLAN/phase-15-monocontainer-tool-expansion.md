@@ -32,7 +32,7 @@ fixes.
 | `whisper` | built from `whisper.cpp` | CLI binary only; model files remain externalized |
 | `demucs` | local shim | deterministic compatibility surface for adapter validation |
 | `basic-pitch` | local shim | deterministic compatibility surface for adapter validation |
-| `fluidsynth` | distro package plus bundled SoundFont | uses system SoundFont fallback when no cached model is supplied |
+| `fluidsynth` | distro package | executable remains image-owned; runtime SoundFonts come from model storage or an explicit override |
 | `rubberband` | distro package | time-stretch and pitch-shift |
 | `imagemagick` (`convert`) | distro package | image resize and format conversion |
 | `mediainfo` | distro package | media inspection |
@@ -62,7 +62,7 @@ fixes.
 ### Current Validation State
 
 - The current source tree still carries the expanded tool inventory and `whisper.cpp` build hooks.
-- `docker compose run --rm studiomcp whisper --help` passes on April 14, 2026 after the rebuilt
+- `docker compose run --rm studiomcp whisper --help` passes on April 15, 2026 after the rebuilt
   outer image installs loader-visible `libwhisper.so.1` and companion `libggml*.so` files under
   `/usr/local/lib`.
 - [phase-24-whisper-runtime-closure.md](phase-24-whisper-runtime-closure.md) records the closed
@@ -70,9 +70,10 @@ fixes.
 
 ### Remaining Work
 
-None. This baseline image-expansion phase remains closed, and
-[phase-24-whisper-runtime-closure.md](phase-24-whisper-runtime-closure.md) now records the
-completed Whisper runtime follow-on.
+None within the original image-expansion scope. [phase-24-whisper-runtime-closure.md](phase-24-whisper-runtime-closure.md)
+records the completed Whisper runtime follow-on, and
+[Phase 25](phase-25-auth-storage-and-runtime-contract-realignment.md) records the later FluidSynth
+SoundFont contract realignment.
 
 ## Documentation Requirements
 
@@ -92,3 +93,4 @@ completed Whisper runtime follow-on.
 - [00-overview.md](00-overview.md)
 - [system-components.md](system-components.md)
 - [phase-24-whisper-runtime-closure.md](phase-24-whisper-runtime-closure.md)
+- [phase-25-auth-storage-and-runtime-contract-realignment.md](phase-25-auth-storage-and-runtime-contract-realignment.md)

@@ -43,8 +43,9 @@ Keep model weights out of containers while giving the repo a concrete model-mana
 
 ### Remaining Work
 
-None. The repository-owned model registry, sync surface, and cache contract are implemented and
-documented. Live bucket population remains environment-dependent but no longer blocks this phase.
+None within the original registry, sync, and cache scope. The repository-owned model registry is
+implemented and documented. [Phase 25](phase-25-auth-storage-and-runtime-contract-realignment.md)
+records the later runtime alignment that makes MinIO-backed SoundFonts authoritative in practice.
 
 ## Documentation Requirements
 
@@ -62,3 +63,4 @@ documented. Live bucket population remains environment-dependent but no longer b
 - [README.md](README.md)
 - [00-overview.md](00-overview.md)
 - [system-components.md](system-components.md)
+- [phase-25-auth-storage-and-runtime-contract-realignment.md](phase-25-auth-storage-and-runtime-contract-realignment.md)

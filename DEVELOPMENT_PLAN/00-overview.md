@@ -27,21 +27,21 @@
 | Phase | Status | Notes |
 |-------|--------|-------|
 | 1 | Done | Repository, DAG execution, tool boundaries, worker runtime, and inference entrypoints are implemented and validated |
-| 2 | Done | MCP protocol surface, artifact governance, and observability are implemented and validated |
-| 3 | Done | Keycloak-backed auth and shared Redis session behavior are implemented, validated, and documented against the stable Phase 2 MCP catalog |
-| 4 | Done | Control-plane route split and object-storage public endpoint contract are explicit and validated |
-| 5 | Done | Browser login, session, refresh, and logout behavior are cookie-first, validated, and aligned across the BFF and web-surface docs |
+| 2 | Done | MCP protocol surface, artifact governance, and observability are implemented and validated; Phase 25 records the later MinIO-only tenant metadata and synthetic auth scope realignment |
+| 3 | Done | Keycloak-backed auth and shared Redis session behavior are implemented and validated; Phase 25 records the later BFF-default, bootstrap-helper, and dev or synthetic auth contract realignment |
+| 4 | Done | Control-plane route split and object-storage public endpoint contract are explicit and validated; Phase 25 records the later MinIO-only tenant storage ownership realignment behind that split |
+| 5 | Done | Browser login, session, refresh, and logout behavior are cookie-first and validated; Phase 25 records the later standalone BFF client-default realignment to the documented `studiomcp-bff` contract |
 | 6 | Done | The cluster plan uses an in-cluster Harbor deployment as the registry source for all Helm workloads, with the CLI responsible for Harbor population and event-driven service endpoint publication before live edge validation |
-| 7 | Done | Keycloak realm bootstrap is automated and idempotent on the default cluster path, and the runbook now documents the CLI-driven path without retired compose-era guidance |
-| 8 | Done | The canonical regression gate remains `docker compose run --rm studiomcp studiomcp validate all`, and the April 14, 2026 reruns closed the former Whisper runtime follow-on with `studiomcp test` and `validate all` both green again |
+| 7 | Done | Keycloak realm bootstrap is automated and idempotent on the default cluster path, and Phase 25 records the later realm-export and helper-contract realignment |
+| 8 | Done | The canonical regression gate remains `docker compose run --rm studiomcp studiomcp validate all`, and the April 15, 2026 cold-state rerun revalidated `studiomcp test` with `904 examples, 0 failures` for unit coverage and `26 examples, 0 failures` for integration coverage; `validate all` remains last recorded at `Passed: 36/36` on April 14, 2026 |
 | 9 | Done | CLI test and validate commands consolidated with unified interface and documentation |
 | 10 | Done | Build artifact isolation baseline and the one-command container contract are implemented: single-stage Dockerfile, `tini`, no Dockerfile `CMD`, no compose `command`, and Kubernetes-owned runtime startup |
-| 11 | Done | Dependency-aware readiness is implemented across workloads, CLI waits, validators, and governed docs, with the post-cleanup full-suite verification closed |
+| 11 | Done | Dependency-aware readiness is implemented across workloads, CLI waits, validators, and governed docs, including the internal reference-model health gate that `cluster deploy server` closes before live validation begins |
 | 12 | Done | Aggregate test artifact isolation and repo-owned warning closure are complete: canonical build and test paths stay under `/opt/build/`, repo-owned compiler warnings are closed, and the workspace remains free of `dist-newstyle/` even when aggregate validation fails elsewhere |
 | 13 | Done | Harbor-backed MCP HTTP validation and aggregate-suite reliability are now closed: the source tree uses persistent filesystem-backed local Harbor storage with relative upload URLs, reconciles Harbor registry storage through the manual-PV path, waits for PostgreSQL/Redis plus Harbor health before managed-registry publication, retries managed publication with extended backoff and remote-digest confirmation, and the April 14, 2026 clean post-prune rerun closed the April 13, 2026 `validate mcp-http` failure |
 | 14 | Done | The legacy `Makefile` is removed, the compose-only repository workflow is authoritative, and the cleanup ledger records the removal |
-| 15 | Done | The outer image carries the expanded boundary-tool inventory, including a `whisper.cpp` build plus deterministic `demucs` and `basic-pitch` compatibility shims; the April 14, 2026 Phase 24 follow-on restored loader-visible Whisper shared libraries in the supported outer image |
-| 16 | Done | MinIO-backed model registry, sync/list/verify commands, source overrides, and local model-cache support are implemented and documented |
+| 15 | Done | The outer image carries the expanded boundary-tool inventory, including a `whisper.cpp` build plus deterministic `demucs` and `basic-pitch` compatibility shims; Phase 25 records the later FluidSynth SoundFont contract realignment |
+| 16 | Done | MinIO-backed model registry, sync/list/verify commands, source overrides, and local model-cache support are implemented and documented; Phase 25 records the later runtime alignment that makes MinIO-backed SoundFonts authoritative in practice |
 | 17 | Done | Haskell boundary adapters, runtime tool-registry entries, and CLI validators are implemented for SoX, Demucs, Whisper, BasicPitch, FluidSynth, Rubberband, ImageMagick, and MediaInfo, and the repaired Whisper runtime path validates cleanly again through the outer container |
 | 18 | Done | Deterministic fixture generation, MinIO seed/verify commands, and the fixture manifest are implemented and documented |
 | 19 | Done | Adapter contract tests and registry coverage execute against deterministic fixtures and the installed boundary tools, and the repaired Whisper adapter path is back inside the green aggregate test gate |
@@ -49,7 +49,8 @@
 | 21 | Done | Synthetic recovery-budget chaos coverage and the `test chaos` CLI entrypoint are implemented and documented |
 | 22 | Done | SES request signing, email templates, fake-endpoint integration coverage, IAM policy guidance, and `email send-test` are implemented |
 | 23 | Done | Tool docs, supporting engineering docs, and the MCP workflow-boundary catalog update are complete |
-| 24 | Done | The rebuilt outer-container image exposes loader-visible `libwhisper.so.1`, `whisper --help` and `validate whisper-adapter` pass, `studiomcp test` returns `897 examples, 0 failures` plus `26 examples, 0 failures`, and `validate all` passes `36/36` on April 14, 2026 |
+| 24 | Done | The rebuilt outer-container image exposes loader-visible `libwhisper.so.1`; `whisper --help` and `validate whisper-adapter` pass on the current worktree; the latest full aggregate `studiomcp test` completion is the April 15, 2026 cold-state rerun with `904 examples, 0 failures` for unit coverage and `26 examples, 0 failures` for integration coverage; and `validate all` last passed `36/36` on April 14, 2026 |
+| 25 | Done | The auth, storage, and runtime contract realignment is implemented and closed, including the requested April 15, 2026 post-prune rebuild, cold-state aggregate-suite rerun, and post-edit docs validation on the supported path |
 
 ## Public Topology Baseline
 
@@ -63,6 +64,8 @@ The supported local and cluster topology is:
 - Keycloak uses its own PostgreSQL store
 - MCP listener nodes externalize resumable session state to Redis
 - runtime services use Pulsar and MinIO for eventing and immutable artifact storage
+- an internal reference-model service backs advisory inference and BFF flows and must report
+  healthy before live validation begins
 - Harbor runs on the cluster and serves as the image source for Helm-managed workloads
 - the CLI populates Harbor with required application images before Helm chart deployment begins
 - server deploy now waits for Kubernetes service endpoint publication and dependency-aware
@@ -95,6 +98,8 @@ The supported local and cluster topology is:
 - Raw media executables remain workflow boundary tools referenced by DAG `tool:` names; they are
   documented in the MCP catalog but are not exposed as tenant-facing direct `tools/list` entries.
 - Cluster secrets are managed by the CLI on deploy; no env files.
+- Redis runs without persistent storage; the Helm chart deploys no PVCs and the CLI creates no PVs
+  for Redis. Session state is ephemeral in-cluster runtime data, not durable business data.
 - Stateful Helm workloads bind only to the CLI-reconciled `studiomcp-manual` StorageClass; no
   default dynamic storage class remains on the supported local path.
 - The control-plane route split is fixed: `/mcp` for MCP, `/api` for the BFF, `/kc` for Keycloak.
@@ -149,3 +154,4 @@ The supported local and cluster topology is:
 - [phase-22-ses-email-integration.md](phase-22-ses-email-integration.md)
 - [phase-23-tool-documentation.md](phase-23-tool-documentation.md)
 - [phase-24-whisper-runtime-closure.md](phase-24-whisper-runtime-closure.md)
+- [phase-25-auth-storage-and-runtime-contract-realignment.md](phase-25-auth-storage-and-runtime-contract-realignment.md)

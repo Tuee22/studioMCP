@@ -9,7 +9,7 @@
 
 ## Summary
 
-This document defines the target public topology for `studioMCP` as a secure multi-tenant SaaS product.
+This document defines the supported public topology for `studioMCP` as a secure multi-tenant SaaS product.
 
 Scope boundary:
 
@@ -46,13 +46,13 @@ flowchart TB
   MCP --> Keycloak
   MCP --> Redis[HA Session Store]
   MCP --> Runtime[Execution Runtime]
-  Runtime --> Storage[Tenant S3 Or MinIO]
+  Runtime --> Storage[MinIO]
   Keycloak --> Pg[Dedicated Postgres]
 ```
 
 ## Current Repo Note
 
-This topology is now implemented for the current login/password delivery path. The repo ships the ingress-nginx-backed kind topology, live Keycloak-backed browser login/password flow, deterministic Keycloak realm bootstrap from the checked-in realm export, and live validation behind the shared ingress edge. Docker Compose launches only one-off outer development containers; all application services run in the kind cluster.
+This topology is now implemented for the current login/password delivery path. The repo ships the ingress-nginx-backed kind topology, live Keycloak-backed browser login/password flow, deterministic Keycloak realm bootstrap from the checked-in realm export, MinIO-backed artifact storage, and live validation behind the shared ingress edge. Docker Compose launches only one-off outer development containers; all application services run in the kind cluster.
 
 ## Client Classes
 
@@ -89,7 +89,8 @@ The BFF exists to serve browser product workflows.
 
 It is responsible for:
 
-- accepting browser login/password over TLS during the simplified auth phase
+- accepting browser login/password on the published edge; published deployments use TLS, while the
+  local kind validation baseline preserves the same route shape at `http://localhost:8081`
 - exchanging those credentials with Keycloak
 - browser session management
 - user-facing API composition
@@ -152,7 +153,8 @@ The MCP server must validate JWT tokens according to these rules:
 
 ### JWKS Handling
 
-- JWKS endpoint: `{keycloak-url}/realms/{realm}/protocol/openid-connect/certs`
+- published-edge issuer: `https://auth.example.com/kc/realms/{realm}`
+- JWKS endpoint: `{issuer}/protocol/openid-connect/certs`
 - Cache JWKS with 5-minute refresh interval
 - Handle key rotation gracefully (retry with fresh JWKS on signature failure)
 - Timeout JWKS fetch after 5 seconds
@@ -197,7 +199,7 @@ Some Keycloak direct-grant access tokens in the current delivery path can omit `
 
 ```json
 {
-  "iss": "https://auth.example.com/realms/studiomcp",
+  "iss": "https://auth.example.com/kc/realms/studiomcp",
   "sub": "user-uuid-1234",
   "aud": ["studiomcp-mcp", "account"],
   "exp": 1700000000,
@@ -229,6 +231,7 @@ Some Keycloak direct-grant access tokens in the current delivery path can omit `
 | `artifact:manage` | Hide, archive, supersede artifacts |
 | `prompt:read` | Access prompt templates |
 | `resource:read` | Read MCP resources |
+| `tenant:read` | Read tenant metadata and storage usage |
 
 ### Role-to-Capability Mapping
 
@@ -265,16 +268,18 @@ The stable public tool identifiers come from the MCP catalog in
 | `workflow.status` | `workflow:read` |
 | `workflow.cancel` | `workflow:write` |
 | `artifact.upload_url` | `artifact:write` |
+| `artifact.get` | `artifact:read` |
 | `artifact.download_url` | `artifact:read` |
 | `artifact.hide` | `artifact:manage` |
 | `artifact.archive` | `artifact:manage` |
+| `tenant.info` | `tenant:read` |
 
 ## Authentication Flows
 
 ### Browser User (Login/Password Via BFF)
 
 ```
-1. Browser submits login/password to the BFF over TLS
+1. Browser submits login/password to the BFF on the published edge; published deployments use TLS, while the local kind validation baseline keeps the same route shape on `http://localhost:8081`
 2. BFF exchanges those credentials with the Keycloak token endpoint
 3. BFF creates a server-side web session and stores Keycloak tokens server-side
 4. BFF returns an HTTP-only session cookie plus summary-only JSON that omits session identifiers and Keycloak tokens
@@ -310,7 +315,16 @@ Bearer session identifiers may remain available as a compatibility/debug path, b
   "bearerOnly": true,
   "publicClient": false,
   "defaultClientScopes": ["openid", "profile"],
-  "optionalClientScopes": ["workflow:read", "workflow:write", "artifact:read", "artifact:write"]
+  "optionalClientScopes": [
+    "workflow:read",
+    "workflow:write",
+    "artifact:read",
+    "artifact:write",
+    "artifact:manage",
+    "resource:read",
+    "prompt:read",
+    "tenant:read"
+  ]
 }
 ```
 
@@ -336,8 +350,11 @@ OAuth/PKCE remains deferred and is not part of the supported auth contract.
     "workflow:write",
     "artifact:read",
     "artifact:write",
-    "prompt:read"
-  ]
+    "prompt:read",
+    "resource:read",
+    "tenant:read"
+  ],
+  "optionalClientScopes": ["artifact:manage"]
 }
 ```
 
@@ -384,7 +401,8 @@ The deployment baseline is:
 - Keycloak published behind the edge on `/kc`
 - dedicated Keycloak deployment
 - dedicated PostgreSQL instance or cluster for Keycloak only
-- TLS at ingress
+- published deployments terminate TLS at ingress; the local kind validation baseline preserves the
+  same route shape on plain HTTP at `localhost`
 - realm and client bootstrap automation
 - no sharing of the Keycloak database with unrelated platform services
 
@@ -395,7 +413,7 @@ Current local edge baselines:
 
 For Helm-first deployments, the documented baseline is:
 
-- `codecentric/keycloakx` for Keycloak packaging
+- `bitnami/keycloak` for Keycloak packaging
 - a dedicated PostgreSQL chart or managed PostgreSQL instance for Keycloak persistence
 
 The repo must keep the deployment packaging separate from the logical auth model. Chart choice is operational packaging, not the definition of the security boundary.
@@ -419,7 +437,7 @@ In the current repo, `cluster ensure`, `cluster deploy sidecars`, and `cluster d
 
 ## Hard Security Rules
 
-- in the current simplified delivery path, the browser may send username/password to the BFF only on `POST /api/v1/session/login` over TLS
+- in the current simplified delivery path, the browser may send username/password to the BFF only on `POST /api/v1/session/login`; published deployments use TLS, while the local kind validation baseline keeps the same route on plain HTTP
 - the BFF and MCP server accept only Keycloak-issued credentials
 - invalid tokens return `401`
 - authenticated but unauthorized requests return `403`

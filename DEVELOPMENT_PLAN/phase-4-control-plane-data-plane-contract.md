@@ -57,7 +57,9 @@ docker compose run --rm studiomcp studiomcp cluster deploy server
 
 ### Remaining Work
 
-None. This phase is complete on the current supported path.
+None within the original route and public-endpoint closure scope. [Phase 25](phase-25-auth-storage-and-runtime-contract-realignment.md)
+records the later MinIO-only tenant storage ownership realignment behind this control-plane and
+data-plane split.
 
 ## Documentation Requirements
 
@@ -76,4 +78,5 @@ None. This phase is complete on the current supported path.
 - [00-overview.md](00-overview.md)
 - [system-components.md](system-components.md)
 - [phase-5-browser-session-contract.md](phase-5-browser-session-contract.md)
+- [phase-25-auth-storage-and-runtime-contract-realignment.md](phase-25-auth-storage-and-runtime-contract-realignment.md)
 - [../documents/architecture/overview.md](../documents/architecture/overview.md)

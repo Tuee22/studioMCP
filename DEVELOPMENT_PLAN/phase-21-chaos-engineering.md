@@ -55,7 +55,13 @@ repository validation surface.
 - `documents/development/chaos_testing.md`
 
 **Product docs to create/update:**
-- None
+- None.
+
+**Cross-references to add:**
+- Keep [phase-8-final-closure-regression-gate.md](phase-8-final-closure-regression-gate.md)
+  aligned when chaos coverage changes the supported aggregate test story.
+- Keep [phase-9-cli-test-validate-consolidation.md](phase-9-cli-test-validate-consolidation.md)
+  aligned when `test chaos` or related CLI test entrypoints change.
 
 ## Cross-References
 

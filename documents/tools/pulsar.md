@@ -29,23 +29,22 @@ Requirements:
 
 - minimum 3 pods for each stateful component (ZooKeeper, BookKeeper, Broker)
 - official Helm chart from the Apache Pulsar repository
-- CLI deploys via `helm install pulsar apache/pulsar`
-- null storage class for all PVCs
+- deployed as a chart dependency in the `studioMCP` Helm release and reconciled by the CLI
+- all PVCs must request `studiomcp-manual`, backed by `kubernetes.io/no-provisioner`
 - CLI creates rehydratable PVs before chart deployment
 
 Deployment command pattern:
 
 ```bash
-helm repo add apache https://pulsar.apache.org/charts
-studiomcp cluster storage reconcile  # creates PVs
-helm install pulsar apache/pulsar \
-  --set zookeeper.replicaCount=3 \
-  --set bookkeeper.replicaCount=3 \
-  --set broker.replicaCount=3 \
-  --set persistence.storageClass="studiomcp-manual"
+docker compose run --rm studiomcp studiomcp cluster storage reconcile
+docker compose run --rm studiomcp studiomcp cluster ensure
 ```
 
-HA deployment is the preferred mode where possible. See [../engineering/k8s_storage.md](../engineering/k8s_storage.md#ha-deployment-mode) for the full policy.
+The supported path does not use a standalone `helm install` for Pulsar. The CLI reconciles the
+Pulsar chart dependency through the repo-owned Helm release during `cluster ensure` and
+`cluster deploy sidecars`.
+
+HA deployment is required in all environments including local kind development. See [../engineering/k8s_storage.md](../engineering/k8s_storage.md#ha-deployment-mode) for the full policy.
 
 ## Current Maturity
 
@@ -55,7 +54,7 @@ The repo currently includes Pulsar in the deployment topology, pure execution-ev
 
 Pulsar is stateful infrastructure. Any local persistent Pulsar volume must follow:
 
-- the null storage class rule
+- the `studiomcp-manual` / `kubernetes.io/no-provisioner` storage-class rule
 - the rehydratable PV system
 - CLI-owned PV lifecycle
 

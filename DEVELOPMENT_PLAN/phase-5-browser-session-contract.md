@@ -64,7 +64,9 @@ docker compose run --rm studiomcp studiomcp cluster ensure
 
 ### Remaining Work
 
-None. This phase is complete on the current supported path.
+None within the original browser-session closure scope. [Phase 25](phase-25-auth-storage-and-runtime-contract-realignment.md)
+records the later standalone BFF default-client realignment to the documented `studiomcp-bff`
+contract.
 
 ## Documentation Requirements
 
@@ -85,5 +87,6 @@ None. This phase is complete on the current supported path.
 - [00-overview.md](00-overview.md)
 - [phase-2-mcp-surface-catalog-artifact-governance.md](phase-2-mcp-surface-catalog-artifact-governance.md)
 - [phase-3-keycloak-auth-shared-sessions.md](phase-3-keycloak-auth-shared-sessions.md)
+- [phase-25-auth-storage-and-runtime-contract-realignment.md](phase-25-auth-storage-and-runtime-contract-realignment.md)
 - [legacy-tracking-for-deletion.md](legacy-tracking-for-deletion.md)
 - [../documents/reference/web_portal_surface.md](../documents/reference/web_portal_surface.md)

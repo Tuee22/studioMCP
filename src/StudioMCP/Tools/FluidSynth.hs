@@ -22,7 +22,6 @@ import StudioMCP.Tools.AdapterSupport
     validateHelpCommand,
   )
 import StudioMCP.Tools.Boundary (BoundaryResult)
-import System.Directory (doesFileExist)
 import System.Environment (lookupEnv)
 
 runFluidSynthCommand :: Int -> [String] -> IO (Either FailureDetail BoundaryResult)
@@ -67,25 +66,15 @@ resolveSoundFontPath = do
       case cachedResult of
         Left failureDetail -> pure (Left failureDetail)
         Right (Just cachedPath) -> pure (Right cachedPath)
-        Right Nothing -> do
-          let systemCandidates =
-                ["/usr/share/sounds/sf2/FluidR3_GM.sf2", "/usr/share/sounds/sf2/TimGM6mb.sf2"]
-          findFirstExisting systemCandidates
+        Right Nothing -> pure (Left missingSoundFontFailure)
 
-findFirstExisting :: [FilePath] -> IO (Either FailureDetail FilePath)
-findFirstExisting [] =
-  pure
-    ( Left
-        FailureDetail
-          { failureCategory = StorageFailure,
-            failureCode = "fluidsynth-soundfont-missing",
-            failureMessage = "No usable SoundFont was available for FluidSynth validation.",
-            failureRetryable = False,
-            failureContext = Map.empty
-          }
-    )
-findFirstExisting (candidate : remainingCandidates) = do
-  exists <- doesFileExist candidate
-  if exists
-    then pure (Right candidate)
-    else findFirstExisting remainingCandidates
+missingSoundFontFailure :: FailureDetail
+missingSoundFontFailure =
+  FailureDetail
+    { failureCategory = StorageFailure,
+      failureCode = "fluidsynth-soundfont-missing",
+      failureMessage =
+        "No usable SoundFont was available for FluidSynth validation. Set STUDIOMCP_FLUIDSYNTH_SOUNDFONT or provide the generaluser-gs model through MinIO-backed model storage.",
+      failureRetryable = False,
+      failureContext = Map.empty
+    }

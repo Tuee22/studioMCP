@@ -59,12 +59,16 @@ The repo keeps one Helm chart at `chart/`.
 The local control-plane loop is:
 
 1. build the outer development image with Docker Compose
-2. invoke one command at a time with `docker compose -f docker-compose.yaml run --rm studiomcp studiomcp ...`
+2. invoke one command at a time with `docker compose run --rm studiomcp studiomcp ...`
 3. run `studiomcp cluster ...` commands to manage kind
 4. run `studiomcp cluster deploy ...` commands to deploy Helm-backed workloads
 
 kind must run against the selected host Docker context through the outer development container. This is not Docker-in-Docker.
 Persistent storage must follow the explicit PV policy in [Kubernetes Storage Policy](k8s_storage.md#kubernetes-storage-policy).
+
+Lower-level tools such as `helm`, `skaffold`, or `cabal --builddir=/opt/build/studiomcp` may still
+be used inside the outer container for focused diagnostics, but they are supporting tools rather
+than the canonical repository command surface.
 
 ### Condition-Driven Startup
 

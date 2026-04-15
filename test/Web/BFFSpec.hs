@@ -4,6 +4,7 @@ module Web.BFFSpec (spec) where
 
 import Network.HTTP.Types (status400, status401, status403, status404, status500, status502)
 import qualified Data.Text as T
+import StudioMCP.Auth.Config (AuthConfig (acKeycloak), KeycloakConfig (kcClientId, kcClientSecret))
 import StudioMCP.DAG.Types (DagSpec (..))
 import StudioMCP.Web.BFF
 import StudioMCP.Web.Types
@@ -32,6 +33,14 @@ spec = do
 
     it "sets a browser session cookie name" $ do
       bffSessionCookieName defaultBFFConfig `shouldBe` "studiomcp_session"
+
+    it "uses the confidential BFF Keycloak client by default" $ do
+      let keycloakConfig = acKeycloak (bffAuthConfig defaultBFFConfig)
+      kcClientId keycloakConfig `shouldBe` "studiomcp-bff"
+      kcClientSecret keycloakConfig `shouldBe` Just "studiomcp-bff-dev-secret"
+
+    it "requests only openid explicitly and relies on assigned client scopes" $ do
+      bffAuthScopes defaultBFFConfig `shouldBe` ["openid"]
 
     it "allows video content types" $ do
       bffAllowedContentTypes defaultBFFConfig `shouldSatisfy` elem "video/mp4"

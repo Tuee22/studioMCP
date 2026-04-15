@@ -18,6 +18,7 @@ Canonical role definitions live in:
 Within the current repo, Redis is the session store used for:
 
 - MCP session persistence for non-sticky horizontal scaling
+- browser-adjacent session coordination
 - subscription and stream cursor storage
 - session locking for concurrent access
 - resumable session metadata
@@ -31,7 +32,7 @@ Requirements:
 - Sentinel mode enabled for HA
 - Bitnami Helm chart from the Bitnami repository
 - Deployed as a subchart dependency in the studioMCP chart
-- Null storage class for all PVCs
+- all PVCs must request `studiomcp-manual`, backed by `kubernetes.io/no-provisioner`
 - CLI creates rehydratable PVs before chart deployment
 
 Deployment via Chart.yaml dependency:
@@ -67,11 +68,16 @@ HA deployment is required in all environments including local kind development. 
 
 The repo includes Redis in the deployment topology for session storage. Current implementation status is tracked in [../../DEVELOPMENT_PLAN/README.md](../../DEVELOPMENT_PLAN/00-overview.md#current-repo-assessment-against-this-plan).
 
+The authoritative plan inventory classifies Redis contents as shared in-cluster runtime state
+rather than durable business data. On the supported local kind path, the Helm deployment still
+binds Redis persistence to `studiomcp-manual` so session-store behavior can be rehydrated and
+validated deterministically across cluster rebuilds.
+
 ## Storage Policy
 
 Redis is stateful infrastructure. Any local persistent Redis volume must follow:
 
-- the null storage class rule
+- the `studiomcp-manual` / `kubernetes.io/no-provisioner` storage-class rule
 - the rehydratable PV system
 - CLI-owned PV lifecycle
 

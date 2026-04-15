@@ -15,7 +15,8 @@ Implemented today:
 
 - MCP JSON-RPC handling with `initialize`, `tools/*`, `resources/*`, and `prompts/*`
 - Streamable HTTP on `POST /mcp` plus SSE bootstrap on `GET /mcp`
-- admin and observability endpoints on `/healthz`, `/version`, and `/metrics`
+- operational and observability endpoints on `/healthz`, `/health/live`, `/health/ready`,
+  `/version`, and `/metrics`, plus `/mcp/...` health variants on the ingress-routed path
 - live auth, session, catalog, and conformance validation through `validate mcp-http`, `validate mcp-auth`, `validate observability`, and `validate mcp-conformance`
 
 Current note:
@@ -30,7 +31,7 @@ The target public MCP surface is:
 - `stdio` for local development and local tooling
 - Streamable HTTP for remote clients and BFF mediation
 - a single MCP endpoint for remote protocol traffic
-- separate operational endpoints for `/healthz`, `/version`, and `/metrics`
+- separate operational endpoints for `/healthz`, `/health/live`, `/health/ready`, `/version`, and `/metrics`
 
 ## Stdio Transport Specification
 
@@ -77,8 +78,8 @@ Each message is a complete JSON-RPC 2.0 object on a single line. No length prefi
 ### CLI Invocation
 
 ```bash
-studiomcp stdio                     # Start MCP over stdio
-studiomcp validate mcp-stdio       # Validate stdio transport
+docker compose run --rm studiomcp studiomcp stdio
+docker compose run --rm studiomcp studiomcp validate mcp-stdio
 ```
 
 ## Streamable HTTP Transport Specification
@@ -161,7 +162,7 @@ Note: JSON-RPC protocol errors return HTTP 200 with error in the JSON body.
 ### CLI Validation
 
 ```bash
-studiomcp validate mcp-http        # Validate HTTP transport
+docker compose run --rm studiomcp studiomcp validate mcp-http
 ```
 
 **Note**: `validate mcp-http` exercises initialize, `tools/list`, `resources/list`, `prompts/list`, `ping`, parse-error handling, unknown-method handling, and the SSE bootstrap event.
@@ -259,6 +260,11 @@ flowchart TB
 Operational endpoints remain out of band from MCP:
 
 - `GET /healthz`
+- `GET /health/live`
+- `GET /health/ready`
+- `GET /mcp/healthz`
+- `GET /mcp/health/live`
+- `GET /mcp/health/ready`
 - `GET /version`
 - `GET /metrics`
 
@@ -266,7 +272,7 @@ They exist for operational control, not as a substitute automation contract.
 
 ## Auth Expectations
 
-- remote MCP access is OAuth-protected
+- remote MCP access uses Keycloak-issued bearer tokens
 - browser traffic reaches MCP through the BFF rather than ad hoc direct browser automation
 - external MCP clients authenticate directly through the MCP auth model
 - tenant scoping is enforced on every capability

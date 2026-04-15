@@ -22,6 +22,8 @@ Within the current repo, MinIO is the S3-compatible object store used for:
 - summaries
 - manifests
 - local and shared-cluster artifact storage
+- synced model storage for model-backed adapters
+- deterministic test-fixture storage
 
 ## Deployment
 
@@ -31,24 +33,22 @@ Requirements:
 
 - minimum 3 pods (distributed mode)
 - official Helm chart from the MinIO repository
-- CLI deploys via `helm install minio minio/minio`
-- null storage class for all PVCs
+- deployed as a chart dependency in the `studioMCP` Helm release and reconciled by the CLI
+- all PVCs must request `studiomcp-manual`, backed by `kubernetes.io/no-provisioner`
 - CLI creates rehydratable PVs before chart deployment
 
 Deployment command pattern:
 
 ```bash
-helm repo add minio https://charts.min.io/
-studiomcp cluster storage reconcile  # creates PVs
-helm install minio minio/minio \
-  --set replicas=3 \
-  --set persistence.storageClass="studiomcp-manual" \
-  --set persistence.size=20Gi \
-  --set rootUser=minioadmin \
-  --set rootPassword=minioadmin123
+docker compose run --rm studiomcp studiomcp cluster storage reconcile
+docker compose run --rm studiomcp studiomcp cluster ensure
 ```
 
-HA deployment is the preferred mode where possible. See [../engineering/k8s_storage.md](../engineering/k8s_storage.md#ha-deployment-mode) for the full policy.
+The supported path does not use a standalone `helm install` for MinIO. The CLI reconciles the
+MinIO chart dependency through the repo-owned Helm release during `cluster ensure` and
+`cluster deploy sidecars`.
+
+HA deployment is required in all environments including local kind development. See [../engineering/k8s_storage.md](../engineering/k8s_storage.md#ha-deployment-mode) for the full policy.
 
 ## Current Maturity
 
@@ -58,7 +58,7 @@ The repo now includes a real Haskell MinIO adapter that uses the native CLI work
 
 MinIO is stateful infrastructure. In local kind development, persistent MinIO volumes must follow:
 
-- the null storage class rule
+- the `studiomcp-manual` / `kubernetes.io/no-provisioner` storage-class rule
 - the rehydratable PV system
 - CLI-owned PV lifecycle
 
@@ -71,12 +71,14 @@ The following buckets are created during initialization:
 - `studiomcp-memo` - memoized node outputs
 - `studiomcp-artifacts` - durable media artifacts
 - `studiomcp-summaries` - run summaries and manifests
+- `studiomcp-models` - synced model weights and SoundFonts for runtime adapters
 - `studiomcp-test-fixtures` - test fixture storage
 
 ## Cross-References
 
 - [Pulsar vs MinIO](../architecture/pulsar_vs_minio.md#pulsar-vs-minio)
 - [Artifact Storage Architecture](../architecture/artifact_storage_architecture.md#artifact-storage-architecture)
+- [Model Storage](../engineering/model_storage.md#model-storage)
 - [Testing Strategy](../development/testing_strategy.md#testing-strategy)
 - [Kubernetes Storage Policy](../engineering/k8s_storage.md#kubernetes-storage-policy)
 - [Local Debugging Runbook](../operations/runbook_local_debugging.md#local-debugging-runbook)

@@ -74,8 +74,9 @@ import Network.HTTP.Types (Status, status400, status401, status403, status404, s
 import StudioMCP.Auth.Config
   ( AuthConfig (..),
     KeycloakConfig (..),
+    defaultBFFKeycloakConfig,
     defaultAuthConfig,
-    loadAuthConfigFromEnv,
+    loadAuthConfigFromEnvWithDefaultKeycloak,
     userinfoEndpoint,
   )
 import StudioMCP.Auth.PKCE
@@ -163,7 +164,10 @@ defaultBFFConfig =
           "image/png",
           "image/tiff"
         ],
-      bffAuthConfig = defaultAuthConfig,
+      bffAuthConfig =
+        defaultAuthConfig
+          { acKeycloak = defaultBFFKeycloakConfig
+          },
       -- `openid` is required for Keycloak's userinfo endpoint while the rest of
       -- the effective access scopes come from the BFF client's assigned defaults.
       bffAuthScopes = ["openid"],
@@ -175,7 +179,7 @@ defaultBFFConfig =
 
 loadBFFConfigFromEnv :: IO BFFConfig
 loadBFFConfigFromEnv = do
-  authConfig <- loadAuthConfigFromEnv
+  authConfig <- loadAuthConfigFromEnvWithDefaultKeycloak defaultBFFKeycloakConfig
   mcpEndpoint <- lookupEnvText "STUDIO_MCP_BFF_MCP_ENDPOINT" (bffMcpEndpoint defaultBFFConfig)
   sessionTtl <- lookupEnvInt "STUDIO_MCP_BFF_SESSION_TTL_SECONDS" (bffSessionTtlSeconds defaultBFFConfig)
   uploadTtl <- lookupEnvInt "STUDIO_MCP_BFF_UPLOAD_TTL_SECONDS" (bffUploadTtlSeconds defaultBFFConfig)

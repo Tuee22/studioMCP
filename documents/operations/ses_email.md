@@ -12,6 +12,10 @@
 `studioMCP` sends transactional email through AWS SES using sender address
 `no-reply@resolvefintech.com`.
 
+The current repository-owned mail layer covers verification and password-reset style templates plus
+the `email send-test` operator path. That template support does not mean the default Keycloak realm
+bootstrap enables self-service verify-email or reset-password flows.
+
 ## Configuration
 
 | Environment Variable | Purpose |
@@ -31,6 +35,10 @@ docker compose run --rm studiomcp studiomcp email send-test
 
 The command renders the verification template, uses the configured SES credentials, and prints the
 target recipient plus the first part of the SES response body.
+
+The other checked-in templates remain part of the supported renderer surface even though the
+default Keycloak bootstrap path keeps self-service verify-email and password-reset features
+disabled.
 
 ## IAM Policy
 

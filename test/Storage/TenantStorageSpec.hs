@@ -233,6 +233,9 @@ spec = do
     it "round-trips PlatformMinIO" $ do
       (decode (encode PlatformMinIO) :: Maybe TenantStorageBackend) `shouldBe` Just PlatformMinIO
 
+    it "rejects the removed tenant-s3 compatibility backend" $ do
+      (decode "{\"type\":\"tenant-s3\"}" :: Maybe TenantStorageBackend) `shouldBe` Nothing
+
   describe "TenantArtifact JSON" $ do
     it "round-trips artifact" $ do
       service <- newTenantStorageService defaultTenantStorageConfig

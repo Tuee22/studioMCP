@@ -16,8 +16,14 @@ Within the current repo, PostgreSQL is used for:
 - Keycloak identity provider database
 - realm, client, and user storage
 - session and token persistence
+- application-database technology where repo/runtime services require durable relational state, as
+  tracked by the authoritative system inventory in
+  [../../DEVELOPMENT_PLAN/system-components.md](../../DEVELOPMENT_PLAN/system-components.md#runtime-and-application-components)
 
-PostgreSQL is deployed as a dedicated instance for Keycloak. It is not used for application data storage.
+On the supported Helm-managed sidecar path documented here, PostgreSQL-HA is deployed specifically
+for Keycloak. If additional repo/runtime PostgreSQL-backed application state becomes part of the
+governed deployment contract, this document must be updated to match the authoritative development
+plan inventory rather than contradict it.
 
 ## Deployment
 
@@ -28,7 +34,7 @@ Requirements:
 - 3 replicas for HA (primary + 2 standby)
 - Bitnami Helm chart from the Bitnami repository
 - Deployed as a subchart dependency in the studioMCP chart
-- Null storage class for all PVCs
+- all PVCs must request `studiomcp-manual`, backed by `kubernetes.io/no-provisioner`
 - CLI creates rehydratable PVs before chart deployment
 
 Deployment via Chart.yaml dependency:
@@ -64,7 +70,7 @@ The repo includes PostgreSQL in the deployment topology for Keycloak. Current im
 
 PostgreSQL is stateful infrastructure. Any local persistent PostgreSQL volume must follow:
 
-- the null storage class rule
+- the `studiomcp-manual` / `kubernetes.io/no-provisioner` storage-class rule
 - the rehydratable PV system
 - CLI-owned PV lifecycle
 
